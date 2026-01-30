@@ -27,3 +27,14 @@ class Infantry(Unit):
 
 class Vehicle(Unit):
     __tablename__ = "vehicles"
+
+
+
+#melee range is 1 inch (best guess)
+class weapons(SQLModel):
+    __tablename__ = "weapons"
+    attacks: int 
+    weapon_strength: int
+    save: int
+    armour_penetration: int
+    damage: int 
