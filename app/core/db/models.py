@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 class Unit(SQLModel):
+    id: Optional[int] = Field(default= None, primary_key= True)
     name: str
     faction: str
     movement: int
@@ -24,15 +25,18 @@ class Infantry(Unit):
     __tablename__ = "infantry"
 
 
-
 class Vehicle(Unit):
     __tablename__ = "vehicles"
 
+
+class Characters(Unit):
+    __tablename__ = "characters"
 
 
 #melee range is 1 inch (best guess)
 class weapons(SQLModel):
     __tablename__ = "weapons"
+    id: Optional[int] = Field(default= None, primary_key= True)
     attacks: int 
     weapon_strength: int
     save: int
