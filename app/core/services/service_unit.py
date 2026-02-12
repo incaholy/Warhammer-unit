@@ -1,3 +1,6 @@
+from collections.abc import Sequence as SequenceABC
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
 
@@ -55,3 +58,34 @@ class UnitService():
             return "unit does not exist"
         
         return unit
+    
+#put in filters 
+    def list_units(
+            self,
+            filter: Optional[Dict[str, any]] = None,
+            offset: int = 0,
+            limit: Optional[int] = 50
+    )-> list[Unit]:
+        
+        statment = select(Unit)
+
+        if filter:
+            for field_name, value in filter.items():
+                if value is None or not hasattr(Unit, field_name):
+                    continue
+                column = getattr(Unit, field_name)
+
+                if isinstance(value, SequenceABC) and not isinstance(value, (str, bytes)):
+                    statement = statement.where(column.in_(value))
+                else:
+                    statement = statement.where(column == value)
+
+        if offset:
+            statement = statement.offset(max(offset, 0))
+
+        if limit:
+            statement = statement.limit(limit)
+
+        results = self.session.exec(statment)
+
+        return results.all()
