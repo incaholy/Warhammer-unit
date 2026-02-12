@@ -3,7 +3,9 @@ from sqlmodel import select
 
 from app.core.db.connection import get_session
 from app.core.db.models import Unit
-
+#because changed from Unit_service to unit_service (the uppercase U) vs code might not have been confused on what to track 
+#so git will see the differences but vs code will not see it becuase it is on unit_service and that is not tracked
+#Unit_service is being tracked but since no changed to that one then no diff decorator
 
 
 class UnitService():
@@ -12,7 +14,7 @@ class UnitService():
 
     def create_unit(
             self,
-            name :str, 
+            name :str,
             type: str,
             faction:str,
             movement:int,
@@ -40,4 +42,16 @@ class UnitService():
         self.session.refresh(new_unit)
 
         return new_unit
-    
+
+
+    def get_unit(
+            self,
+            id: int
+    )-> Unit:
+        
+        unit = self.session.get(Unit, id)
+        
+        if not unit:
+            return "unit does not exist"
+        
+        return unit
