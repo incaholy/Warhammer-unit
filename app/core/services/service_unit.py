@@ -89,3 +89,13 @@ class UnitService():
         results = self.session.exec(statment)
 
         return results.all()
+    
+    def delete_unit(
+            self,
+            id
+    ):
+        unit = self.get_unit(id)
+        self.session.delete(unit)
+        self.session.commit
+
+        return unit
