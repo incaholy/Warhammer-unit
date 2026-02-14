@@ -1,5 +1,5 @@
 from collections.abc import Sequence as SequenceABC
-from typing import Any, Dict, List, Optional
+from typing import  Dict, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
@@ -92,10 +92,36 @@ class UnitService():
     
     def delete_unit(
             self,
-            id
+            id: int
     ):
         unit = self.get_unit(id)
         self.session.delete(unit)
         self.session.commit
 
         return unit
+    
+    def update_unit(
+            self,
+            id: int,
+            field: str,
+            new: int | str 
+        )->Unit:
+        
+        unit = self.get_unit(id)
+        
+        if not hasattr(unit, field):
+            raise AttributeError("{field} is not an attribute of the unit")
+
+        attribute_value = getattr(unit, field)
+
+        if not isinstance(new, type(attribute_value)):
+            raise TypeError("{unit} is not the same {field}")
+        
+        setattr(unit, field, new)
+        
+        self.session.add(unit)
+        self.session.commit()
+        self.session.refresh(unit)
+        
+        return unit
+        
