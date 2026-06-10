@@ -1,14 +1,11 @@
 from collections.abc import Sequence as SequenceABC
 from typing import  Dict, Optional
 
-from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
 
 from app.core.db.connection import get_session
 from app.core.db.models import Unit
-#because changed from Unit_service to unit_service (the uppercase U) vs code might not have been confused on what to track 
-#so git will see the differences but vs code will not see it becuase it is on unit_service and that is not tracked
-#Unit_service is being tracked but since no changed to that one then no diff decorator
+
 
 
 class UnitService():
@@ -41,7 +38,7 @@ class UnitService():
         )
 
         self.session.add(new_unit)
-        self.session.commit(new_unit)
+        self.session.commit()
         self.session.refresh(new_unit)
 
         return new_unit
@@ -55,11 +52,11 @@ class UnitService():
         unit = self.session.get(Unit, id)
         
         if not unit:
-            return "unit does not exist"
+            raise AttributeError("unit not found")
         
         return unit
     
-#put in filters 
+
     def list_units(
             self,
             filter: Optional[Dict[str, any]] = None,
@@ -67,7 +64,7 @@ class UnitService():
             limit: Optional[int] = 50
     )-> list[Unit]:
         
-        statment = select(Unit)
+        statement = select(Unit)
 
         if filter:
             for field_name, value in filter.items():
@@ -86,7 +83,7 @@ class UnitService():
         if limit:
             statement = statement.limit(limit)
 
-        results = self.session.exec(statment)
+        results = self.session.exec(statement)
 
         return results.all()
     
@@ -96,7 +93,7 @@ class UnitService():
     ):
         unit = self.get_unit(id)
         self.session.delete(unit)
-        self.session.commit
+        self.session.commit()
 
         return unit
     
@@ -110,12 +107,12 @@ class UnitService():
         unit = self.get_unit(id)
         
         if not hasattr(unit, field):
-            raise AttributeError("{field} is not an attribute of the unit")
+            raise AttributeError(f"{field} is not an attribute of the unit")
 
         attribute_value = getattr(unit, field)
 
         if not isinstance(new, type(attribute_value)):
-            raise TypeError("{unit} is not the same {field}")
+            raise TypeError(f"{unit} is not the same {field}")
         
         setattr(unit, field, new)
         
