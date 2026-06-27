@@ -1,8 +1,39 @@
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
 
 from sqlmodel import Field, Relationship, SQLModel
-from sqlalchemy import Column, CheckConstraint, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    SmallInteger,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    func,
+    text,
+)
+
+class user(table= True):
+    __tablename__ = "users"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    username: str = Field(sa_column=Column(String(64), nullable=False))
+    password_hash: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=func.now(),
+        ),
+    )
+    
 
 
 class Unit(SQLModel, table= True):
