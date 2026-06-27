@@ -10,21 +10,29 @@ The data divides into two halves:
   shared copy of every datasheet.
 - **Collections** — user-owned data that points into the catalog. Users don't
   create datasheets; they organise *which* units (and how many of each) they
-  field. A collection is structured as a hierarchy so it can grow into a
-  roster / list builder: a user has one **collection**, the collection holds
-  named **armies**, and each army holds **units with quantities**.
+  own and field. A user has one **collection**, which holds two distinct things:
+  - an **inventory** — the flat list of units the user physically owns, with a
+    quantity each ("I own 3 Intercessor squads"); and
+  - named **armies** — buildable lists / rosters, each holding units with
+    quantities ("this 2000pt list uses 2 Intercessor squads").
 
-The end-to-end flow is **user → collection → army → unit (+ quantity)**:
+  Inventory and armies are kept separate on purpose: the same physical model can
+  appear in several army lists, and a list may include units the user hasn't
+  bought yet, so "what I own" can't be derived by summing armies.
+
+The end-to-end flow — one collection per user, holding an inventory and armies,
+all pointing into the catalog:
 
 ```
-users ──(1:1)── collections ──< armies ──< army_entries >── units  (the catalog)
-                                                  │
-                                                  └─ quantity
+                    ┌──< inventory_entries >── units   (quantity_owned)
+users ──(1:1)── collections                                (the catalog)
+                    └──< armies ──< army_entries >── units (quantity_in_list)
 ```
 
-The unit↔army link is still a quantity-bearing join (one row per unit type per
-army); the army and collection layers above it are what turn a flat "what I own"
-list into named, buildable lists. Each army is effectively a roster.
+Both `inventory_entries` and `army_entries` are quantity-bearing joins into the
+catalog. Armies are **independent** of inventory — an army may use units beyond
+what's owned (aspirational lists) — but a read-only **shortfall** comparison can
+diff an army against the inventory to report what the user still needs to buy.
 
 ## Architecture overview
 
@@ -66,9 +74,10 @@ Rules:
 | `Ability` | `abilities` | catalog | A named ability with a category (core, faction, datasheet) and description |
 | `Keyword` | `keywords` | catalog | A keyword tag on a unit (e.g. INFANTRY, IMPERIUM); `keyword_type` separates normal vs faction keywords |
 | `User` | `users` | collection | An account that owns one collection |
-| `Collection` | `collections` | collection | A user's top-level container; holds their armies |
+| `Collection` | `collections` | collection | A user's top-level container; holds the inventory and the armies |
+| `InventoryEntry` | `inventory_entries` | collection | A pointer from a collection to a unit, with how many the user physically owns |
 | `Army` | `armies` | collection | A named list/roster belonging to a collection; holds units |
-| `ArmyEntry` | `army_entries` | collection | A pointer from an army to a unit, with how many are in it |
+| `ArmyEntry` | `army_entries` | collection | A pointer from an army to a unit, with how many are in the list |
 
 Relationships:
 
@@ -78,27 +87,35 @@ Unit ──< Weapon ──< WeaponProfile
 Unit ──< Ability
 Unit ──< Keyword
 
-# collection (a hierarchy; army_entries is a quantity-bearing join to the catalog)
-User ──(1:1)── Collection ──< Army ──< ArmyEntry >── Unit
+# collection (inventory_entries and army_entries are quantity-bearing joins to the catalog)
+User ──(1:1)── Collection ──< InventoryEntry >── Unit
+                       └────< Army ──< ArmyEntry >── Unit
 ```
 
 Collection layer details:
 - `User` — unique `username`; no password field until auth lands (see below).
-- `Collection` — one per user (`user_id` unique foreign key, 1:1). It exists as
-  its own table so collection-level data and multiple-collections-per-user
-  remain easy to add later; for now it's just the container for armies.
+- `Collection` — one per user (`user_id` unique foreign key, 1:1). Holds both the
+  inventory entries and the armies. It exists as its own table so collection-level
+  data and multiple-collections-per-user remain easy to add later.
+- `InventoryEntry` — carries `collection_id`, `unit_id`, and `quantity` (how many
+  owned), with `UNIQUE(collection_id, unit_id)` (one row per unit type per
+  collection) and `CHECK (quantity >= 1)`. This is the flat "what I own" list.
 - `Army` — `collection_id` foreign key, plus a `name` (and optionally `faction`
   / points limit later). This is the unit that becomes a roster.
-- `ArmyEntry` — carries `army_id`, `unit_id`, and `quantity`, with a
-  `UNIQUE(army_id, unit_id)` constraint (one row per unit type per army, so
-  "is this unit in the army?" is one lookup and quantity is never split across
-  rows) and a `CHECK (quantity >= 1)` (quantity zero is a delete, not a row).
+- `ArmyEntry` — carries `army_id`, `unit_id`, and `quantity` (how many in the
+  list), with a `UNIQUE(army_id, unit_id)` constraint (one row per unit type per
+  army, so "is this unit in the army?" is one lookup and quantity is never split
+  across rows) and a `CHECK (quantity >= 1)` (quantity zero is a delete, not a
+  row). Armies are independent of inventory — an `ArmyEntry` may reference a unit
+  the collection doesn't own, or exceed the owned quantity.
 
 A unit can appear in many armies and across many users' collections; deleting a
 catalog unit is still a global admin action, while deleting an `ArmyEntry`,
 `Army`, or `Collection` only affects that one user. Deletes cascade downward:
-removing a collection removes its armies and their entries; removing an army
-removes its entries (never the catalog units they point at).
+removing a collection removes its inventory entries, its armies, and their
+entries; removing an army removes its entries (never the catalog units they
+point at). Removing an `InventoryEntry` does not touch any army — a list can
+keep referencing a unit the user just sold.
 
 Unit stat line maps to the datasheet: `movement` (M), `toughness` (T),
 `save` (Sv), `wounds` (W), `leadership` (Ld), `objective_control` (OC).
@@ -137,7 +154,8 @@ One service class per aggregate root, named `service_<thing>.py` containing
 | `KeywordService` | planned | CRUD for keywords |
 | `UserService` | planned | `create_user(username)` (`ValueError` on duplicate, creates the user's `Collection`), `get_user(id)` |
 | `CollectionService` | planned | `get_collection(user_id)`, `list_armies`, `create_army`, `rename_army`, `delete_army` |
-| `ArmyService` | planned | `add_unit`, `set_quantity`, `remove_unit`, `list_army` |
+| `InventoryService` | planned | `add_unit`, `set_quantity`, `remove_unit`, `list_inventory` |
+| `ArmyService` | planned | `add_unit`, `set_quantity`, `remove_unit`, `list_army`, `shortfall` |
 
 `CollectionService` manages armies inside a user's collection:
 - `get_collection(user_id)` — the collection with its armies (`LookupError` if
@@ -146,15 +164,30 @@ One service class per aggregate root, named `service_<thing>.py` containing
 - `rename_army(army_id, name)` / `delete_army(army_id)` — `LookupError` if the
   army doesn't exist; delete cascades to the army's entries.
 
+`InventoryService` manages the units the user owns (the flat inventory). Same
+upsert/set/remove/list shape as `ArmyService` below, but keyed on
+`collection_id`:
+- `add_unit(collection_id, unit_id, quantity=1)` — validates the collection and
+  unit exist (else `LookupError`), then **upserts** the owned quantity.
+- `set_quantity(collection_id, unit_id, quantity)` — absolute set; `<= 0` raises
+  `ValueError` (use `remove_unit`).
+- `remove_unit(collection_id, unit_id)` — delete the inventory entry.
+- `list_inventory(collection_id)` — entries joined with their `Unit`.
+
 `ArmyService` manages the units inside one army:
 - `add_unit(army_id, unit_id, quantity=1)` — validates the army and unit both
   exist (else `LookupError`), then **upserts**: increment quantity if an entry
   already exists, otherwise create one. Makes "add unit to army" idempotent.
+  Does **not** check inventory — armies are aspirational.
 - `set_quantity(army_id, unit_id, quantity)` — absolute set; `quantity <= 0`
   raises `ValueError` (use `remove_unit` instead).
 - `remove_unit(army_id, unit_id)` — delete the entry.
 - `list_army(army_id)` — returns the army's entries joined with their `Unit`, so
   the caller gets each datasheet plus how many are in the army.
+- `shortfall(army_id)` — read-only diff of the army against its collection's
+  inventory: for each unit, `need = max(0, quantity_in_list - quantity_owned)`.
+  Returns one row per unit short (or all units with their owned/needed counts),
+  so the caller can show "what you still need to buy."
 
 Service conventions:
 - "Not found" raises `LookupError` (don't return strings or `None` ambiguously).
@@ -187,29 +220,36 @@ catalog"), not part of the normal user flow.
 | POST | `/units/{id}/abilities` | add an ability (admin) | to do |
 | POST | `/units/{id}/keywords` | add a keyword (admin) | to do |
 
-**Users, collections & armies** — the user-facing flow. Routes nest the
-hierarchy: a collection belongs to a user, an army to a collection, a unit entry
-to an army.
+**Users, collections, inventory & armies** — the user-facing flow. Routes nest
+the hierarchy: a collection belongs to a user; the inventory and armies belong to
+the collection; a unit entry belongs to the inventory or to an army.
 
 | Method | Path | Action | Status |
 |---|---|---|---|
 | POST | `/users` | create a user (and their empty collection) | to do |
 | GET | `/users/{id}` | get a user | to do |
-| GET | `/users/{id}/collection` | get the collection with a summary of its armies | to do |
+| GET | `/users/{id}/collection` | get the collection with a summary of its inventory and armies | to do |
+| GET | `/users/{id}/collection/inventory` | list owned units + quantities (nested `Unit_Read` + `quantity`) | to do |
+| POST | `/users/{id}/collection/inventory` | add an owned unit — body `{unit_id, quantity}`, upserts | to do |
+| PATCH | `/users/{id}/collection/inventory/{unit_id}` | set absolute owned quantity | to do |
+| DELETE | `/users/{id}/collection/inventory/{unit_id}` | remove a unit from inventory | to do |
 | POST | `/users/{id}/collection/armies` | create an army — body `{name}` | to do |
 | GET | `/users/{id}/collection/armies/{army_id}` | get one army with its units + quantities (nested `Unit_Read` + `quantity`) | to do |
 | PATCH | `/users/{id}/collection/armies/{army_id}` | rename an army | to do |
 | DELETE | `/users/{id}/collection/armies/{army_id}` | delete an army (cascade its entries) | to do |
+| GET | `/users/{id}/collection/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | to do |
 | POST | `/users/{id}/collection/armies/{army_id}/units` | add a unit — body `{unit_id, quantity}`, upserts | to do |
 | PATCH | `/users/{id}/collection/armies/{army_id}/units/{unit_id}` | set absolute quantity | to do |
 | DELETE | `/users/{id}/collection/armies/{army_id}/units/{unit_id}` | remove a unit from the army | to do |
 
 Read schemas nest the hierarchy:
-- `ArmyEntry_Read` embeds the existing `Unit_Read` and adds `quantity`.
+- `InventoryEntry_Read` and `ArmyEntry_Read` both embed the existing `Unit_Read`
+  and add `quantity`.
 - `Army_Read` is `{id, name, entries: [ArmyEntry_Read]}` — a full roster.
-- `Collection_Read` is `{id, armies: [Army_Summary]}`, where each army summary is
-  just `{id, name, unit_count}` so the collection view stays light; you fetch a
-  single army to get its full unit list.
+- `Collection_Read` is `{id, inventory_count, armies: [Army_Summary]}`, where each
+  army summary is just `{id, name, unit_count}` so the collection view stays
+  light; fetch the inventory or a single army for full unit lists.
+- `Shortfall_Read` is a list of `{unit: Unit_Read, in_list, owned, need}` rows.
 
 Error mapping at the API layer:
 
@@ -246,8 +286,8 @@ scope for now.)
 ## Authentication (future)
 
 The schema is auth-ready: a real `users` table and FK integrity through
-`collections` → `armies` → `army_entries`. For now endpoints take `user_id` as
-a path param and there is no login. When auth lands, add `hashed_password` to
+`collections` → `inventory_entries` / `armies` → `army_entries`. For now
+endpoints take `user_id` as a path param and there is no login. When auth lands, add `hashed_password` to
 `User`, an `/auth` router (register/login → JWT), and a "current user"
 dependency that replaces the `user_id` path param on the collection routes — the
 collection/army logic itself doesn't change.
@@ -263,17 +303,22 @@ tests/
     test_service_unit.py
     test_service_weapon.py
     test_service_collection.py   # armies within a collection
+    test_service_inventory.py    # owned units within a collection
     test_service_army.py         # units within an army
   api/
     test_api_unit.py
     test_api_collection.py
 ```
 
-Collection/army tests to cover: create a user makes an empty collection; create
-an army then list it under the collection; add-unit-then-list; add the same unit
-twice increments quantity; `set_quantity` to a new value; remove a unit; delete
-an army cascades its entries; adding a unit to a nonexistent army or a
-nonexistent unit → 404; `set_quantity <= 0` → 400.
+Collection/inventory/army tests to cover: create a user makes an empty
+collection; add an owned unit to inventory then list it; create an army then list
+it under the collection; add-unit-then-list; add the same unit twice increments
+quantity (inventory and army both); `set_quantity` to a new value; remove a unit;
+delete an army cascades its entries; deleting an inventory entry leaves armies
+untouched; an army may reference a unit the inventory doesn't own (no rejection);
+`shortfall` reports `need = max(0, in_list - owned)` and is empty when inventory
+covers the list; adding a unit to a nonexistent army/collection or a nonexistent
+unit → 404; `set_quantity <= 0` → 400.
 
 - Service tests hit a real database session pointed at SQLite in-memory (or a
   throwaway Postgres database) so SQL actually executes.
@@ -290,11 +335,12 @@ nonexistent unit → 404; `set_quantity <= 0` → 400.
 5. Implement `WeaponService` + `WeaponProfile` handling and routes.
 6. Abilities and keywords services + routes.
 7. Nested read schema: GET unit returns full datasheet (weapons with profiles, abilities, keywords).
-8. **Collections & armies**: add `User`, `Collection`, `Army`, and `ArmyEntry`
-   models and a migration; build `UserService`, `CollectionService`, and
-   `ArmyService`; add the nested users/collection/army routes and the
-   `ArmyEntry_Read` / `Army_Read` / `Collection_Read` schemas; write the
-   collection/army tests.
+8. **Collections, inventory & armies**: add `User`, `Collection`,
+   `InventoryEntry`, `Army`, and `ArmyEntry` models and a migration; build
+   `UserService`, `CollectionService`, `InventoryService`, and `ArmyService`
+   (including `shortfall`); add the nested routes and the `InventoryEntry_Read` /
+   `ArmyEntry_Read` / `Army_Read` / `Collection_Read` / `Shortfall_Read` schemas;
+   write the collection/inventory/army tests.
 9. Seed script to load the real datasheet catalog.
 10. Roster features on `Army`: faction, points limit/total, list validation.
 11. Authentication: passwords + `/auth` router + current-user dependency.
