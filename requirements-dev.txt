@@ -1,0 +1,6 @@
+# Dev/test dependencies — installed by `make install-dev`.
+# Pulls in everything from requirements.txt, plus dev-only tools below.
+-r requirements.txt
+
+# (pytest / pytest-cov currently live in requirements.txt; move them here if you
+#  want to keep them out of production installs.)
