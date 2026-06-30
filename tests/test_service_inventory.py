@@ -1,0 +1,81 @@
+"""Tests for InventoryService (a user's owned units = user_unit).
+
+These fail until app/core/services/service_inventory.py exists with an
+InventoryService class that matches this contract:
+
+    InventoryService(session)
+      add_unit(user_id, unit_id, amount=1) -> UserUnit
+          upsert: increments amount if the unit is already owned.
+          raises LookupError if the user or unit does not exist
+      set_amount(user_id, unit_id, amount) -> UserUnit
+          absolute set; raises ValueError if amount < 1
+      remove_unit(user_id, unit_id) -> None
+      list_inventory(user_id) -> list[UserUnit]
+"""
+
+import uuid
+
+import pytest
+
+from app.core.services.service_inventory import InventoryService
+
+
+def test_add_unit_to_inventory(session, make_user, make_unit):
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    entry = svc.add_unit(user.id, unit.id, amount=3)
+    assert entry.amount == 3
+
+
+def test_add_unit_twice_increments_amount(session, make_user, make_unit):
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    svc.add_unit(user.id, unit.id, amount=1)
+    entry = svc.add_unit(user.id, unit.id, amount=2)
+    assert entry.amount == 3  # upsert increments
+
+
+def test_add_unit_unknown_user_raises_lookup_error(session, make_unit):
+    unit = make_unit()
+    svc = InventoryService(session)
+    with pytest.raises(LookupError):
+        svc.add_unit(uuid.uuid4(), unit.id, amount=1)
+
+
+def test_set_amount(session, make_user, make_unit):
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    svc.add_unit(user.id, unit.id, amount=1)
+    entry = svc.set_amount(user.id, unit.id, amount=4)
+    assert entry.amount == 4
+
+
+def test_set_amount_below_one_raises_value_error(session, make_user, make_unit):
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    svc.add_unit(user.id, unit.id, amount=1)
+    with pytest.raises(ValueError):
+        svc.set_amount(user.id, unit.id, amount=0)
+
+
+def test_remove_unit(session, make_user, make_unit):
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    svc.add_unit(user.id, unit.id, amount=1)
+    svc.remove_unit(user.id, unit.id)
+    assert svc.list_inventory(user.id) == []
+
+
+def test_list_inventory(session, make_user, make_unit):
+    user = make_user()
+    u1 = make_unit()
+    u2 = make_unit()
+    svc = InventoryService(session)
+    svc.add_unit(user.id, u1.id, amount=1)
+    svc.add_unit(user.id, u2.id, amount=2)
+    assert len(svc.list_inventory(user.id)) == 2
