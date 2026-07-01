@@ -17,6 +17,7 @@ import uuid
 
 import pytest
 
+from app.core.db.models import Army
 from app.core.services.service_inventory import InventoryService
 
 
@@ -79,3 +80,28 @@ def test_list_inventory(session, make_user, make_unit):
     svc.add_unit(user.id, u1.id, amount=1)
     svc.add_unit(user.id, u2.id, amount=2)
     assert len(svc.list_inventory(user.id)) == 2
+
+
+def test_add_unit_unknown_unit_raises_lookup_error(session, make_user):
+    user = make_user()
+    svc = InventoryService(session)
+    with pytest.raises(LookupError):
+        svc.add_unit(user.id, uuid.uuid4(), amount=1)
+
+
+def test_removing_inventory_entry_leaves_armies_untouched(
+    session, make_user, make_faction, make_unit
+):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit()
+    army = Army(owner_user_id=user.id, faction_id=f.id, name="A")
+    session.add(army)
+    session.commit()
+
+    svc = InventoryService(session)
+    svc.add_unit(user.id, unit.id, amount=1)
+    svc.remove_unit(user.id, unit.id)
+
+    # selling a model (removing inventory) leaves the user's armies untouched
+    assert session.get(Army, army.id) is not None

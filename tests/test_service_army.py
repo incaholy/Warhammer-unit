@@ -23,8 +23,9 @@ class that matches this contract:
 import uuid
 
 import pytest
+from sqlalchemy import func, select
 
-from app.core.db.models import UserUnit
+from app.core.db.models import ArmyUnit, UserUnit
 from app.core.services.service_army import ArmyService
 
 
@@ -126,3 +127,50 @@ def test_shortfall_reports_what_to_buy(session, make_user, make_faction, make_un
     short = svc.shortfall(army.id)
     assert len(short) == 1
     assert short[0].need == 2  # 3 in list - 1 owned
+
+
+def test_add_unit_to_nonexistent_army_raises_lookup_error(session, make_unit):
+    unit = make_unit()
+    svc = ArmyService(session)
+    with pytest.raises(LookupError):
+        svc.add_unit(uuid.uuid4(), unit.id, amount=1)
+
+
+def test_army_may_include_a_unit_the_user_does_not_own(
+    session, make_user, make_faction, make_unit
+):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)
+    # the user owns none of this unit; adding it to the army is still allowed
+    entry = svc.add_unit(army.id, unit.id, amount=2)
+    assert entry.amount == 2
+
+
+def test_delete_army_cascades_army_units(session, make_army, make_unit):
+    army = make_army()
+    unit = make_unit()
+    svc = ArmyService(session)
+    svc.add_unit(army.id, unit.id, amount=2)
+    svc.delete_army(army.id)
+    remaining = session.execute(
+        select(func.count()).select_from(ArmyUnit).where(ArmyUnit.army_id == army.id)
+    ).scalar_one()
+    assert remaining == 0
+
+
+def test_shortfall_empty_when_inventory_covers_the_list(
+    session, make_user, make_faction, make_unit
+):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)
+    svc.add_unit(army.id, unit.id, amount=2)  # the list wants 2
+    session.add(UserUnit(owner_user_id=user.id, unit_id=unit.id, amount=5))  # owns 5
+    session.commit()
+
+    assert svc.shortfall(army.id) == []
