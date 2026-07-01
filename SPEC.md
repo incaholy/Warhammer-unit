@@ -145,9 +145,10 @@ Weapon maps to the weapon row: `range_inches` (nullable; null = melee),
 
 ### Connection (`connection.py`)
 
-Reads `DATABASE_URL` from the environment (loaded from `.env`), creates one
-engine at import time, and hands out fresh `Session` objects via
-`get_session()`.
+`get_engine()` creates a single engine on first use (not at import time),
+loading `.env` and reading `DATABASE_URL` only then — so importing the module
+never requires a database. `get_session()` is a FastAPI-style dependency that
+yields a `Session` and closes it afterwards.
 
 ### Migrations (`alembic/`)
 
