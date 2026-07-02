@@ -145,10 +145,28 @@ Weapon maps to the weapon row: `range_inches` (nullable; null = melee),
 
 ### Connection (`connection.py`)
 
-`get_engine()` creates a single engine on first use (not at import time),
-loading `.env` and reading `DATABASE_URL` only then — so importing the module
-never requires a database. `get_session()` is a FastAPI-style dependency that
-yields a `Session` and closes it afterwards.
+`get_engine()` builds one cached engine (one per process, via `lru_cache`) on
+first use — not at import time — so importing this module (or anything that
+imports it) never touches a database. The `DATABASE_URL` (e.g.
+`postgresql+psycopg2://user:pass@host:port/db`) lives in `.env`, which is
+gitignored; `get_engine()` calls `load_dotenv()` and reads it only when a session
+is first requested, raising `RuntimeError` if it's unset. The engine is created
+with `pool_pre_ping=True` so stale or dropped pooled connections are detected and
+replaced. Both the app and Alembic (`alembic/env.py`) read the same
+`DATABASE_URL`, so migrations and the running app always target one database.
+
+Getting a session depends on the caller:
+
+- **Requests** use `get_session()` as a FastAPI dependency
+  (`Depends(get_session)`) — it yields a `Session` and closes it after the
+  request.
+- **Scripts / seed code** use `Session(get_engine())` directly.
+- **Tests** build their own in-memory SQLite engine and inject the session, so
+  they never call `get_session()` and never need `DATABASE_URL`.
+
+This laziness is deliberate: services receive an injected session rather than
+calling `get_session()` themselves, and tests import models/services without a
+live database — the reason the engine can't be created at import time.
 
 ### Migrations (`alembic/`)
 
@@ -224,56 +242,88 @@ Service conventions:
 
 ## API layer (`app/api/`)
 
-One router module per resource. Routers define their own request/response
-schemas (`*_Create`, `*_Read`) so internal model fields aren't exposed
-accidentally.
+One router module per resource; each is backed by one service and defines its
+own request/response schemas (`*_Create`, `*_Read`) so internal model fields
+aren't exposed accidentally. All ids in paths and schemas are UUIDs.
 
-Planned routes:
+Router modules (each mounted in `app/main.py` with `app.include_router(...)`):
+
+| Module | Backing service | Resource |
+|---|---|---|
+| `app/api/unit.py` | `UnitService` | catalog units |
+| `app/api/faction.py` | `UnitService` (catalog) | catalog factions & subfactions |
+| `app/api/user.py` | `UserService` | users |
+| `app/api/inventory.py` | `InventoryService` | a user's inventory (`user_unit`) |
+| `app/api/army.py` | `ArmyService` | a user's armies and their units |
+
+Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
+→ **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,
+so they return **201** when they create the row and **200** when they increment
+an existing one.
+
+Planned routes. The **Backing method** column names the service call each route
+makes; methods marked *(to add)* don't exist on the service yet.
 
 **Catalog** — reads are public; writes are admin/seed only (see "Populating the
 catalog"), not part of the normal user flow.
 
-| Method | Path | Action | Status |
-|---|---|---|---|
-| POST | `/units` | create a unit (admin/seed) | to do |
-| GET | `/units/{id}` | get one unit (stats, keywords, linked weapons + abilities) | to do |
-| GET | `/units` | list units; query params for faction filter, limit, offset | to do |
-| PATCH | `/units/{id}` | update fields on a unit (admin) | to do |
-| DELETE | `/units/{id}` | delete a unit (admin) | to do |
-| POST | `/units/{id}/weapons` | link a weapon to a unit (admin) | to do |
-| POST | `/units/{id}/abilities` | link an ability to a unit (admin) | to do |
-| GET | `/factions` | list factions with their subfactions | to do |
-| POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | to do |
+| Method | Path | Action | Backing method | Status |
+|---|---|---|---|---|
+| POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | to do |
+| GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | to do |
+| GET | `/units` | list units; query params for faction filter, limit, offset | `UnitService.list_units` | to do |
+| PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` *(to add)* | to do |
+| DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` *(to add)* | to do |
+| POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` *(to add)* | to do |
+| POST | `/units/{unit_id}/abilities` | link an ability to a unit (admin) | `UnitService.link_ability` *(to add)* | to do |
+| GET | `/factions` | list factions with their subfactions | `UnitService.list_factions` *(to add)* | to do |
+| POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | `UnitService.create_faction` / `create_subfaction` *(to add)* | to do |
 
 **Users, inventory & armies** — the user-facing flow. Routes nest under the
 user: the inventory and armies belong to a user, and a unit entry belongs to the
 inventory or to an army.
 
-| Method | Path | Action | Status |
-|---|---|---|---|
-| POST | `/users` | create a user | to do |
-| GET | `/users/{id}` | get a user | to do |
-| GET | `/users/{id}/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | to do |
-| POST | `/users/{id}/inventory` | add an owned unit — body `{unit_id, amount}`, upserts | to do |
-| PATCH | `/users/{id}/inventory/{unit_id}` | set absolute owned amount | to do |
-| DELETE | `/users/{id}/inventory/{unit_id}` | remove a unit from inventory | to do |
-| POST | `/users/{id}/armies` | create an army — body `{name, faction_id, subfaction_id?, description?}` | to do |
-| GET | `/users/{id}/armies` | list the user's armies | to do |
-| GET | `/users/{id}/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | to do |
-| PATCH | `/users/{id}/armies/{army_id}` | rename/update an army | to do |
-| DELETE | `/users/{id}/armies/{army_id}` | delete an army (cascade its `army_units`) | to do |
-| GET | `/users/{id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | to do |
-| POST | `/users/{id}/armies/{army_id}/units` | add a unit — body `{unit_id, amount}`, upserts | to do |
-| PATCH | `/users/{id}/armies/{army_id}/units/{unit_id}` | set absolute amount | to do |
-| DELETE | `/users/{id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | to do |
+| Method | Path | Action | Backing method | Status |
+|---|---|---|---|---|
+| POST | `/users` | create a user | `UserService.create_user` | to do |
+| GET | `/users/{user_id}` | get a user | `UserService.get_user` | to do |
+| GET | `/users/{user_id}/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | to do |
+| POST | `/users/{user_id}/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | to do |
+| PATCH | `/users/{user_id}/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | to do |
+| DELETE | `/users/{user_id}/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | to do |
+| POST | `/users/{user_id}/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | to do |
+| GET | `/users/{user_id}/armies` | list the user's armies | `ArmyService.list_armies` | to do |
+| GET | `/users/{user_id}/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | `ArmyService.get_army` + `list_army_units` | to do |
+| PATCH | `/users/{user_id}/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` *(to add)* | to do |
+| DELETE | `/users/{user_id}/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | to do |
+| GET | `/users/{user_id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | to do |
+| POST | `/users/{user_id}/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | to do |
+| PATCH | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | to do |
+| DELETE | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | to do |
+
+Request schemas (`*_Create` plus the small add/patch bodies):
+- `Unit_Create` — `{faction_id, unit_name, movement, toughness, armor_save,
+  wounds, leadership, objective_control, points, invulnerable_save?,
+  subfaction_id?, keywords?}`.
+- `Faction_Create` — `{name}`; `Subfaction_Create` — `{faction_id, name}`.
+- `User_Create` — `{username, email, password_hash}` (becomes a raw `password`
+  once auth lands and hashing moves server-side).
+- `Army_Create` — `{name, faction_id, subfaction_id?, description?}`;
+  `Army_Update` — the same fields, all optional.
+- `InventoryAdd` / `ArmyUnitAdd` — `{unit_id, amount}` (`amount` defaults to 1).
+- `AmountSet` (the `PATCH` set-amount body) — `{amount}`.
 
 Read schemas nest the hierarchy:
-- `UserUnit_Read` and `ArmyUnit_Read` both embed the existing `Unit_Read` and add
-  `amount`.
-- `Army_Read` is `{id, name, faction_id, units: [ArmyUnit_Read]}` — a full roster.
-- `User_Read` is the account (`{id, username, email}`); the inventory and armies
-  are fetched via their own routes, or summarized as `{..., army_count,
-  inventory_count}`.
+- `Unit_Read` — the catalog datasheet: `{id, unit_name, faction_id,
+  subfaction_id, movement, toughness, armor_save, wounds, invulnerable_save,
+  leadership, objective_control, points, keywords, weapons: [...],
+  abilities: [...]}`.
+- `Faction_Read` — `{id, name, subfactions: [{id, name}]}`.
+- `UserUnit_Read` and `ArmyUnit_Read` both embed `Unit_Read` and add `amount`.
+- `Army_Read` is `{id, name, faction_id, subfaction_id, units: [ArmyUnit_Read]}`
+  — a full roster.
+- `User_Read` is `{id, username, email}`. A user's armies and inventory are
+  fetched via their own list routes, not embedded here.
 - `Shortfall_Read` is a list of `{unit: Unit_Read, in_list, owned, need}` rows.
 
 Error mapping at the API layer:
