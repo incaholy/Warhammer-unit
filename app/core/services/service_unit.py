@@ -1,124 +1,64 @@
-from collections.abc import Sequence as SequenceABC
-from typing import  Dict, Optional
+"""UnitService — the catalog of unit datasheets.
 
-from sqlmodel import select
+Session-injected. Raises `LookupError` for not-found, per SPEC.md conventions.
+"""
 
-from app.core.db.connection import get_session
-from app.core.db.models import Unit
+from typing import Optional
+from uuid import UUID
+
+from sqlmodel import Session, select
+
+from app.core.db.models import Faction, Subfaction, Unit
 
 
-
-class UnitService():
-    def __init__(self):
-        self.session = get_session()
+class UnitService:
+    def __init__(self, session: Session):
+        self.session = session
 
     def create_unit(
-            self,
-            name :str,
-            type: str,
-            faction:str,
-            movement:int,
-            tough:int,
-            save:int,
-            wound:int,
-            leader:int,
-            objective: int
-            )-> Unit:
-        
-        new_unit = Unit(
-            name= name,
-            unit_type=type,
-            faction=faction, 
+        self,
+        faction_id: UUID,
+        unit_name: str,
+        movement: int,
+        toughness: int,
+        armor_save: int,
+        wounds: int,
+        leadership: int,
+        objective_control: int,
+        points: int,
+        invulnerable_save: Optional[int] = None,
+        subfaction_id: Optional[UUID] = None,
+        keywords: Optional[list[str]] = None,
+    ) -> Unit:
+        if self.session.get(Faction, faction_id) is None:
+            raise LookupError(f"faction {faction_id} not found")
+        if subfaction_id is not None and self.session.get(Subfaction, subfaction_id) is None:
+            raise LookupError(f"subfaction {subfaction_id} not found")
+
+        unit = Unit(
+            faction_id=faction_id,
+            unit_name=unit_name,
             movement=movement,
-            toughness=tough,
-            save=save,
-            wounds=wound,
-            leadership= leader,
-            objective_control= objective
+            toughness=toughness,
+            armor_save=armor_save,
+            wounds=wounds,
+            leadership=leadership,
+            objective_control=objective_control,
+            points=points,
+            invulnerable_save=invulnerable_save,
+            subfaction_id=subfaction_id,
+            keywords=keywords or [],
         )
-
-        self.session.add(new_unit)
-        self.session.commit()
-        self.session.refresh(new_unit)
-
-        return new_unit
-
-
-    def get_unit(
-            self,
-            id: int
-    )-> Unit:
-        
-        unit = self.session.get(Unit, id)
-        
-        if not unit:
-            raise AttributeError("unit not found")
-        
-        return unit
-    
-
-    def list_units(
-            self,
-            filter: Optional[Dict[str, any]] = None,
-            offset: int = 0,
-            limit: Optional[int] = 50
-    )-> list[Unit]:
-        
-        statement = select(Unit)
-
-        if filter:
-            for field_name, value in filter.items():
-                if value is None or not hasattr(Unit, field_name):
-                    continue
-                column = getattr(Unit, field_name)
-
-                if isinstance(value, SequenceABC) and not isinstance(value, (str, bytes)):
-                    statement = statement.where(column.in_(value))
-                else:
-                    statement = statement.where(column == value)
-
-        if offset:
-            statement = statement.offset(max(offset, 0))
-
-        if limit:
-            statement = statement.limit(limit)
-
-        results = self.session.exec(statement)
-
-        return results.all()
-    
-    def delete_unit(
-            self,
-            id: int
-    ):
-        unit = self.get_unit(id)
-        self.session.delete(unit)
-        self.session.commit()
-
-        return unit
-    
-    def update_unit(
-            self,
-            id: int,
-            field: str,
-            new: int | str 
-        )->Unit:
-        
-        unit = self.get_unit(id)
-        
-        if not hasattr(unit, field):
-            raise AttributeError(f"{field} is not an attribute of the unit")
-
-        attribute_value = getattr(unit, field)
-
-        if not isinstance(new, type(attribute_value)):
-            raise TypeError(f"{unit} is not the same {field}")
-        
-        setattr(unit, field, new)
-        
         self.session.add(unit)
         self.session.commit()
         self.session.refresh(unit)
-        
         return unit
-        
+
+    def get_unit(self, unit_id: UUID) -> Unit:
+        unit = self.session.get(Unit, unit_id)
+        if unit is None:
+            raise LookupError(f"unit {unit_id} not found")
+        return unit
+
+    def list_units(self) -> list[Unit]:
+        return list(self.session.exec(select(Unit)).all())
