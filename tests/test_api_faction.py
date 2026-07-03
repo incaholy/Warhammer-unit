@@ -53,3 +53,38 @@ def test_create_subfaction_duplicate_returns_400(client):
         "/subfactions", json={"faction_id": faction["id"], "name": "Sautekh"}
     )
     assert resp.status_code == 400
+
+
+def test_create_weapon(client):
+    resp = client.post(
+        "/weapons",
+        json={
+            "name": "Bolt rifle", "category": "range", "attacks": "2",
+            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
+            "damage": "1", "range_inches": 24,
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["name"] == "Bolt rifle"
+    assert body["category"] == "range"
+    assert "id" in body
+
+
+def test_create_weapon_invalid_category_returns_400(client):
+    resp = client.post(
+        "/weapons",
+        json={
+            "name": "Bad", "category": "psychic", "attacks": "1",
+            "weapon_skill": 3, "strength": 4, "armor_piercing": 0, "damage": "1",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_create_ability(client):
+    resp = client.post(
+        "/abilities", json={"name": "Oath of Moment", "description": "reroll"}
+    )
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "Oath of Moment"

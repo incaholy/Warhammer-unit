@@ -4,11 +4,13 @@ Uses full paths (no shared prefix) because `/factions` and `/subfactions` are
 sibling resources. Catalog writes are admin/seed in principle.
 """
 
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from sqlmodel import Session, SQLModel
 
+from app.api.unit import Ability_Read, Weapon_Read
 from app.core.db.connection import get_session
 from app.core.services.service_unit import UnitService
 
@@ -33,6 +35,23 @@ class Faction_Create(SQLModel):
 class Subfaction_Create(SQLModel):
     faction_id: UUID
     name: str
+
+
+class Weapon_Create(SQLModel):
+    name: str
+    category: str
+    attacks: str
+    weapon_skill: int
+    strength: int
+    armor_piercing: int
+    damage: str
+    range_inches: Optional[int] = None
+    keywords: Optional[list[str]] = None
+
+
+class Ability_Create(SQLModel):
+    name: str
+    description: str
 
 
 def get_catalog_service(session: Session = Depends(get_session)) -> UnitService:
@@ -65,3 +84,21 @@ def create_subfaction(
     service: UnitService = Depends(get_catalog_service),
 ) -> Subfaction_Read:
     return service.create_subfaction(payload.faction_id, payload.name)
+
+
+@router.post(
+    "/weapons", response_model=Weapon_Read, status_code=status.HTTP_201_CREATED
+)
+def create_weapon(
+    payload: Weapon_Create, service: UnitService = Depends(get_catalog_service)
+) -> Weapon_Read:
+    return service.create_weapon(**payload.model_dump())
+
+
+@router.post(
+    "/abilities", response_model=Ability_Read, status_code=status.HTTP_201_CREATED
+)
+def create_ability(
+    payload: Ability_Create, service: UnitService = Depends(get_catalog_service)
+) -> Ability_Read:
+    return service.create_ability(payload.name, payload.description)
