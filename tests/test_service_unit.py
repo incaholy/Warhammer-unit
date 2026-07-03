@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 
+from app.core.db.models import Ability, Weapon
 from app.core.services.service_unit import UnitService
 
 
@@ -66,3 +67,67 @@ def test_list_units(session, make_unit):
     make_unit()
     svc = UnitService(session)
     assert len(svc.list_units()) == 2
+
+
+def _weapon():
+    return Weapon(
+        name="Bolt rifle", category="range", range_inches=24, attacks="2",
+        weapon_skill=3, strength=4, armor_piercing=1, damage="1",
+    )
+
+
+def test_update_unit(session, make_unit):
+    unit = make_unit()
+    svc = UnitService(session)
+    updated = svc.update_unit(unit.id, points=120, unit_name="Renamed")
+    assert updated.points == 120
+    assert updated.unit_name == "Renamed"
+
+
+def test_update_unit_missing_raises_lookup_error(session):
+    svc = UnitService(session)
+    with pytest.raises(LookupError):
+        svc.update_unit(uuid.uuid4(), points=1)
+
+
+def test_update_unit_unknown_field_raises_value_error(session, make_unit):
+    unit = make_unit()
+    svc = UnitService(session)
+    with pytest.raises(ValueError):
+        svc.update_unit(unit.id, not_a_field=1)
+
+
+def test_delete_unit(session, make_unit):
+    unit = make_unit()
+    svc = UnitService(session)
+    svc.delete_unit(unit.id)
+    with pytest.raises(LookupError):
+        svc.get_unit(unit.id)
+
+
+def test_delete_unit_missing_raises_lookup_error(session):
+    svc = UnitService(session)
+    with pytest.raises(LookupError):
+        svc.delete_unit(uuid.uuid4())
+
+
+def test_link_weapon(session, make_unit):
+    unit = make_unit()
+    weapon = _weapon()
+    session.add(weapon)
+    session.commit()
+    session.refresh(weapon)
+    svc = UnitService(session)
+    result = svc.link_weapon(unit.id, weapon.id)
+    assert [w.name for w in result.weapons] == ["Bolt rifle"]
+
+
+def test_link_ability(session, make_unit):
+    unit = make_unit()
+    ability = Ability(name="Oath", description="reroll")
+    session.add(ability)
+    session.commit()
+    session.refresh(ability)
+    svc = UnitService(session)
+    result = svc.link_ability(unit.id, ability.id)
+    assert [a.name for a in result.abilities] == ["Oath"]
