@@ -228,22 +228,35 @@ exposes CRUD methods.
 
 | Service | Status | Methods |
 |---|---|---|
-| `UserService` | planned (tests written) | `create_user(username, email, password_hash)` (`ValueError` on duplicate username/email), `get_user(user_id)` |
-| `UnitService` | planned (tests written) | catalog: `create_unit(...)`, `get_unit(unit_id)`, `list_units()` |
-| `ArmyService` | planned (tests written) | `create_army`, `get_army`, `list_armies`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall` |
-| `InventoryService` | planned (tests written) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
+| `UserService` | implemented (+ tests) | `create_user(username, email, password_hash)` (`ValueError` on duplicate username/email), `get_user(user_id)` |
+| `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `link_weapon`, `link_ability`, `create_weapon` *(to add)*, `create_ability` *(to add)*; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
+| `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall` |
+| `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
 
 `UserService`:
 - `create_user(username, email, password_hash)` — `ValueError` if the username
   or email is already taken.
 - `get_user(user_id)` — `LookupError` if not found.
 
-`UnitService` manages the catalog:
+`UnitService` manages the catalog (units, factions, and their weapons/abilities):
 - `create_unit(faction_id, unit_name, <stats>, points, invulnerable_save=None,
-  subfaction_id=None, keywords=None)` — `LookupError` if the faction doesn't
-  exist.
+  subfaction_id=None, keywords=None)` — `LookupError` if the faction (or the
+  given subfaction) doesn't exist.
 - `get_unit(unit_id)` — `LookupError` if not found.
 - `list_units()` — all catalog units (filter/limit/offset later).
+- `update_unit(unit_id, **fields)` — partial update; `ValueError` on an unknown
+  field, `LookupError` if the unit (or a new faction/subfaction) doesn't exist.
+- `delete_unit(unit_id)` — `LookupError` if not found.
+- `create_weapon(name, category, attacks, weapon_skill, strength,
+  armor_piercing, damage, range_inches=None, keywords=None)` — create a weapon
+  profile (`category` is `range`/`melee`, `null` range = melee). *(to add)*
+- `create_ability(name, description)` — create an ability. *(to add)*
+- `link_weapon(unit_id, weapon_id)` / `link_ability(unit_id, ability_id)` —
+  attach an existing weapon/ability to a unit (idempotent); `LookupError` if
+  either doesn't exist.
+- `list_factions()`; `create_faction(name)` (`ValueError` on duplicate);
+  `create_subfaction(faction_id, name)` (`LookupError` on unknown faction,
+  `ValueError` on duplicate for that faction).
 
 `ArmyService` manages a user's armies and the units inside them:
 - `create_army(user_id, name, faction_id, subfaction_id=None, description=None)`
