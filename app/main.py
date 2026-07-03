@@ -12,6 +12,7 @@ mounted at the bottom.
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.api.faction import router as faction_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
 
@@ -45,3 +46,4 @@ def health() -> dict[str, str]:
 
 app.include_router(user_router)
 app.include_router(unit_router)
+app.include_router(faction_router)

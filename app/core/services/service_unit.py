@@ -119,3 +119,35 @@ class UnitService:
             self.session.commit()
             self.session.refresh(unit)
         return unit
+
+    # ---- factions & subfactions (catalog reference data) ----
+
+    def list_factions(self) -> list[Faction]:
+        return list(self.session.exec(select(Faction)).all())
+
+    def create_faction(self, name: str) -> Faction:
+        if self.session.exec(select(Faction).where(Faction.name == name)).first():
+            raise ValueError(f"faction {name!r} already exists")
+        faction = Faction(name=name)
+        self.session.add(faction)
+        self.session.commit()
+        self.session.refresh(faction)
+        return faction
+
+    def create_subfaction(self, faction_id: UUID, name: str) -> Subfaction:
+        if self.session.get(Faction, faction_id) is None:
+            raise LookupError(f"faction {faction_id} not found")
+        clash = self.session.exec(
+            select(Subfaction).where(
+                Subfaction.faction_id == faction_id, Subfaction.name == name
+            )
+        ).first()
+        if clash is not None:
+            raise ValueError(
+                f"subfaction {name!r} already exists for that faction"
+            )
+        sub = Subfaction(faction_id=faction_id, name=name)
+        self.session.add(sub)
+        self.session.commit()
+        self.session.refresh(sub)
+        return sub

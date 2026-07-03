@@ -19,6 +19,8 @@ import pytest
 from app.core.db.models import Ability, Weapon
 from app.core.services.service_unit import UnitService
 
+# --- catalog factions/subfactions live on UnitService ---
+
 
 def _stats():
     return dict(
@@ -131,3 +133,46 @@ def test_link_ability(session, make_unit):
     svc = UnitService(session)
     result = svc.link_ability(unit.id, ability.id)
     assert [a.name for a in result.abilities] == ["Oath"]
+
+
+def test_create_faction(session):
+    svc = UnitService(session)
+    faction = svc.create_faction("Space Marines")
+    assert faction.id is not None
+    assert faction.name == "Space Marines"
+
+
+def test_create_faction_duplicate_raises_value_error(session):
+    svc = UnitService(session)
+    svc.create_faction("Necrons")
+    with pytest.raises(ValueError):
+        svc.create_faction("Necrons")
+
+
+def test_list_factions(session):
+    svc = UnitService(session)
+    svc.create_faction("A")
+    svc.create_faction("B")
+    assert len(svc.list_factions()) == 2
+
+
+def test_create_subfaction(session, make_faction):
+    f = make_faction()
+    svc = UnitService(session)
+    sub = svc.create_subfaction(f.id, "Ultramarines")
+    assert sub.faction_id == f.id
+    assert sub.name == "Ultramarines"
+
+
+def test_create_subfaction_unknown_faction_raises_lookup_error(session):
+    svc = UnitService(session)
+    with pytest.raises(LookupError):
+        svc.create_subfaction(uuid.uuid4(), "X")
+
+
+def test_create_subfaction_duplicate_raises_value_error(session, make_faction):
+    f = make_faction()
+    svc = UnitService(session)
+    svc.create_subfaction(f.id, "Sautekh")
+    with pytest.raises(ValueError):
+        svc.create_subfaction(f.id, "Sautekh")
