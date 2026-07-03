@@ -316,25 +316,25 @@ Success status codes follow REST conventions: `POST` create → **201**, `DELETE
 so they return **201** when they create the row and **200** when they increment
 an existing one.
 
-Planned routes. The **Backing method** column names the service call each route
-makes; methods marked *(to add)* don't exist on the service yet.
+Routes below are implemented. The **Backing method** column names the service
+call each route makes.
 
 **Catalog** — reads are public; writes are admin/seed only (see "Populating the
 catalog"), not part of the normal user flow.
 
 | Method | Path | Action | Backing method | Status |
 |---|---|---|---|---|
-| POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | to do |
-| GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | to do |
-| GET | `/units` | list units; query params for faction filter, limit, offset | `UnitService.list_units` | to do |
-| PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` *(to add)* | to do |
-| DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` *(to add)* | to do |
-| POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` *(to add)* | to do |
-| POST | `/units/{unit_id}/abilities` | link an ability to a unit (admin) | `UnitService.link_ability` *(to add)* | to do |
-| GET | `/factions` | list factions with their subfactions | `UnitService.list_factions` *(to add)* | to do |
-| POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | `UnitService.create_faction` / `create_subfaction` *(to add)* | to do |
-| POST | `/weapons` | create a weapon (admin/seed) | `UnitService.create_weapon` | to do |
-| POST | `/abilities` | create an ability (admin/seed) | `UnitService.create_ability` | to do |
+| POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | done |
+| GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | done |
+| GET | `/units` | list units; query params for faction filter, limit, offset | `UnitService.list_units` | done |
+| PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` | done |
+| DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` | done |
+| POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` | done |
+| POST | `/units/{unit_id}/abilities` | link an ability to a unit (admin) | `UnitService.link_ability` | done |
+| GET | `/factions` | list factions with their subfactions | `UnitService.list_factions` | done |
+| POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | `UnitService.create_faction` / `create_subfaction` | done |
+| POST | `/weapons` | create a weapon (admin/seed) | `UnitService.create_weapon` | done |
+| POST | `/abilities` | create an ability (admin/seed) | `UnitService.create_ability` | done |
 
 **Users, inventory & armies** — the user-facing flow. Routes nest under the
 user: the inventory and armies belong to a user, and a unit entry belongs to the
@@ -342,21 +342,21 @@ inventory or to an army.
 
 | Method | Path | Action | Backing method | Status |
 |---|---|---|---|---|
-| POST | `/users` | create a user | `UserService.create_user` | to do |
-| GET | `/users/{user_id}` | get a user | `UserService.get_user` | to do |
-| GET | `/users/{user_id}/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | to do |
-| POST | `/users/{user_id}/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | to do |
-| PATCH | `/users/{user_id}/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | to do |
-| DELETE | `/users/{user_id}/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | to do |
-| POST | `/users/{user_id}/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | to do |
-| GET | `/users/{user_id}/armies` | list the user's armies | `ArmyService.list_armies` | to do |
-| GET | `/users/{user_id}/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | `ArmyService.get_army` + `list_army_units` | to do |
-| PATCH | `/users/{user_id}/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` *(to add)* | to do |
-| DELETE | `/users/{user_id}/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | to do |
-| GET | `/users/{user_id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | to do |
-| POST | `/users/{user_id}/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | to do |
-| PATCH | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | to do |
-| DELETE | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | to do |
+| POST | `/users` | create a user | `UserService.create_user` | done |
+| GET | `/users/{user_id}` | get a user | `UserService.get_user` | done |
+| GET | `/users/{user_id}/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | done |
+| POST | `/users/{user_id}/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | done |
+| PATCH | `/users/{user_id}/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | done |
+| DELETE | `/users/{user_id}/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | done |
+| POST | `/users/{user_id}/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | done |
+| GET | `/users/{user_id}/armies` | list the user's armies | `ArmyService.list_armies` | done |
+| GET | `/users/{user_id}/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | `ArmyService.get_army` + `list_army_units` | done |
+| PATCH | `/users/{user_id}/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` | done |
+| DELETE | `/users/{user_id}/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
+| GET | `/users/{user_id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
+| POST | `/users/{user_id}/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
+| PATCH | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
+| DELETE | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
 
 Request schemas (`*_Create` plus the small add/patch bodies):
 - `Unit_Create` — `{faction_id, unit_name, movement, toughness, armor_save,
