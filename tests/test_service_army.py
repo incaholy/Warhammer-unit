@@ -63,6 +63,27 @@ def test_delete_army(session, make_army):
         svc.get_army(army.id)
 
 
+def test_update_army(session, make_army):
+    army = make_army()
+    svc = ArmyService(session)
+    updated = svc.update_army(army.id, name="Renamed", description="new note")
+    assert updated.name == "Renamed"
+    assert updated.description == "new note"
+
+
+def test_update_army_missing_raises_lookup_error(session):
+    svc = ArmyService(session)
+    with pytest.raises(LookupError):
+        svc.update_army(uuid.uuid4(), name="X")
+
+
+def test_update_army_unknown_field_raises_value_error(session, make_army):
+    army = make_army()
+    svc = ArmyService(session)
+    with pytest.raises(ValueError):
+        svc.update_army(army.id, not_a_field=1)
+
+
 def test_add_unit_to_army(session, make_army, make_unit):
     army = make_army()
     unit = make_unit()

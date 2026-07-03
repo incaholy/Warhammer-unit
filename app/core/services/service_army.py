@@ -26,6 +26,9 @@ class Shortfall:
 
 
 class ArmyService:
+    # Fields a PATCH may set on an army.
+    _UPDATABLE = {"name", "description", "faction_id", "subfaction_id"}
+
     def __init__(self, session: Session):
         self.session = session
 
@@ -76,6 +79,27 @@ class ArmyService:
         self.session.execute(sa_delete(ArmyUnit).where(ArmyUnit.army_id == army_id))
         self.session.delete(army)
         self.session.commit()
+
+    def update_army(self, army_id: UUID, **fields) -> Army:
+        army = self.get_army(army_id)
+        unknown = set(fields) - self._UPDATABLE
+        if unknown:
+            raise ValueError(f"cannot update fields: {sorted(unknown)}")
+        if fields.get("faction_id") is not None and (
+            self.session.get(Faction, fields["faction_id"]) is None
+        ):
+            raise LookupError(f"faction {fields['faction_id']} not found")
+        if fields.get("subfaction_id") is not None and (
+            self.session.get(Subfaction, fields["subfaction_id"]) is None
+        ):
+            raise LookupError(f"subfaction {fields['subfaction_id']} not found")
+
+        for key, value in fields.items():
+            setattr(army, key, value)
+        self.session.add(army)
+        self.session.commit()
+        self.session.refresh(army)
+        return army
 
     # -------------------------- units in an army --------------------------
 
