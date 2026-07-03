@@ -47,11 +47,17 @@ def list_inventory(
 def add_unit(
     user_id: UUID,
     payload: InventoryAdd,
+    response: Response,
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
-    # Upsert (create or increment). Returns 201; the create/increment 200
-    # distinction from the SPEC is simplified to always-201 for now.
-    return service.add_unit(user_id, payload.unit_id, payload.amount)
+    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
+    existed = any(
+        e.unit_id == payload.unit_id for e in service.list_inventory(user_id)
+    )
+    entry = service.add_unit(user_id, payload.unit_id, payload.amount)
+    if existed:
+        response.status_code = status.HTTP_200_OK
+    return entry
 
 
 @router.patch("/{unit_id}", response_model=UserUnit_Read)

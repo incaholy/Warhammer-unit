@@ -77,14 +77,16 @@ def test_add_unit_twice_increments(client, make_user, make_faction, make_unit):
     f = make_faction()
     unit = make_unit()
     army = _make_army(client, user, f)
-    client.post(
+    first = client.post(
         f"/users/{user.id}/armies/{army['id']}/units",
         json={"unit_id": str(unit.id), "amount": 2},
     )
+    assert first.status_code == 201  # created
     resp = client.post(
         f"/users/{user.id}/armies/{army['id']}/units",
         json={"unit_id": str(unit.id), "amount": 3},
     )
+    assert resp.status_code == 200  # incremented existing
     assert resp.json()["amount"] == 5
 
 

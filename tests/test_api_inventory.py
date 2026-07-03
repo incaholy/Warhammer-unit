@@ -23,8 +23,10 @@ def test_add_and_list_inventory(client, make_user, make_unit):
 def test_add_twice_increments(client, make_user, make_unit):
     user = make_user()
     unit = make_unit()
-    client.post(f"/users/{user.id}/inventory", json={"unit_id": str(unit.id), "amount": 1})
+    first = client.post(f"/users/{user.id}/inventory", json={"unit_id": str(unit.id), "amount": 1})
+    assert first.status_code == 201  # created
     resp = client.post(f"/users/{user.id}/inventory", json={"unit_id": str(unit.id), "amount": 2})
+    assert resp.status_code == 200  # incremented existing
     assert resp.json()["amount"] == 3
 
 

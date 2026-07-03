@@ -131,9 +131,17 @@ def add_unit(
     user_id: UUID,
     army_id: UUID,
     payload: ArmyUnitAdd,
+    response: Response,
     service: ArmyService = Depends(get_army_service),
 ) -> ArmyUnit_Read:
-    return service.add_unit(army_id, payload.unit_id, payload.amount)
+    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
+    existed = any(
+        u.unit_id == payload.unit_id for u in service.list_army_units(army_id)
+    )
+    entry = service.add_unit(army_id, payload.unit_id, payload.amount)
+    if existed:
+        response.status_code = status.HTTP_200_OK
+    return entry
 
 
 @router.patch("/{army_id}/units/{unit_id}", response_model=ArmyUnit_Read)
