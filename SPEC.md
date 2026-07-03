@@ -306,7 +306,7 @@ Router modules (each mounted in `app/main.py` with `app.include_router(...)`):
 | Module | Backing service | Resource |
 |---|---|---|
 | `app/api/unit.py` | `UnitService` | catalog units |
-| `app/api/faction.py` | `UnitService` (catalog) | catalog factions & subfactions |
+| `app/api/faction.py` | `UnitService` (catalog) | catalog factions, subfactions, weapons & abilities |
 | `app/api/user.py` | `UserService` | users |
 | `app/api/inventory.py` | `InventoryService` | a user's inventory (`user_unit`) |
 | `app/api/army.py` | `ArmyService` | a user's armies and their units |
@@ -333,6 +333,8 @@ catalog"), not part of the normal user flow.
 | POST | `/units/{unit_id}/abilities` | link an ability to a unit (admin) | `UnitService.link_ability` *(to add)* | to do |
 | GET | `/factions` | list factions with their subfactions | `UnitService.list_factions` *(to add)* | to do |
 | POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | `UnitService.create_faction` / `create_subfaction` *(to add)* | to do |
+| POST | `/weapons` | create a weapon (admin/seed) | `UnitService.create_weapon` | to do |
+| POST | `/abilities` | create an ability (admin/seed) | `UnitService.create_ability` | to do |
 
 **Users, inventory & armies** — the user-facing flow. Routes nest under the
 user: the inventory and armies belong to a user, and a unit entry belongs to the
@@ -361,6 +363,9 @@ Request schemas (`*_Create` plus the small add/patch bodies):
   wounds, leadership, objective_control, points, invulnerable_save?,
   subfaction_id?, keywords?}`.
 - `Faction_Create` — `{name}`; `Subfaction_Create` — `{faction_id, name}`.
+- `Weapon_Create` — `{name, category, attacks, weapon_skill, strength,
+  armor_piercing, damage, range_inches?, keywords?}`; `Ability_Create` —
+  `{name, description}`.
 - `User_Create` — `{username, email, password_hash}`. The `password_hash` field
   is a temporary placeholder: once auth lands this becomes `{username, email,
   password}` and the server hashes it, never accepting a client-supplied hash
@@ -376,6 +381,9 @@ Read schemas nest the hierarchy:
   leadership, objective_control, points, keywords, weapons: [...],
   abilities: [...]}`.
 - `Faction_Read` — `{id, name, subfactions: [{id, name}]}`.
+- `Weapon_Read` — `{id, name, category, keywords, range_inches, attacks,
+  weapon_skill, strength, armor_piercing, damage}`; `Ability_Read` —
+  `{id, name, description}`. (These are also the shapes embedded in `Unit_Read`.)
 - `UserUnit_Read` and `ArmyUnit_Read` both embed `Unit_Read` and add `amount`.
 - `Army_Read` is `{id, name, faction_id, subfaction_id, units: [ArmyUnit_Read]}`
   — a full roster.
