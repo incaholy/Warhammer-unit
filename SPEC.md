@@ -505,15 +505,21 @@ another user's armies; a non-admin can't write the catalog).
    `ValueError` per the contracts) — the service suite is green.
 4. ✓ Made `connection.py` lazy (engine created on first use; imports no longer
    require `DATABASE_URL`).
-5. Add the API routers (units, faction, users, inventory, armies) onto the
-   existing bare-bones `app/main.py`, with `*_Create`/`*_Read` schemas, the
-   `get_session` dependency, and the service-exception → HTTP mapping. Some
-   routes still need service methods (see the API layer's "Backing method"
-   column).
-6. API tests with FastAPI's `TestClient` (dependency-overridden session).
-7. Seed script to load the real datasheet catalog.
-8. Roster features on `Army`: points limit/total, list validation.
-9. Authentication & authorization: `app/core/security.py` (bcrypt hashing +
-   JWT), the `passlib`/`bcrypt`/`python-jose`/`cryptography` deps, an `/auth`
-   router, a current-user dependency (own-data enforcement), and an admin role
-   for catalog writes.
+5. ✓ API routers (units, faction, users, inventory, armies) mounted on
+   `app/main.py`, with `*_Create`/`*_Read` schemas, the `get_session`
+   dependency, and the service-exception → HTTP handlers. The previously
+   "to add" service methods (`update_unit`, `delete_unit`, `link_weapon`,
+   `link_ability`, `create_faction`, `create_subfaction`, `update_army`) were
+   added.
+6. ✓ API tests with FastAPI's `TestClient` (dependency-overridden session), one
+   file per router.
+7. Add `POST /weapons` and `POST /abilities` routes (backed by
+   `create_weapon`/`create_ability`) so the full catalog is enterable over
+   HTTP. Also settle the upsert `POST`s' 201-vs-200 status (currently always
+   201).
+8. Seed script to load the real datasheet catalog.
+9. Roster features on `Army`: points limit/total, list validation.
+10. Authentication & authorization: `app/core/security.py` (bcrypt hashing +
+    JWT), the `passlib`/`bcrypt`/`python-jose`/`cryptography` deps, an `/auth`
+    router, a current-user dependency (own-data enforcement), and an admin role
+    for catalog writes.
