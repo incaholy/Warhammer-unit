@@ -61,6 +61,43 @@ Rules:
 - Models are the single source of truth for the database schema; Alembic
   migrations are generated from them.
 
+Layout:
+
+```
+app/
+  main.py                # FastAPI app (entry point)
+  api/                   # routers + *_Create/*_Read schemas (one module per resource)
+  core/
+    services/            # one <Thing>Service per file (business logic)
+    db/
+      models.py          # SQLModel tables
+      connection.py      # engine + session
+      alembic/           # migrations (versions/ + env.py)
+tests/                   # pytest suite (service tests; API tests to come)
+Makefile                 # dev/db commands (see Development)
+requirements.txt, requirements-dev.txt
+```
+
+## Development
+
+Python 3.12 in a pyenv virtualenv named in `.python-version`
+(`warhammer-unit-env`). `DATABASE_URL` must be set — it lives in `.env`, which is
+gitignored. Common tasks run through the Makefile:
+
+| Command | What it does |
+|---|---|
+| `make setup` | create the venv, install deps, create the DB, run migrations |
+| `make install` / `make install-dev` | install runtime / dev+test dependencies |
+| `make db-setup` | create the Postgres role + database (idempotent) |
+| `make migrate` | apply Alembic migrations (`upgrade head`) |
+| `make migrate-fresh` | drop, recreate, and re-migrate the dev DB (destructive) |
+| `make test` | run the pytest suite |
+| `uvicorn app.main:app --reload` | run the API locally |
+
+Dependencies are pinned in `requirements.txt` (runtime) and
+`requirements-dev.txt` (adds `pytest`/`pytest-cov`). Core stack: FastAPI,
+SQLModel, SQLAlchemy, Alembic, psycopg2, Pydantic, python-dotenv.
+
 ## DB layer (`app/core/db/`)
 
 ### Models (`models.py`)
@@ -168,21 +205,26 @@ This laziness is deliberate: services receive an injected session rather than
 calling `get_session()` themselves, and tests import models/services without a
 live database — the reason the engine can't be created at import time.
 
-### Migrations (`alembic/`)
+### Migrations (`app/core/db/alembic/`)
 
-Schema changes are made by editing `models.py`, then:
+Schema changes are made by editing `models.py`, then autogenerating and applying
+a migration:
 
 ```
-alembic revision --autogenerate -m "describe the change"
-alembic upgrade head
+alembic revision --autogenerate -m "describe the change"   # generate
+make migrate         # apply (alembic upgrade head)
+make migrate-fresh   # drop, recreate, and re-migrate the dev DB (destructive)
 ```
 
-Never edit the database schema by hand.
+Migrations live in `app/core/db/alembic/versions/`; `env.py` loads `.env` and
+points Alembic at the same `DATABASE_URL` as the app. Never edit the database
+schema by hand.
 
 ## Service layer (`app/core/services/`)
 
 One service class per aggregate root, named `service_<thing>.py` containing
-`<Thing>Service`. Each service owns a session and exposes CRUD methods.
+`<Thing>Service`. Each service is given a `Session` (constructor injection) and
+exposes CRUD methods.
 
 | Service | Status | Methods |
 |---|---|---|
@@ -336,10 +378,12 @@ Error mapping at the API layer:
 | `ValueError` / `TypeError` (bad input) | 400 |
 | Pydantic validation failure | 422 (FastAPI automatic) |
 
-### App entry point (to do)
+### App entry point (`app/main.py`)
 
-`app/main.py` creates the `FastAPI()` instance and includes the routers.
-Run locally with:
+`app/main.py` exists as a bare-bones app: the `FastAPI()` instance plus a
+`GET /health` liveness check. Still to add — the routers
+(`app.include_router(...)`) and the service-exception → HTTP handlers. Run
+locally with:
 
 ```
 uvicorn app.main:app --reload
