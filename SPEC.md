@@ -306,8 +306,10 @@ Request schemas (`*_Create` plus the small add/patch bodies):
   wounds, leadership, objective_control, points, invulnerable_save?,
   subfaction_id?, keywords?}`.
 - `Faction_Create` — `{name}`; `Subfaction_Create` — `{faction_id, name}`.
-- `User_Create` — `{username, email, password_hash}` (becomes a raw `password`
-  once auth lands and hashing moves server-side).
+- `User_Create` — `{username, email, password_hash}`. The `password_hash` field
+  is a temporary placeholder: once auth lands this becomes `{username, email,
+  password}` and the server hashes it, never accepting a client-supplied hash
+  (see "Authentication & authorization").
 - `Army_Create` — `{name, faction_id, subfaction_id?, description?}`;
   `Army_Update` — the same fields, all optional.
 - `InventoryAdd` / `ArmyUnitAdd` — `{unit_id, amount}` (`amount` defaults to 1).
@@ -350,7 +352,8 @@ Users never create datasheets, so the catalog is filled out of band:
 1. A **seed script** (`scripts/seed_datasheets.py`) that bulk-inserts datasheets
    from a JSON/CSV source. Run once, re-run when GW publishes a dataslate.
 2. Or treat the catalog write routes (`POST /units`, etc.) as **admin-only**
-   ingestion, gated once auth exists.
+   ingestion, gated by the admin role introduced in "Authentication &
+   authorization."
 
 Start with the seed script. Editing a datasheet updates the single shared
 `units` row, so every army and inventory entry pointing at it sees the new stats
@@ -358,14 +361,37 @@ automatically — which is the desired behaviour. ("Stats as of when I added it"
 would need a `version` on `Unit` plus a version stored on the entry; out of
 scope for now.)
 
-## Authentication (future)
+## Authentication & authorization (future)
 
 The schema is auth-ready: a real `users` table with a `password_hash` column,
 and FK integrity from `armies` / `user_unit` down to the user. For now endpoints
-take `user_id` as a path param and there is no login. When auth lands, add an
-`/auth` router (register/login → JWT) and a "current user" dependency that
-replaces the `user_id` path param on the user routes — the army/inventory logic
-itself doesn't change.
+take `user_id` as a path param and there is no login.
+
+**Passwords.** Hashing lives in a dedicated `app/core/security.py`:
+`hash_password` / `verify_password` using **bcrypt via `passlib`**. The server
+always hashes a **raw password** — a client-supplied hash is never accepted or
+stored. (Until auth lands, `User_Create.password_hash` is a temporary
+placeholder.)
+
+**Tokens.** Login returns a **JWT** (`create_access_token` / decode, also in
+`security.py`): subject = the user's id, algorithm **HS256**, signed with a
+`SECRET_KEY` env var and expiring after `ACCESS_TOKEN_EXPIRE_MINUTES`.
+
+**Dependencies to add:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
+
+**When auth lands:**
+- Add an `/auth` router (register → hash the password; login → verify and return
+  a JWT).
+- Add a "current user" dependency that decodes the JWT and replaces the
+  `user_id` path param on the user routes — the army/inventory logic itself
+  doesn't change.
+
+**Authorization** (distinct from authentication):
+- **Own-data only** — a user may read/write only *their own* armies and
+  inventory; the current-user dependency, not a path param, decides whose data
+  is touched.
+- **Admin role** — catalog writes (`POST/PATCH/DELETE /units`, `/factions`,
+  etc.) require an admin; see "Populating the catalog."
 
 ## Testing
 
@@ -378,40 +404,59 @@ tests/
   test_service_unit.py
   test_service_army.py
   test_service_inventory.py
-  # test_api_*.py — added once the API layer exists
+  # test_api_*.py — added with the API layer (see below)
 ```
 
-Service tests to cover: create a user (duplicate username/email → `ValueError`,
-missing → `LookupError`); create a catalog unit (unknown faction → `LookupError`),
-get/list units; create an army (unknown user → `LookupError`), list and delete
-armies; add a unit to an army or to inventory, add the same unit twice increments
-the amount, set the amount to a new value, remove a unit; `set_amount < 1` →
-`ValueError`; adding a unit to a nonexistent army/user or a nonexistent unit →
-`LookupError`; an army may reference a unit the user doesn't own (no rejection);
-deleting an army cascades its `army_units`; deleting an inventory entry leaves
-armies untouched; `shortfall` reports `need = max(0, in_list - owned)` and is
-empty when inventory covers the list.
+`conftest.py` provides the `session` fixture plus object factories
+(`make_user`, `make_faction`, `make_subfaction`, `make_unit`, `make_army`) that
+build valid rows so each test only spells out what it cares about.
+
+The **service tests are implemented and green.** They cover: create a user
+(duplicate username/email → `ValueError`, missing → `LookupError`); create a
+catalog unit (unknown faction → `LookupError`), get/list units; create an army
+(unknown user → `LookupError`), list and delete armies; add a unit to an army or
+to inventory, add the same unit twice increments the amount, set the amount to a
+new value, remove a unit; `set_amount < 1` → `ValueError`; adding a unit to a
+nonexistent army/user or a nonexistent unit → `LookupError`; an army may
+reference a unit the user doesn't own (no rejection); deleting an army cascades
+its `army_units`; deleting an inventory entry leaves armies untouched;
+`shortfall` reports `need = max(0, in_list - owned)` and is empty when inventory
+covers the list.
+
+API tests come with the API layer — one file per router (`test_api_user.py`,
+`test_api_unit.py`, `test_api_inventory.py`, `test_api_army.py`), plus
+`test_api_auth.py` and authorization tests once auth lands (a user can't read
+another user's armies; a non-admin can't write the catalog).
 
 - Service tests run against an in-memory SQLite database (one fresh schema per
-  test, foreign keys enforced) so SQL actually executes.
-- API tests (later) will use FastAPI's `TestClient` with the service dependency
-  overridden to use the test session.
-- Run with `pytest` (or `make test`).
+  test, foreign keys enforced) so SQL actually executes. This is equivalent to
+  Postgres for our schema (UUIDs, JSON, CHECKs, and cascades all behave), though
+  Postgres-specific behavior isn't exercised.
+- API tests use FastAPI's `TestClient` with the `get_session` dependency
+  overridden (`app.dependency_overrides[get_session] = ...`) so routers run
+  against the test session.
+- Run with `pytest` (or `make test`); add `--cov` for coverage (`pytest-cov`
+  is installed).
 
 ## Roadmap
 
 1. ✓ Full schema in `models.py` (factions, subfactions, units, abilities,
    weapons, users, armies, inventory) + an initial Alembic migration.
-2. ✓ Service tests written (red) for `UserService` / `UnitService` /
-   `ArmyService` / `InventoryService`.
-3. Implement the four services to turn the tests green — session-injected,
-   raising `LookupError` / `ValueError` per the contracts.
-4. Make `connection.py` lazy so importing a service doesn't require
-   `DATABASE_URL` (the engine/URL check moves into `get_session()`).
-5. Add `app/main.py` and the API routers (units, users, inventory, armies),
-   with `*_Create`/`*_Read` schemas and the service-exception → HTTP mapping.
-6. API tests with FastAPI's `TestClient`.
+2. ✓ Service tests written for `UserService` / `UnitService` / `ArmyService` /
+   `InventoryService`.
+3. ✓ Implemented the four services (session-injected, `LookupError` /
+   `ValueError` per the contracts) — the service suite is green.
+4. ✓ Made `connection.py` lazy (engine created on first use; imports no longer
+   require `DATABASE_URL`).
+5. Add the API routers (units, faction, users, inventory, armies) onto the
+   existing bare-bones `app/main.py`, with `*_Create`/`*_Read` schemas, the
+   `get_session` dependency, and the service-exception → HTTP mapping. Some
+   routes still need service methods (see the API layer's "Backing method"
+   column).
+6. API tests with FastAPI's `TestClient` (dependency-overridden session).
 7. Seed script to load the real datasheet catalog.
-8. Roster features on `Army`: points limit/total, list validation, the
-   `shortfall` endpoint.
-9. Authentication: `/auth` router (register/login → JWT) + current-user dependency.
+8. Roster features on `Army`: points limit/total, list validation.
+9. Authentication & authorization: `app/core/security.py` (bcrypt hashing +
+   JWT), the `passlib`/`bcrypt`/`python-jose`/`cryptography` deps, an `/auth`
+   router, a current-user dependency (own-data enforcement), and an admin role
+   for catalog writes.
