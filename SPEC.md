@@ -229,7 +229,7 @@ exposes CRUD methods.
 | Service | Status | Methods |
 |---|---|---|
 | `UserService` | implemented (+ tests) | `create_user(username, email, password_hash)` (`ValueError` on duplicate username/email), `get_user(user_id)` |
-| `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `link_weapon`, `link_ability`, `create_weapon` *(to add)*, `create_ability` *(to add)*; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
+| `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `create_weapon`, `create_ability`, `link_weapon`, `link_ability`; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
 | `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall` |
 | `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
 
@@ -249,8 +249,8 @@ exposes CRUD methods.
 - `delete_unit(unit_id)` — `LookupError` if not found.
 - `create_weapon(name, category, attacks, weapon_skill, strength,
   armor_piercing, damage, range_inches=None, keywords=None)` — create a weapon
-  profile (`category` is `range`/`melee`, `null` range = melee). *(to add)*
-- `create_ability(name, description)` — create an ability. *(to add)*
+  profile; `ValueError` if `category` isn't `range`/`melee` (`null` range = melee).
+- `create_ability(name, description)` — create an ability.
 - `link_weapon(unit_id, weapon_id)` / `link_ability(unit_id, ability_id)` —
   attach an existing weapon/ability to a unit (idempotent); `LookupError` if
   either doesn't exist.

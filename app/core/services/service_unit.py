@@ -96,6 +96,43 @@ class UnitService:
         self.session.delete(unit)
         self.session.commit()
 
+    def create_weapon(
+        self,
+        name: str,
+        category: str,
+        attacks: str,
+        weapon_skill: int,
+        strength: int,
+        armor_piercing: int,
+        damage: str,
+        range_inches: Optional[int] = None,
+        keywords: Optional[list[str]] = None,
+    ) -> Weapon:
+        if category not in ("range", "melee"):
+            raise ValueError("category must be 'range' or 'melee'")
+        weapon = Weapon(
+            name=name,
+            category=category,
+            attacks=attacks,
+            weapon_skill=weapon_skill,
+            strength=strength,
+            armor_piercing=armor_piercing,
+            damage=damage,
+            range_inches=range_inches,
+            keywords=keywords or [],
+        )
+        self.session.add(weapon)
+        self.session.commit()
+        self.session.refresh(weapon)
+        return weapon
+
+    def create_ability(self, name: str, description: str) -> Ability:
+        ability = Ability(name=name, description=description)
+        self.session.add(ability)
+        self.session.commit()
+        self.session.refresh(ability)
+        return ability
+
     def link_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
         unit = self.get_unit(unit_id)
         weapon = self.session.get(Weapon, weapon_id)

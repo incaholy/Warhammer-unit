@@ -135,6 +135,33 @@ def test_link_ability(session, make_unit):
     assert [a.name for a in result.abilities] == ["Oath"]
 
 
+def test_create_weapon(session):
+    svc = UnitService(session)
+    weapon = svc.create_weapon(
+        name="Bolt rifle", category="range", attacks="2", weapon_skill=3,
+        strength=4, armor_piercing=1, damage="1", range_inches=24,
+    )
+    assert weapon.id is not None
+    assert weapon.category == "range"
+    assert weapon.range_inches == 24
+
+
+def test_create_weapon_invalid_category_raises_value_error(session):
+    svc = UnitService(session)
+    with pytest.raises(ValueError):
+        svc.create_weapon(
+            name="Bad", category="psychic", attacks="1", weapon_skill=3,
+            strength=4, armor_piercing=0, damage="1",
+        )
+
+
+def test_create_ability(session):
+    svc = UnitService(session)
+    ability = svc.create_ability(name="Oath of Moment", description="reroll")
+    assert ability.id is not None
+    assert ability.name == "Oath of Moment"
+
+
 def test_create_faction(session):
     svc = UnitService(session)
     faction = svc.create_faction("Space Marines")
