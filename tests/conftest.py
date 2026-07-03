@@ -9,12 +9,15 @@ to spell out what they care about.
 import itertools
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 # Importing the models registers every table on SQLModel.metadata.
+from app.core.db.connection import get_session
 from app.core.db.models import Army, Faction, Subfaction, Unit, User
+from app.main import app
 
 # Unique-ish suffixes for fields with UNIQUE constraints (username, email,
 # faction name). A single global counter is enough: each test gets a fresh DB,
@@ -46,6 +49,16 @@ def engine_fixture():
 def session_fixture(engine):
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture(name="client")
+def client_fixture(session):
+    """A TestClient whose routes run against the test `session` (same DB as the
+    factories) by overriding the `get_session` dependency."""
+    app.dependency_overrides[get_session] = lambda: session
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
 
 
 # --------------------------- object factories ---------------------------
