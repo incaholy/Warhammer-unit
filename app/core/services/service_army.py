@@ -25,9 +25,26 @@ class Shortfall:
     need: int
 
 
+@dataclass
+class ValidationIssue:
+    """One legality problem with an army list."""
+
+    kind: str  # "over_points" | "wrong_faction" | "wrong_subfaction"
+    detail: str
+    unit: Optional[Unit] = None  # the offending unit, when applicable
+
+
+@dataclass
+class ValidationReport:
+    ok: bool
+    points_total: int
+    points_limit: Optional[int]
+    issues: list[ValidationIssue]
+
+
 class ArmyService:
     # Fields a PATCH may set on an army.
-    _UPDATABLE = {"name", "description", "faction_id", "subfaction_id"}
+    _UPDATABLE = {"name", "description", "faction_id", "subfaction_id", "points_limit"}
 
     def __init__(self, session: Session):
         self.session = session
@@ -41,6 +58,7 @@ class ArmyService:
         faction_id: UUID,
         subfaction_id: Optional[UUID] = None,
         description: Optional[str] = None,
+        points_limit: Optional[int] = None,
     ) -> Army:
         if self.session.get(User, user_id) is None:
             raise LookupError(f"user {user_id} not found")
@@ -55,6 +73,7 @@ class ArmyService:
             faction_id=faction_id,
             subfaction_id=subfaction_id,
             description=description,
+            points_limit=points_limit,
         )
         self.session.add(army)
         self.session.commit()
@@ -164,6 +183,59 @@ class ArmyService:
                     )
                 )
         return rows
+
+    # ------------------------------ roster ------------------------------
+
+    def points_total(self, army_id: UUID) -> int:
+        self.get_army(army_id)  # LookupError if missing
+        total = 0
+        for entry in self.session.exec(
+            select(ArmyUnit).where(ArmyUnit.army_id == army_id)
+        ).all():
+            total += entry.amount * self.session.get(Unit, entry.unit_id).points
+        return total
+
+    def validate(self, army_id: UUID) -> ValidationReport:
+        army = self.get_army(army_id)
+        issues: list[ValidationIssue] = []
+        total = 0
+        for entry in self.session.exec(
+            select(ArmyUnit).where(ArmyUnit.army_id == army_id)
+        ).all():
+            unit = self.session.get(Unit, entry.unit_id)
+            total += entry.amount * unit.points
+            if unit.faction_id != army.faction_id:
+                issues.append(
+                    ValidationIssue(
+                        kind="wrong_faction",
+                        detail=f"{unit.unit_name} is not in the army's faction",
+                        unit=unit,
+                    )
+                )
+            if (
+                unit.subfaction_id is not None
+                and unit.subfaction_id != army.subfaction_id
+            ):
+                issues.append(
+                    ValidationIssue(
+                        kind="wrong_subfaction",
+                        detail=f"{unit.unit_name} is restricted to another subfaction",
+                        unit=unit,
+                    )
+                )
+        if army.points_limit is not None and total > army.points_limit:
+            issues.append(
+                ValidationIssue(
+                    kind="over_points",
+                    detail=f"list is {total} pts, over the {army.points_limit} pt limit",
+                )
+            )
+        return ValidationReport(
+            ok=not issues,
+            points_total=total,
+            points_limit=army.points_limit,
+            issues=issues,
+        )
 
     # ------------------------------ helpers ------------------------------
 
