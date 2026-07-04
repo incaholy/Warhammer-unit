@@ -197,6 +197,12 @@ class User(TimestampMixin, table=True):
 
 class Army(TimestampMixin, table=True):
     __tablename__ = "armies"
+    __table_args__ = (
+        CheckConstraint(
+            "points_limit IS NULL OR points_limit >= 0",
+            name="ck_army_points_limit_non_negative",
+        ),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # delete a user -> their armies go with them
@@ -205,6 +211,7 @@ class Army(TimestampMixin, table=True):
     )
     name: str = Field(max_length=128)
     description: Optional[str] = Field(default=None)
+    points_limit: Optional[int] = Field(default=None)
 
     faction_id: UUID = Field(foreign_key="factions.id", index=True)
     subfaction_id: Optional[UUID] = Field(
