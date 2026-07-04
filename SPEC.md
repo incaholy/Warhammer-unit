@@ -153,8 +153,10 @@ Catalog details:
 User-data details:
 - `User` — unique `username` and unique `email`, plus `password_hash`.
 - `Army` — `owner_user_id` foreign key, a `name`, optional `description`, a
-  required `faction_id`, and a nullable `subfaction_id`. This is the unit that
-  becomes a roster.
+  required `faction_id`, a nullable `subfaction_id`, and an optional
+  `points_limit` (`CHECK (points_limit IS NULL OR points_limit >= 0)`). This is
+  the unit that becomes a roster; its points *total* is computed from its units,
+  not stored.
 - `ArmyUnit` — carries `army_id`, `unit_id`, and `amount` (how many in the list),
   with `UNIQUE(army_id, unit_id)` (one row per unit type per army) and
   `CHECK (amount >= 0)`. Armies are independent of inventory — an `ArmyUnit` may
@@ -230,7 +232,7 @@ exposes CRUD methods.
 |---|---|---|
 | `UserService` | implemented (+ tests) | `create_user(username, email, password_hash)` (`ValueError` on duplicate username/email), `get_user(user_id)` |
 | `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `create_weapon`, `create_ability`, `link_weapon`, `link_ability`; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
-| `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall` |
+| `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `update_army`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall`, `points_total`, `validate` |
 | `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
 
 `UserService`:
@@ -259,8 +261,8 @@ exposes CRUD methods.
   `ValueError` on duplicate for that faction).
 
 `ArmyService` manages a user's armies and the units inside them:
-- `create_army(user_id, name, faction_id, subfaction_id=None, description=None)`
-  — `LookupError` if the user or faction doesn't exist.
+- `create_army(user_id, name, faction_id, subfaction_id=None, description=None,
+  points_limit=None)` — `LookupError` if the user or faction doesn't exist.
 - `get_army(army_id)` / `list_armies(user_id)` / `delete_army(army_id)` —
   `LookupError` if the army doesn't exist; delete cascades to the army's
   `army_units`.
@@ -276,6 +278,17 @@ exposes CRUD methods.
   inventory: for each unit, `need = max(0, amount_in_list - amount_owned)`.
   Returns the units that are short (with their owned/needed counts) so the
   caller can show "what you still need to buy."
+- `points_total(army_id)` — computed points cost: `sum(unit.points × amount)`
+  over the army's units.
+- `validate(army_id)` — read-only legality check returning a
+  `ValidationReport{ok, points_total, points_limit, issues}`. Each issue has a
+  `kind`, a `detail`, and the offending `unit` where relevant:
+  - `over_points` — `points_limit` is set and the total exceeds it (Tier 1).
+  - `wrong_faction` — a unit's `faction_id` ≠ the army's (Tier 2).
+  - `wrong_subfaction` — a unit's `subfaction_id` restriction ≠ the army's
+    `subfaction_id` (Tier 2; a unit's `null` subfaction = usable by any).
+  `ok` is true when there are no issues. Datasheet count limits and detachment
+  rules are out of scope for now.
 
 `InventoryService` manages the units a user owns (the flat inventory), keyed on
 `user_id`:
@@ -354,6 +367,7 @@ inventory or to an army.
 | PATCH | `/users/{user_id}/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` | done |
 | DELETE | `/users/{user_id}/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
 | GET | `/users/{user_id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
+| GET | `/users/{user_id}/armies/{army_id}/validate` | check the list's legality (points vs limit, faction/subfaction) | `ArmyService.validate` | to do |
 | POST | `/users/{user_id}/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
 | PATCH | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
 | DELETE | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
@@ -370,7 +384,7 @@ Request schemas (`*_Create` plus the small add/patch bodies):
   is a temporary placeholder: once auth lands this becomes `{username, email,
   password}` and the server hashes it, never accepting a client-supplied hash
   (see "Authentication & authorization").
-- `Army_Create` — `{name, faction_id, subfaction_id?, description?}`;
+- `Army_Create` — `{name, faction_id, subfaction_id?, description?, points_limit?}`;
   `Army_Update` — the same fields, all optional.
 - `InventoryAdd` / `ArmyUnitAdd` — `{unit_id, amount}` (`amount` defaults to 1).
 - `AmountSet` (the `PATCH` set-amount body) — `{amount}`.
@@ -385,11 +399,14 @@ Read schemas nest the hierarchy:
   weapon_skill, strength, armor_piercing, damage}`; `Ability_Read` —
   `{id, name, description}`. (These are also the shapes embedded in `Unit_Read`.)
 - `UserUnit_Read` and `ArmyUnit_Read` both embed `Unit_Read` and add `amount`.
-- `Army_Read` is `{id, name, faction_id, subfaction_id, units: [ArmyUnit_Read]}`
-  — a full roster.
+- `Army_Read` is `{id, name, faction_id, subfaction_id, points_limit,
+  points_total, units: [ArmyUnit_Read]}` — a full roster (`points_total` is
+  computed).
 - `User_Read` is `{id, username, email}`. A user's armies and inventory are
   fetched via their own list routes, not embedded here.
 - `Shortfall_Read` is a list of `{unit: Unit_Read, in_list, owned, need}` rows.
+- `Validation_Read` is `{ok, points_total, points_limit, issues: [{kind, detail,
+  unit: Unit_Read?}]}` — the `validate` report.
 
 Error mapping at the API layer:
 
@@ -526,7 +543,9 @@ another user's armies; a non-admin can't write the catalog).
    HTTP. Also settle the upsert `POST`s' 201-vs-200 status (currently always
    201).
 8. Seed script to load the real datasheet catalog.
-9. Roster features on `Army`: points limit/total, list validation.
+9. Roster features on `Army`: `points_limit` + computed `points_total`, and
+   list validation — Tier 1 (points vs limit) and Tier 2 (faction/subfaction).
+   Datasheet count limits and detachment rules are a later follow-up.
 10. Authentication & authorization: `app/core/security.py` (bcrypt hashing +
     JWT), the `passlib`/`bcrypt`/`python-jose`/`cryptography` deps, an `/auth`
     router, a current-user dependency (own-data enforcement), and an admin role
