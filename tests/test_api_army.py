@@ -137,3 +137,85 @@ def test_shortfall(client, session, make_user, make_faction, make_unit):
     rows = resp.json()
     assert len(rows) == 1
     assert rows[0]["need"] == 2
+
+
+def test_army_read_includes_points(client, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit(faction=f, points=100)
+    army = client.post(
+        f"/users/{user.id}/armies",
+        json={"name": "A", "faction_id": str(f.id), "points_limit": 2000},
+    ).json()
+    client.post(
+        f"/users/{user.id}/armies/{army['id']}/units",
+        json={"unit_id": str(unit.id), "amount": 3},
+    )
+    resp = client.get(f"/users/{user.id}/armies/{army['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["points_limit"] == 2000
+    assert body["points_total"] == 300
+
+
+def test_create_army_with_points_limit(client, make_user, make_faction):
+    user = make_user()
+    f = make_faction()
+    resp = client.post(
+        f"/users/{user.id}/armies",
+        json={"name": "A", "faction_id": str(f.id), "points_limit": 1000},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["points_limit"] == 1000
+
+
+def test_update_army_points_limit(client, make_user, make_faction):
+    user = make_user()
+    f = make_faction()
+    army = client.post(
+        f"/users/{user.id}/armies", json={"name": "A", "faction_id": str(f.id)}
+    ).json()
+    resp = client.patch(
+        f"/users/{user.id}/armies/{army['id']}", json={"points_limit": 1500}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["points_limit"] == 1500
+
+
+def test_validate_endpoint_ok(client, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit(faction=f, points=80)
+    army = client.post(
+        f"/users/{user.id}/armies",
+        json={"name": "A", "faction_id": str(f.id), "points_limit": 2000},
+    ).json()
+    client.post(
+        f"/users/{user.id}/armies/{army['id']}/units",
+        json={"unit_id": str(unit.id), "amount": 2},
+    )
+    resp = client.get(f"/users/{user.id}/armies/{army['id']}/validate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["points_total"] == 160
+    assert body["issues"] == []
+
+
+def test_validate_endpoint_reports_over_points(client, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    unit = make_unit(faction=f, points=80)
+    army = client.post(
+        f"/users/{user.id}/armies",
+        json={"name": "A", "faction_id": str(f.id), "points_limit": 100},
+    ).json()
+    client.post(
+        f"/users/{user.id}/armies/{army['id']}/units",
+        json={"unit_id": str(unit.id), "amount": 2},
+    )
+    resp = client.get(f"/users/{user.id}/armies/{army['id']}/validate")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert any(i["kind"] == "over_points" for i in body["issues"])

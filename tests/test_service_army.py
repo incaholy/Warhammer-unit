@@ -195,3 +195,84 @@ def test_shortfall_empty_when_inventory_covers_the_list(
     session.commit()
 
     assert svc.shortfall(army.id) == []
+
+
+# ------------------------------ roster (points + validate) ------------------------------
+
+def test_create_army_with_points_limit(session, make_user, make_faction):
+    user = make_user()
+    f = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id, points_limit=2000)
+    assert army.points_limit == 2000
+
+
+def test_points_total(session, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)
+    unit = make_unit(faction=f, points=100)
+    svc.add_unit(army.id, unit.id, amount=3)
+    assert svc.points_total(army.id) == 300
+
+
+def test_validate_ok(session, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id, points_limit=2000)
+    svc.add_unit(army.id, make_unit(faction=f, points=80).id, amount=2)  # 160 pts, same faction
+    report = svc.validate(army.id)
+    assert report.ok is True
+    assert report.points_total == 160
+    assert report.issues == []
+
+
+def test_validate_over_points(session, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id, points_limit=100)
+    svc.add_unit(army.id, make_unit(faction=f, points=80).id, amount=2)  # 160 > 100
+    report = svc.validate(army.id)
+    assert report.ok is False
+    assert any(i.kind == "over_points" for i in report.issues)
+
+
+def test_validate_no_limit_ignores_points(session, make_user, make_faction, make_unit):
+    user = make_user()
+    f = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)  # no limit
+    svc.add_unit(army.id, make_unit(faction=f, points=80).id, amount=100)
+    report = svc.validate(army.id)
+    assert report.ok is True
+    assert all(i.kind != "over_points" for i in report.issues)
+
+
+def test_validate_wrong_faction(session, make_user, make_faction, make_unit):
+    user = make_user()
+    f1 = make_faction()
+    f2 = make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f1.id)
+    svc.add_unit(army.id, make_unit(faction=f2).id, amount=1)  # different faction
+    report = svc.validate(army.id)
+    assert report.ok is False
+    assert any(i.kind == "wrong_faction" for i in report.issues)
+
+
+def test_validate_wrong_subfaction(
+    session, make_user, make_faction, make_subfaction, make_unit
+):
+    user = make_user()
+    f = make_faction()
+    sub_a = make_subfaction(faction=f)
+    sub_b = make_subfaction(faction=f)
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f.id, subfaction_id=sub_a.id)
+    svc.add_unit(army.id, make_unit(faction=f, subfaction_id=sub_b.id).id, amount=1)
+    report = svc.validate(army.id)
+    assert report.ok is False
+    assert any(i.kind == "wrong_subfaction" for i in report.issues)
