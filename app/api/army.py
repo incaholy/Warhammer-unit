@@ -29,6 +29,8 @@ class Army_Read(SQLModel):
     faction_id: UUID
     subfaction_id: Optional[UUID]
     description: Optional[str]
+    points_limit: Optional[int]
+    points_total: int = 0  # computed; set by the route
     units: list[ArmyUnit_Read] = []
 
 
@@ -37,6 +39,7 @@ class Army_Create(SQLModel):
     faction_id: UUID
     subfaction_id: Optional[UUID] = None
     description: Optional[str] = None
+    points_limit: Optional[int] = None
 
 
 class Army_Update(SQLModel):
@@ -44,6 +47,7 @@ class Army_Update(SQLModel):
     faction_id: Optional[UUID] = None
     subfaction_id: Optional[UUID] = None
     description: Optional[str] = None
+    points_limit: Optional[int] = None
 
 
 class ArmyUnitAdd(SQLModel):
@@ -62,8 +66,28 @@ class Shortfall_Read(SQLModel):
     need: int
 
 
+class ValidationIssue_Read(SQLModel):
+    kind: str
+    detail: str
+    unit: Optional[Unit_Read] = None
+
+
+class Validation_Read(SQLModel):
+    ok: bool
+    points_total: int
+    points_limit: Optional[int]
+    issues: list[ValidationIssue_Read]
+
+
 def get_army_service(session: Session = Depends(get_session)) -> ArmyService:
     return ArmyService(session)
+
+
+def _army_read(service: ArmyService, army) -> Army_Read:
+    """Serialize an Army plus its computed points_total (kept out of the ORM)."""
+    data = Army_Read.model_validate(army, from_attributes=True)
+    data.points_total = service.points_total(army.id)
+    return data
 
 
 # ------------------------------ armies ------------------------------
@@ -74,27 +98,29 @@ def create_army(
     payload: Army_Create,
     service: ArmyService = Depends(get_army_service),
 ) -> Army_Read:
-    return service.create_army(
+    army = service.create_army(
         user_id=user_id,
         name=payload.name,
         faction_id=payload.faction_id,
         subfaction_id=payload.subfaction_id,
         description=payload.description,
+        points_limit=payload.points_limit,
     )
+    return _army_read(service, army)
 
 
 @router.get("", response_model=list[Army_Read])
 def list_armies(
     user_id: UUID, service: ArmyService = Depends(get_army_service)
 ) -> list[Army_Read]:
-    return service.list_armies(user_id)
+    return [_army_read(service, army) for army in service.list_armies(user_id)]
 
 
 @router.get("/{army_id}", response_model=Army_Read)
 def get_army(
     user_id: UUID, army_id: UUID, service: ArmyService = Depends(get_army_service)
 ) -> Army_Read:
-    return service.get_army(army_id)
+    return _army_read(service, service.get_army(army_id))
 
 
 @router.patch("/{army_id}", response_model=Army_Read)
@@ -104,7 +130,8 @@ def update_army(
     payload: Army_Update,
     service: ArmyService = Depends(get_army_service),
 ) -> Army_Read:
-    return service.update_army(army_id, **payload.model_dump(exclude_unset=True))
+    army = service.update_army(army_id, **payload.model_dump(exclude_unset=True))
+    return _army_read(service, army)
 
 
 @router.delete("/{army_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -120,6 +147,13 @@ def shortfall(
     user_id: UUID, army_id: UUID, service: ArmyService = Depends(get_army_service)
 ) -> list[Shortfall_Read]:
     return service.shortfall(army_id)
+
+
+@router.get("/{army_id}/validate", response_model=Validation_Read)
+def validate(
+    user_id: UUID, army_id: UUID, service: ArmyService = Depends(get_army_service)
+) -> Validation_Read:
+    return service.validate(army_id)
 
 
 # -------------------------- units in an army --------------------------
