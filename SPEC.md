@@ -462,8 +462,8 @@ placeholder.)
 **Dependencies to add:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
 
 **When auth lands:**
-- Add an `/auth` router (register → hash the password; login → verify and return
-  a JWT).
+- Add an `/auth` router: `register` (create a user, hashing the password) and
+  `login` (verify username/email + password, return a JWT).
 - Add a "current user" dependency that decodes the JWT and replaces the
   `user_id` path param on the user routes — the army/inventory logic itself
   doesn't change.
@@ -473,7 +473,9 @@ placeholder.)
   inventory; the current-user dependency, not a path param, decides whose data
   is touched.
 - **Admin role** — catalog writes (`POST/PATCH/DELETE /units`, `/factions`,
-  etc.) require an admin; see "Populating the catalog."
+  `/weapons`, `/abilities`) require an admin. Admin status is a new
+  `User.is_admin` boolean (default `false`) — a model change + migration —
+  enforced by an `admin`-required dependency. See "Populating the catalog."
 
 ## Testing
 
