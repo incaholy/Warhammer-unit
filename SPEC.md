@@ -464,14 +464,20 @@ placeholder.)
 **When auth lands:**
 - Add an `/auth` router: `register` (create a user, hashing the password) and
   `login` (verify username/email + password, return a JWT).
-- Add a "current user" dependency that decodes the JWT and replaces the
-  `user_id` path param on the user routes — the army/inventory logic itself
+- Add a `get_current_user` dependency that decodes the JWT into the `User`.
+  The user-scoped routes then drop their `/users/{user_id}` prefix and become
+  `/me/...` (Option A) — `/me/inventory` and `/me/armies/...` — taking the id
+  from the token, not the path. `POST /users` becomes `POST /auth/register` and
+  `GET /users/{user_id}` becomes `GET /me`. The service/army logic itself
   doesn't change.
 
 **Authorization** (distinct from authentication):
 - **Own-data only** — a user may read/write only *their own* armies and
   inventory; the current-user dependency, not a path param, decides whose data
-  is touched.
+  is touched. Inventory is fully scoped by the token (`/me/inventory`). The
+  nested `{army_id}` routes use a `get_owned_army` dependency that loads the army
+  and returns **404** if it isn't the current user's — so a stranger's `army_id`
+  reveals nothing (404 hides existence rather than 403).
 - **Admin role** — catalog writes (`POST/PATCH/DELETE /units`, `/factions`,
   `/weapons`, `/abilities`) require an admin. Admin status is a new
   `User.is_admin` boolean (default `false`) — a model change + migration —
