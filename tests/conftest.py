@@ -17,6 +17,7 @@ from sqlmodel import Session, SQLModel, create_engine
 # Importing the models registers every table on SQLModel.metadata.
 from app.core.db.connection import get_session
 from app.core.db.models import Army, Faction, Subfaction, Unit, User
+from app.core.security import create_access_token
 from app.main import app
 
 # Unique-ish suffixes for fields with UNIQUE constraints (username, email,
@@ -59,6 +60,25 @@ def client_fixture(session):
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(name="auth_client")
+def auth_client_fixture(client, make_user):
+    """A TestClient authenticated as a fresh non-admin user; the user is exposed
+    as `auth_client.user`."""
+    user = make_user()
+    client.headers["Authorization"] = f"Bearer {create_access_token(str(user.id))}"
+    client.user = user
+    return client
+
+
+@pytest.fixture(name="admin_client")
+def admin_client_fixture(client, make_user):
+    """A TestClient authenticated as an admin user (for catalog-write tests)."""
+    user = make_user(is_admin=True)
+    client.headers["Authorization"] = f"Bearer {create_access_token(str(user.id))}"
+    client.user = user
+    return client
 
 
 # --------------------------- object factories ---------------------------

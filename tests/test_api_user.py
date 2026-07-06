@@ -1,48 +1,15 @@
-"""API tests for the users router (via TestClient)."""
-
-import uuid
+"""API tests for the users router (GET /me)."""
 
 
-def test_create_user(client):
-    resp = client.post(
-        "/users",
-        json={"username": "max", "email": "max@test.io", "password_hash": "h"},
-    )
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["username"] == "max"
-    assert body["email"] == "max@test.io"
-    assert "id" in body
-    assert "password_hash" not in body  # internal field not exposed
-
-
-def test_get_user(client):
-    created = client.post(
-        "/users",
-        json={"username": "max", "email": "max@test.io", "password_hash": "h"},
-    ).json()
-    resp = client.get(f"/users/{created['id']}")
+def test_get_me(auth_client):
+    resp = auth_client.get("/me")
     assert resp.status_code == 200
-    assert resp.json()["id"] == created["id"]
+    body = resp.json()
+    assert body["id"] == str(auth_client.user.id)
+    assert body["username"] == auth_client.user.username
+    assert "password_hash" not in body
 
 
-def test_get_user_missing_returns_404(client):
-    resp = client.get(f"/users/{uuid.uuid4()}")
-    assert resp.status_code == 404
-
-
-def test_duplicate_username_returns_400(client):
-    client.post(
-        "/users",
-        json={"username": "dup", "email": "a@test.io", "password_hash": "h"},
-    )
-    resp = client.post(
-        "/users",
-        json={"username": "dup", "email": "b@test.io", "password_hash": "h"},
-    )
-    assert resp.status_code == 400
-
-
-def test_invalid_body_returns_422(client):
-    resp = client.post("/users", json={"username": "onlyname"})
-    assert resp.status_code == 422
+def test_me_requires_auth(client):
+    resp = client.get("/me")  # no token
+    assert resp.status_code == 401
