@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.army import router as army_router
+from app.api.auth import router as auth_router
 from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
 from app.api.unit import router as unit_router
@@ -46,6 +47,7 @@ def health() -> dict[str, str]:
 
 # --- routers ---
 
+app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(unit_router)
 app.include_router(faction_router)
