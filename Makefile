@@ -9,6 +9,7 @@ PYTHON := $(PYENV) exec python
 PIP := $(PYENV) exec pip
 ALEMBIC := $(PYENV) exec alembic
 PYTEST := $(PYENV) exec pytest
+UVICORN := $(PYENV) exec uvicorn
 PSQL ?= psql
 
 # ---- Database URL + its parsed parts ----
@@ -26,7 +27,11 @@ DB_SUPERUSER ?= $(shell whoami)
 DB_SUPERDB ?= postgres
 DB_SUPERPASS ?=
 
-.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh test
+# ---- App server (for `make run`) ----
+APP_HOST ?= 127.0.0.1
+APP_PORT ?= 8000
+
+.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -71,6 +76,9 @@ migrate-fresh: check-db-url ## Drop, recreate, and re-migrate the DB (destructiv
 		-c "DROP DATABASE IF EXISTS $(DB_NAME);"
 	@$(MAKE) db-setup
 	@$(MAKE) migrate
+
+run: ## Run the FastAPI app locally with auto-reload.
+	@$(UVICORN) app.main:app --reload --host $(APP_HOST) --port $(APP_PORT)
 
 test: ## Run the test suite.
 	@$(PYTEST) tests/ -v
