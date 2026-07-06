@@ -190,6 +190,7 @@ class User(TimestampMixin, table=True):
     username: str = Field(unique=True, index=True, max_length=64)
     email: str = Field(unique=True, index=True, max_length=255)
     password_hash: str
+    is_admin: bool = Field(default=False)
 
     armies: list["Army"] = Relationship(back_populates="owner")
     inventory: list["UserUnit"] = Relationship(back_populates="owner")
