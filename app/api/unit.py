@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.core.db.connection import get_session
+from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(prefix="/units", tags=["units"])
@@ -95,7 +96,12 @@ def get_unit_service(session: Session = Depends(get_session)) -> UnitService:
     return UnitService(session)
 
 
-@router.post("", response_model=Unit_Read, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=Unit_Read,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_admin)],
+)
 def create_unit(
     payload: Unit_Create, service: UnitService = Depends(get_unit_service)
 ) -> Unit_Read:
@@ -114,7 +120,11 @@ def get_unit(
     return service.get_unit(unit_id)
 
 
-@router.patch("/{unit_id}", response_model=Unit_Read)
+@router.patch(
+    "/{unit_id}",
+    response_model=Unit_Read,
+    dependencies=[Depends(get_current_admin)],
+)
 def update_unit(
     unit_id: UUID,
     payload: Unit_Update,
@@ -123,7 +133,11 @@ def update_unit(
     return service.update_unit(unit_id, **payload.model_dump(exclude_unset=True))
 
 
-@router.delete("/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{unit_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
 def delete_unit(
     unit_id: UUID, service: UnitService = Depends(get_unit_service)
 ) -> Response:
@@ -131,7 +145,11 @@ def delete_unit(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{unit_id}/weapons", response_model=Unit_Read)
+@router.post(
+    "/{unit_id}/weapons",
+    response_model=Unit_Read,
+    dependencies=[Depends(get_current_admin)],
+)
 def link_weapon(
     unit_id: UUID,
     payload: WeaponLink,
@@ -140,7 +158,11 @@ def link_weapon(
     return service.link_weapon(unit_id, payload.weapon_id)
 
 
-@router.post("/{unit_id}/abilities", response_model=Unit_Read)
+@router.post(
+    "/{unit_id}/abilities",
+    response_model=Unit_Read,
+    dependencies=[Depends(get_current_admin)],
+)
 def link_ability(
     unit_id: UUID,
     payload: AbilityLink,
