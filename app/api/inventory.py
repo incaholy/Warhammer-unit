@@ -1,7 +1,7 @@
-"""Inventory router — backed by InventoryService.
+"""Inventory router — the current user's owned units (`/me/inventory`).
 
-Nested under a user: `/users/{user_id}/inventory`. (Once auth lands, `user_id`
-becomes the current-user dependency; see SPEC.md.)
+Identity comes from the JWT (`get_current_user`), not a path param, so a user
+can only ever touch their own inventory.
 """
 
 from uuid import UUID
@@ -11,9 +11,11 @@ from sqlmodel import Session, SQLModel
 
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
+from app.core.db.models import User
+from app.core.security import get_current_user
 from app.core.services.service_inventory import InventoryService
 
-router = APIRouter(prefix="/users/{user_id}/inventory", tags=["inventory"])
+router = APIRouter(prefix="/me/inventory", tags=["inventory"])
 
 
 class UserUnit_Read(SQLModel):
@@ -38,23 +40,25 @@ def get_inventory_service(
 
 @router.get("", response_model=list[UserUnit_Read])
 def list_inventory(
-    user_id: UUID, service: InventoryService = Depends(get_inventory_service)
+    current_user: User = Depends(get_current_user),
+    service: InventoryService = Depends(get_inventory_service),
 ) -> list[UserUnit_Read]:
-    return service.list_inventory(user_id)
+    return service.list_inventory(current_user.id)
 
 
 @router.post("", response_model=UserUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
-    user_id: UUID,
     payload: InventoryAdd,
     response: Response,
+    current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
     # Upsert: 201 when creating the row, 200 when incrementing an existing one.
     existed = any(
-        e.unit_id == payload.unit_id for e in service.list_inventory(user_id)
+        e.unit_id == payload.unit_id
+        for e in service.list_inventory(current_user.id)
     )
-    entry = service.add_unit(user_id, payload.unit_id, payload.amount)
+    entry = service.add_unit(current_user.id, payload.unit_id, payload.amount)
     if existed:
         response.status_code = status.HTTP_200_OK
     return entry
@@ -62,19 +66,19 @@ def add_unit(
 
 @router.patch("/{unit_id}", response_model=UserUnit_Read)
 def set_amount(
-    user_id: UUID,
     unit_id: UUID,
     payload: AmountSet,
+    current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
-    return service.set_amount(user_id, unit_id, payload.amount)
+    return service.set_amount(current_user.id, unit_id, payload.amount)
 
 
 @router.delete("/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_unit(
-    user_id: UUID,
     unit_id: UUID,
+    current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> Response:
-    service.remove_unit(user_id, unit_id)
+    service.remove_unit(current_user.id, unit_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
