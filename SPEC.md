@@ -82,7 +82,9 @@ requirements.txt, requirements-dev.txt
 
 Python 3.12 in a pyenv virtualenv named in `.python-version`
 (`warhammer-unit-env`). `DATABASE_URL` must be set — it lives in `.env`, which is
-gitignored. Common tasks run through the Makefile:
+gitignored; auth also reads `SECRET_KEY` (JWT signing — set a real one in
+production) and optionally `ACCESS_TOKEN_EXPIRE_MINUTES` from there. Common tasks
+run through the Makefile:
 
 | Command | What it does |
 |---|---|
@@ -318,11 +320,12 @@ Router modules (each mounted in `app/main.py` with `app.include_router(...)`):
 
 | Module | Backing service | Resource |
 |---|---|---|
+| `app/api/auth.py` | `AuthService` | register / login (public) |
 | `app/api/unit.py` | `UnitService` | catalog units |
 | `app/api/faction.py` | `UnitService` (catalog) | catalog factions, subfactions, weapons & abilities |
-| `app/api/user.py` | `UserService` | users |
-| `app/api/inventory.py` | `InventoryService` | a user's inventory (`user_unit`) |
-| `app/api/army.py` | `ArmyService` | a user's armies and their units |
+| `app/api/user.py` | — (current user via JWT) | `GET /me` |
+| `app/api/inventory.py` | `InventoryService` | the current user's inventory (`/me/inventory`) |
+| `app/api/army.py` | `ArmyService` | the current user's armies (`/me/armies`) |
 
 Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
 → **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,
@@ -332,8 +335,13 @@ an existing one.
 Routes below are implemented. The **Backing method** column names the service
 call each route makes.
 
-**Catalog** — reads are public; writes are admin/seed only (see "Populating the
-catalog"), not part of the normal user flow.
+Authentication: `/auth/register` and `/auth/login` are public; every `/me/*`
+route requires a Bearer JWT (**401** without) and only touches the caller's own
+data — identity comes from the token, never a path param. Catalog **reads** are
+public; catalog **writes** require an admin (**403** otherwise).
+
+**Catalog** — reads are public; writes require an **admin** (see
+"Authentication & authorization" and "Populating the catalog").
 
 | Method | Path | Action | Backing method | Status |
 |---|---|---|---|---|
@@ -349,28 +357,29 @@ catalog"), not part of the normal user flow.
 | POST | `/weapons` | create a weapon (admin/seed) | `UnitService.create_weapon` | done |
 | POST | `/abilities` | create an ability (admin/seed) | `UnitService.create_ability` | done |
 
-**Users, inventory & armies** — the user-facing flow. Routes nest under the
-user: the inventory and armies belong to a user, and a unit entry belongs to the
-inventory or to an army.
+**Auth & the current user's data** — `/auth/*` is public; every `/me/*` route
+requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
+→ 404 via `get_owned_army`).
 
 | Method | Path | Action | Backing method | Status |
 |---|---|---|---|---|
-| POST | `/users` | create a user | `UserService.create_user` | done |
-| GET | `/users/{user_id}` | get a user | `UserService.get_user` | done |
-| GET | `/users/{user_id}/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | done |
-| POST | `/users/{user_id}/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | done |
-| PATCH | `/users/{user_id}/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | done |
-| DELETE | `/users/{user_id}/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | done |
-| POST | `/users/{user_id}/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | done |
-| GET | `/users/{user_id}/armies` | list the user's armies | `ArmyService.list_armies` | done |
-| GET | `/users/{user_id}/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | `ArmyService.get_army` + `list_army_units` | done |
-| PATCH | `/users/{user_id}/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` | done |
-| DELETE | `/users/{user_id}/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
-| GET | `/users/{user_id}/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
-| GET | `/users/{user_id}/armies/{army_id}/validate` | check the list's legality (points vs limit, faction/subfaction) | `ArmyService.validate` | done |
-| POST | `/users/{user_id}/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
-| PATCH | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
-| DELETE | `/users/{user_id}/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
+| POST | `/auth/register` | register (public) — body `Register_Create` | `AuthService.register` | done |
+| POST | `/auth/login` | login (public, OAuth2 form) — returns a `Token` | `AuthService.authenticate` | done |
+| GET | `/me` | the current user | `get_current_user` | done |
+| GET | `/me/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | done |
+| POST | `/me/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | done |
+| PATCH | `/me/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | done |
+| DELETE | `/me/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | done |
+| POST | `/me/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | done |
+| GET | `/me/armies` | list the user's armies | `ArmyService.list_armies` | done |
+| GET | `/me/armies/{army_id}` | get one army with its units + amounts (nested `Unit_Read` + `amount`) | `get_owned_army` + `points_total` | done |
+| PATCH | `/me/armies/{army_id}` | rename/update an army — body `Army_Update` | `ArmyService.update_army` | done |
+| DELETE | `/me/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
+| GET | `/me/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
+| GET | `/me/armies/{army_id}/validate` | check the list's legality (points vs limit, faction/subfaction) | `ArmyService.validate` | done |
+| POST | `/me/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
+| PATCH | `/me/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
+| DELETE | `/me/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
 
 Request schemas (`*_Create` plus the small add/patch bodies):
 - `Unit_Create` — `{faction_id, unit_name, movement, toughness, armor_save,
@@ -380,10 +389,10 @@ Request schemas (`*_Create` plus the small add/patch bodies):
 - `Weapon_Create` — `{name, category, attacks, weapon_skill, strength,
   armor_piercing, damage, range_inches?, keywords?}`; `Ability_Create` —
   `{name, description}`.
-- `User_Create` — `{username, email, password_hash}`. The `password_hash` field
-  is a temporary placeholder: once auth lands this becomes `{username, email,
-  password}` and the server hashes it, never accepting a client-supplied hash
-  (see "Authentication & authorization").
+- `Register_Create` — `{username, email, password}` (the `/auth/register` body;
+  the server hashes the password, never accepting a client-supplied hash). Login
+  uses the OAuth2 password form and returns a `Token` — `{access_token,
+  token_type}`.
 - `Army_Create` — `{name, faction_id, subfaction_id?, description?, points_limit?}`;
   `Army_Update` — the same fields, all optional.
 - `InventoryAdd` / `ArmyUnitAdd` — `{unit_id, amount}` (`amount` defaults to 1).
@@ -443,33 +452,27 @@ automatically — which is the desired behaviour. ("Stats as of when I added it"
 would need a `version` on `Unit` plus a version stored on the entry; out of
 scope for now.)
 
-## Authentication & authorization (future)
+## Authentication & authorization
 
-The schema is auth-ready: a real `users` table with a `password_hash` column,
-and FK integrity from `armies` / `user_unit` down to the user. For now endpoints
-take `user_id` as a path param and there is no login.
+Implemented. Users register and log in for a JWT; `/me/*` routes are token-scoped
+to the caller, and catalog writes require an admin. The pieces:
 
-**Passwords.** Hashing lives in a dedicated `app/core/security.py`:
-`hash_password` / `verify_password` using **bcrypt via `passlib`**. The server
-always hashes a **raw password** — a client-supplied hash is never accepted or
-stored. (Until auth lands, `User_Create.password_hash` is a temporary
-placeholder.)
+**Passwords.** Hashing lives in `app/core/security.py`: `hash_password` /
+`verify_password` using **bcrypt via `passlib`**. The server always hashes a
+**raw password** — a client-supplied hash is never accepted or stored.
 
 **Tokens.** Login returns a **JWT** (`create_access_token` / decode, also in
 `security.py`): subject = the user's id, algorithm **HS256**, signed with a
 `SECRET_KEY` env var and expiring after `ACCESS_TOKEN_EXPIRE_MINUTES`.
 
-**Dependencies to add:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
+**Dependencies:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
 
-**When auth lands:**
-- Add an `/auth` router: `register` (create a user, hashing the password) and
-  `login` (verify username/email + password, return a JWT).
-- Add a `get_current_user` dependency that decodes the JWT into the `User`.
-  The user-scoped routes then drop their `/users/{user_id}` prefix and become
-  `/me/...` (Option A) — `/me/inventory` and `/me/armies/...` — taking the id
-  from the token, not the path. `POST /users` becomes `POST /auth/register` and
-  `GET /users/{user_id}` becomes `GET /me`. The service/army logic itself
-  doesn't change.
+**Routing.**
+- The `/auth` router: `register` (creates a user, hashing the password) and
+  `login` (verifies username/email + password, returns a JWT).
+- A `get_current_user` dependency decodes the JWT into the `User`. The
+  user-scoped routes are `/me/...` (Option A) — `/me`, `/me/inventory`,
+  `/me/armies/...` — taking the id from the token, not the path.
 
 **Authorization** (distinct from authentication):
 - **Own-data only** — a user may read/write only *their own* armies and
@@ -479,9 +482,12 @@ placeholder.)
   and returns **404** if it isn't the current user's — so a stranger's `army_id`
   reveals nothing (404 hides existence rather than 403).
 - **Admin role** — catalog writes (`POST/PATCH/DELETE /units`, `/factions`,
-  `/weapons`, `/abilities`) require an admin. Admin status is a new
-  `User.is_admin` boolean (default `false`) — a model change + migration —
-  enforced by an `admin`-required dependency. See "Populating the catalog."
+  `/subfactions`, `/weapons`, `/abilities`) require an admin, enforced by the
+  `get_current_admin` dependency (**403** otherwise). Admin status is the
+  `User.is_admin` boolean (default `false`). Because it defaults false, the
+  **first admin** is made out of band — a manual `UPDATE users SET
+  is_admin = true WHERE username = '…'` (a `make` helper could wrap this). See
+  "Populating the catalog."
 
 ## Testing
 
@@ -546,15 +552,14 @@ another user's armies; a non-admin can't write the catalog).
    added.
 6. ✓ API tests with FastAPI's `TestClient` (dependency-overridden session), one
    file per router.
-7. Add `POST /weapons` and `POST /abilities` routes (backed by
-   `create_weapon`/`create_ability`) so the full catalog is enterable over
-   HTTP. Also settle the upsert `POST`s' 201-vs-200 status (currently always
-   201).
-8. Seed script to load the real datasheet catalog.
-9. Roster features on `Army`: `points_limit` + computed `points_total`, and
+7. ✓ `POST /weapons` and `POST /abilities` routes (the catalog is fully
+   enterable over HTTP), and the upsert `POST`s return 201 on create / 200 on
+   increment.
+8. Seed script to bulk-load the real datasheet catalog — deferred; the catalog
+   is fully enterable via the API in the meantime.
+9. ✓ Roster features on `Army`: `points_limit` + computed `points_total`, and
    list validation — Tier 1 (points vs limit) and Tier 2 (faction/subfaction).
-   Datasheet count limits and detachment rules are a later follow-up.
-10. Authentication & authorization: `app/core/security.py` (bcrypt hashing +
-    JWT), the `passlib`/`bcrypt`/`python-jose`/`cryptography` deps, an `/auth`
-    router, a current-user dependency (own-data enforcement), and an admin role
-    for catalog writes.
+   Datasheet count limits and detachment rules remain a later follow-up.
+10. ✓ Authentication & authorization: `app/core/security.py` (bcrypt + JWT), the
+    auth deps, an `/auth` router (register/login), `/me/*` own-data routes with
+    `get_owned_army` ownership, and admin-gated catalog writes (`User.is_admin`).
