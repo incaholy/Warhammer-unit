@@ -12,6 +12,7 @@ from sqlmodel import Session, SQLModel
 
 from app.api.unit import Ability_Read, Weapon_Read
 from app.core.db.connection import get_session
+from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(tags=["catalog"])
@@ -66,7 +67,10 @@ def list_factions(
 
 
 @router.post(
-    "/factions", response_model=Faction_Read, status_code=status.HTTP_201_CREATED
+    "/factions",
+    response_model=Faction_Read,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_admin)],
 )
 def create_faction(
     payload: Faction_Create, service: UnitService = Depends(get_catalog_service)
@@ -78,6 +82,7 @@ def create_faction(
     "/subfactions",
     response_model=Subfaction_Read,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_admin)],
 )
 def create_subfaction(
     payload: Subfaction_Create,
@@ -87,7 +92,10 @@ def create_subfaction(
 
 
 @router.post(
-    "/weapons", response_model=Weapon_Read, status_code=status.HTTP_201_CREATED
+    "/weapons",
+    response_model=Weapon_Read,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_admin)],
 )
 def create_weapon(
     payload: Weapon_Create, service: UnitService = Depends(get_catalog_service)
@@ -96,7 +104,10 @@ def create_weapon(
 
 
 @router.post(
-    "/abilities", response_model=Ability_Read, status_code=status.HTTP_201_CREATED
+    "/abilities",
+    response_model=Ability_Read,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(get_current_admin)],
 )
 def create_ability(
     payload: Ability_Create, service: UnitService = Depends(get_catalog_service)
