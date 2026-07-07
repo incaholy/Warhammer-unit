@@ -247,7 +247,10 @@ exposes CRUD methods.
   subfaction_id=None, keywords=None)` — `LookupError` if the faction (or the
   given subfaction) doesn't exist.
 - `get_unit(unit_id)` — `LookupError` if not found.
-- `list_units()` — all catalog units (filter/limit/offset later).
+- `list_units()` — all catalog units. Filtering + pagination is planned but not
+  yet built: the target signature is `list_units(faction_id=None,
+  subfaction_id=None, q=None, limit=50, offset=0)` (`q` = case-insensitive
+  name search); see MVP.md for the per-layer breakdown.
 - `update_unit(unit_id, **fields)` — partial update; `ValueError` on an unknown
   field, `LookupError` if the unit (or a new faction/subfaction) doesn't exist.
 - `delete_unit(unit_id)` — `LookupError` if not found.
@@ -347,7 +350,7 @@ public; catalog **writes** require an admin (**403** otherwise).
 |---|---|---|---|---|
 | POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | done |
 | GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | done |
-| GET | `/units` | list units; query params for faction filter, limit, offset | `UnitService.list_units` | done |
+| GET | `/units` | list units; faction/subfaction filter + `q` name-search + limit/offset are planned (currently returns all) | `UnitService.list_units` | partial — filters/pagination TODO |
 | PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` | done |
 | DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` | done |
 | POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` | done |
