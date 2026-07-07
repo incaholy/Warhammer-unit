@@ -69,8 +69,9 @@ admin-curated.
 ### To build 🔨 (backlog)
 - [ ] **Seed script** to bulk-load a real datasheet catalog (`scripts/seed_datasheets.py`) — *deferred; the catalog is fully enterable via the admin API in the meantime.*
 - [ ] **First-admin bootstrap helper** — a `make`/CLI target to set `is_admin`, instead of a manual `UPDATE users SET is_admin = true`.
-- [ ] **Catalog listing filters + pagination** — `GET /units` should narrow and
-  page results instead of returning the entire catalog. What it needs, by layer:
+- [x] **Catalog listing filters + pagination** — `GET /units` narrows and pages
+  results instead of returning the entire catalog. *(Built: bare-list response
+  kept; envelope with `total` deferred — see note at end of block.)* By layer:
   - **Service** — widen `UnitService.list_units()` from no-args to
     `list_units(faction_id=None, subfaction_id=None, q=None, limit=50, offset=0)`.
     Build the `select(Unit)` conditionally: `.where(Unit.faction_id == faction_id)`
@@ -106,7 +107,7 @@ admin-curated.
 - [ ] Rate limiting on `/auth/*` (brute-force protection).
 
 ## To fix 🐞
-- [ ] `GET /units` advertises `faction filter, limit, offset` in SPEC/route text, but `UnitService.list_units()` takes no args and returns everything — **implement the filtering or correct the description.**
+- [x] ~~`GET /units` advertises `faction filter, limit, offset` but `list_units()` takes no args~~ — **fixed**: filtering + pagination implemented with `faction_id`/`subfaction_id`/`q`/`limit`/`offset`, SPEC synced, 5 tests added.
 - [ ] SPEC's Service-layer table lists four services and omits `AuthService` — doc drift; add it.
 - [ ] `passlib` 1.7.4 emits a `crypt` `DeprecationWarning` (removed in Python 3.13) — harmless now; revisit on a passlib upgrade.
 

@@ -39,6 +39,53 @@ def test_list_units_is_public(client, make_unit):
     assert len(resp.json()) == 2
 
 
+def test_list_units_filters_by_faction(client, make_faction, make_unit):
+    f1, f2 = make_faction(), make_faction()
+    make_unit(faction=f1)
+    make_unit(faction=f1)
+    make_unit(faction=f2)
+    resp = client.get("/units", params={"faction_id": str(f1.id)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 2
+    assert all(u["faction_id"] == str(f1.id) for u in body)
+
+
+def test_list_units_filters_by_subfaction(client, make_subfaction, make_unit):
+    sub = make_subfaction()
+    make_unit(faction=None, subfaction_id=sub.id, unit_name="Sub unit")
+    make_unit()  # different faction, no subfaction
+    resp = client.get("/units", params={"subfaction_id": str(sub.id)})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["subfaction_id"] == str(sub.id)
+
+
+def test_list_units_name_search_is_case_insensitive(client, make_unit):
+    make_unit(unit_name="Intercessor")
+    make_unit(unit_name="Terminator")
+    resp = client.get("/units", params={"q": "inter"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [u["unit_name"] for u in body] == ["Intercessor"]
+
+
+def test_list_units_paginates_in_stable_order(client, make_unit):
+    for name in ("Charlie", "Alpha", "Bravo"):  # inserted out of order
+        make_unit(unit_name=name)
+    page1 = client.get("/units", params={"limit": 2, "offset": 0}).json()
+    page2 = client.get("/units", params={"limit": 2, "offset": 2}).json()
+    assert [u["unit_name"] for u in page1] == ["Alpha", "Bravo"]
+    assert [u["unit_name"] for u in page2] == ["Charlie"]
+
+
+def test_list_units_rejects_out_of_range_limit(client):
+    assert client.get("/units", params={"limit": 0}).status_code == 422
+    assert client.get("/units", params={"limit": 201}).status_code == 422
+    assert client.get("/units", params={"offset": -1}).status_code == 422
+
+
 def test_create_unit_requires_admin(auth_client, make_faction):
     f = make_faction()
     resp = auth_client.post("/units", json=_unit_payload(f.id))  # non-admin

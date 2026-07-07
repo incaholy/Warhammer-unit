@@ -7,7 +7,7 @@ Catalog writes are admin/seed in principle; gating is deferred until auth
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.core.db.connection import get_session
@@ -109,8 +109,21 @@ def create_unit(
 
 
 @router.get("", response_model=list[Unit_Read])
-def list_units(service: UnitService = Depends(get_unit_service)) -> list[Unit_Read]:
-    return service.list_units()
+def list_units(
+    faction_id: Optional[UUID] = None,
+    subfaction_id: Optional[UUID] = None,
+    q: Optional[str] = Query(default=None, description="case-insensitive name search"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    service: UnitService = Depends(get_unit_service),
+) -> list[Unit_Read]:
+    return service.list_units(
+        faction_id=faction_id,
+        subfaction_id=subfaction_id,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{unit_id}", response_model=Unit_Read)

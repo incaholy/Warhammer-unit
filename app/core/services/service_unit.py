@@ -67,8 +67,29 @@ class UnitService:
             raise LookupError(f"unit {unit_id} not found")
         return unit
 
-    def list_units(self) -> list[Unit]:
-        return list(self.session.exec(select(Unit)).all())
+    def list_units(
+        self,
+        faction_id: Optional[UUID] = None,
+        subfaction_id: Optional[UUID] = None,
+        q: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Unit]:
+        """Catalog units, optionally filtered and paged.
+
+        `faction_id`/`subfaction_id` are exact matches; `q` is a
+        case-insensitive substring match on the unit name. Results are ordered
+        by name so `offset`/`limit` paging is stable.
+        """
+        statement = select(Unit)
+        if faction_id is not None:
+            statement = statement.where(Unit.faction_id == faction_id)
+        if subfaction_id is not None:
+            statement = statement.where(Unit.subfaction_id == subfaction_id)
+        if q:
+            statement = statement.where(Unit.unit_name.ilike(f"%{q}%"))
+        statement = statement.order_by(Unit.unit_name).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
 
     def update_unit(self, unit_id: UUID, **fields) -> Unit:
         unit = self.get_unit(unit_id)
