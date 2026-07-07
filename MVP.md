@@ -30,6 +30,7 @@ admin-curated.
 | API — FastAPI routers + request/response schemas | `app/api/` | ✅ |
 | Security — hashing, JWT, current-user/admin deps | `app/core/security.py` | ✅ |
 | Dev tooling — Makefile, tests, `.env.example` | repo root | ✅ |
+| Deployment — `Dockerfile` + `docker-compose.yml` (API + Postgres) | repo root | 🔨 planned |
 
 ## Services
 
@@ -99,6 +100,29 @@ admin-curated.
     shape. (Resolves the *To fix* mismatch below.)
 - [ ] **Validation Tier 3** — per-datasheet count limits ("0-1 per army", "max 3", epic hero once). Needs new `Unit` fields (`max_per_army`, `is_epic_hero`) + a migration.
 - [ ] **Validation Tier 4** — detachments / force-org rules (larger; edition-specific).
+- [ ] **Deployment & containerization** — make the app run anywhere, not just on
+  a dev laptop. *(Full spec: SPEC.md → "Deployment & containerization.")*
+  - **`Dockerfile`** — `python:3.12-slim`, install requirements, run
+    `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+  - **`docker-compose.yml`** — `api` + `db` (`postgres:16`, named volume,
+    healthcheck); `DATABASE_URL` targets the `db` service, not `localhost`.
+  - **`.dockerignore`** — keep caches/`.env` out of the build context.
+  - **Migrations on start** — run `alembic upgrade head` before uvicorn serves.
+  - **Makefile** — add `docker-build` / `docker-up` / `docker-down` targets.
+- [ ] **Custom service errors** — replace the builtin `LookupError`/`ValueError`
+  with a typed hierarchy so errors carry a **field** and the right status.
+  *(Full spec: SPEC.md → "Custom service errors.")*
+  - **`app/core/services/errors.py`** — shared `NotFoundError(LookupError)` (404),
+    `ConflictError(ValueError)` (409, duplicates), `ForbiddenError(Exception)`
+    (403); plus per-service `ValueError` subclasses `UserValidationError`,
+    `UnitValidationError`, `ArmyValidationError`, `InventoryValidationError`,
+    each built as `(field, message)`.
+  - **Backward-compatible** — every custom error subclasses the builtin it
+    replaces, so the current `main.py` handlers keep working; new handlers just
+    add the field + 409/422. Body stays `{"detail", "field"?}` — **no** `{data,
+    meta}` envelope.
+  - **Migration** — per service, swap `raise LookupError` → `NotFoundError` and
+    `raise ValueError` → the typed `*ValidationError` / `ConflictError`.
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend scope; tracked here for the product view.
 
 ### To add / harden ⚙️ (config & ops)

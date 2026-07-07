@@ -439,6 +439,59 @@ locally with:
 uvicorn app.main:app --reload
 ```
 
+## Custom service errors
+
+**Planned — not yet built.** Today services raise builtin exceptions —
+`LookupError` for not-found (→ 404) and `ValueError`/`TypeError` for bad input
+(→ 400) — which the API maps in `app/main.py` (see "Error mapping at the API
+layer"). That's simple but loses two things: **which field** was bad, and the
+difference between a **duplicate** (should be 409) and other bad input (400).
+This section specs a small typed-exception hierarchy in
+`app/core/services/errors.py`, mirroring `attention-api`. It is intentionally
+**backward-compatible**: each custom error subclasses the builtin it replaces, so
+the existing handlers keep mapping it correctly during the migration.
+
+Two families.
+
+**Shared errors** — cross-cutting, carry `message`, an optional `field`, and a
+`status_code`:
+
+- `NotFoundError(LookupError)` — a row doesn't exist. **→ 404** (already, via the
+  existing `LookupError` handler, since it subclasses it).
+- `ConflictError(ValueError)` — a uniqueness clash: duplicate `username`/`email`,
+  duplicate faction name, duplicate subfaction-for-faction. Wants **→ 409**; needs
+  its own handler to get 409, else falls back to 400 (it's a `ValueError`).
+- `ForbiddenError(Exception)` — an ownership/permission violation. **→ 403** via a
+  dedicated handler. (Ownership on `/me/armies/{id}` stays a **404** through
+  `get_owned_army` to hide existence; `ForbiddenError` is for the cases where
+  revealing "exists but not yours" is acceptable.)
+
+**Per-service validation errors** — one `ValueError` subclass per service,
+constructed as `(field, message)`, rendering `"{field}: {message}"` and exposing
+`.field`. Being `ValueError`s, they still map to **400** unhandled; a dedicated
+handler can promote them to **422** with the field attached:
+
+- `UserValidationError` — registration/account rules (e.g.
+  `UserValidationError("username", "is already taken")`, empty/oversized fields).
+- `UnitValidationError` — catalog input (unknown updatable field, `category` not
+  `range`/`melee`).
+- `ArmyValidationError` — roster input (`amount < 1` on set, `points_limit < 0`).
+- `InventoryValidationError` — inventory input (`amount < 1` on set).
+
+**API layer.** Exception handlers (in `app/main.py`, or a new `app/api/errors.py`
+if they grow) catch the base types and build the response from
+`.status_code`/`.field`/`.message`. The body stays close to FastAPI's current
+default — `{"detail": message, "field": field?}` — i.e. **no `{data, meta}`
+envelope** (that was intentionally deferred). Because `NotFoundError ⊂ LookupError`
+and every `*ValidationError ⊂ ValueError`, the current handlers keep working
+before the new ones land, so the migration is incremental.
+
+**Migration.** Per service, swap `raise LookupError(...)` → `raise
+NotFoundError(...)`, and each `raise ValueError("...")` → the typed
+`*ValidationError(field, msg)` (or `ConflictError` for duplicates). Update the
+CLAUDE.md "services raise `LookupError`/`ValueError`" convention once done, and
+extend the "Error mapping at the API layer" table with the 409/422 rows.
+
 ## Populating the catalog
 
 Users never create datasheets, so the catalog is filled out of band:
@@ -537,6 +590,51 @@ another user's armies; a non-admin can't write the catalog).
 - Run with `pytest` (or `make test`); add `--cov` for coverage (`pytest-cov`
   is installed).
 
+## Deployment & containerization
+
+**Planned — not yet built.** Today the app runs bare-metal (`make run` /
+`uvicorn app.main:app --reload`) against a locally-installed Postgres created by
+`make db-setup`. The goal of this section is a reproducible, ship-anywhere setup
+where the API and its database come up together with one command, and dev / test
+/ prod stay in parity. Mirrors the sibling `attention-api` layout.
+
+Pieces to add (all at the repo root):
+
+- **`Dockerfile`** — package the API into an image. Base `python:3.12-slim`,
+  `COPY requirements.txt` + `pip install --no-cache-dir -r requirements.txt`
+  first (so the dependency layer caches), then `COPY . .`, `EXPOSE 8000`, and
+  `CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]`.
+  Bind `0.0.0.0`, not `127.0.0.1`, so the port is reachable from outside the
+  container.
+- **`.dockerignore`** — keep the build context small and secrets out of the
+  image: exclude `.venv`/virtualenvs, `__pycache__`, `.pytest_cache`, `.git`,
+  and **`.env`** (env comes in at runtime, never baked into the image).
+- **`docker-compose.yml`** — the batteries-included local stack, two services:
+  - `db` — `postgres:16`, a named volume `postgres-data` for persistence, and
+    `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` from the environment; a
+    healthcheck (`pg_isready`) so the API can wait on it.
+  - `api` — `build: .`, `depends_on: db` (condition `service_healthy`),
+    `ports: 8000:8000`, and a `DATABASE_URL` that targets the compose DB by
+    **service name** (`postgresql+psycopg2://…@db:5432/…`), not `localhost`.
+  `make run` stays the fast bare-metal path; compose is the one-command path.
+- **`docker-compose.test.yml`** — an overlay that points the suite at a
+  throwaway Postgres (a separate `POSTGRES_DB`, no persistent volume) so
+  integration tests run against real Postgres without touching dev data. (The
+  current pytest suite uses in-memory SQLite and needs none of this; this is the
+  Postgres-parity option for later.)
+
+Cross-cutting concerns:
+
+- **Migrations** — the image must not assume the schema exists. Run
+  `alembic upgrade head` on container start (an entrypoint script, or a one-shot
+  `migrate` compose service that the `api` service waits on) **before** uvicorn
+  serves traffic. Never bake migrations into the image build.
+- **Config** — `DATABASE_URL`, `SECRET_KEY`, and `ACCESS_TOKEN_EXPIRE_MINUTES`
+  are read from the environment (compose injects them; `.env` stays gitignored
+  and out of the image). A real `SECRET_KEY` is required in any non-local run.
+- **Makefile** — add `docker-build`, `docker-up` (compose up), and `docker-down`
+  targets alongside the existing bare-metal ones.
+
 ## Roadmap
 
 1. ✓ Full schema in `models.py` (factions, subfactions, units, abilities,
@@ -566,3 +664,10 @@ another user's armies; a non-admin can't write the catalog).
 10. ✓ Authentication & authorization: `app/core/security.py` (bcrypt + JWT), the
     auth deps, an `/auth` router (register/login), `/me/*` own-data routes with
     `get_owned_army` ownership, and admin-gated catalog writes (`User.is_admin`).
+11. Deployment & containerization: `Dockerfile`, `.dockerignore`, and a
+    `docker-compose.yml` (API + Postgres) with migrations run on start — see
+    "Deployment & containerization." *(Planned.)*
+12. Custom service errors: a typed exception hierarchy in
+    `app/core/services/errors.py` (`NotFoundError`, `ConflictError`,
+    `ForbiddenError`, and per-service `*ValidationError`) replacing the builtin
+    `LookupError`/`ValueError` — see "Custom service errors." *(Planned.)*
