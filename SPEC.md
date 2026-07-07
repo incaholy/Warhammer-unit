@@ -592,13 +592,13 @@ another user's armies; a non-admin can't write the catalog).
 
 ## Deployment & containerization
 
-**Planned — not yet built.** Today the app runs bare-metal (`make run` /
-`uvicorn app.main:app --reload`) against a locally-installed Postgres created by
-`make db-setup`. The goal of this section is a reproducible, ship-anywhere setup
-where the API and its database come up together with one command, and dev / test
-/ prod stay in parity. Mirrors the sibling `attention-api` layout.
+**Implemented.** Alongside the bare-metal path (`make run` /
+`uvicorn app.main:app --reload` against a locally-installed Postgres from
+`make db-setup`), the app now ships a container stack that brings the API and its
+database up together with one command (`make docker-up`), keeping dev / test /
+prod in parity. Mirrors the sibling `attention-api` layout.
 
-Pieces to add (all at the repo root):
+Pieces (all at the repo root):
 
 - **`Dockerfile`** — package the API into an image. Base `python:3.12-slim`,
   `COPY requirements.txt` + `pip install --no-cache-dir -r requirements.txt`
@@ -625,15 +625,17 @@ Pieces to add (all at the repo root):
 
 Cross-cutting concerns:
 
-- **Migrations** — the image must not assume the schema exists. Run
-  `alembic upgrade head` on container start (an entrypoint script, or a one-shot
-  `migrate` compose service that the `api` service waits on) **before** uvicorn
-  serves traffic. Never bake migrations into the image build.
+- **Migrations** — the image ships no schema. `docker-entrypoint.sh` runs
+  `alembic upgrade head` on container start (after the `db` healthcheck passes),
+  then `exec`s the container command (uvicorn) — so the schema is current before
+  traffic is served. Migrations are never baked into the image build.
 - **Config** — `DATABASE_URL`, `SECRET_KEY`, and `ACCESS_TOKEN_EXPIRE_MINUTES`
-  are read from the environment (compose injects them; `.env` stays gitignored
-  and out of the image). A real `SECRET_KEY` is required in any non-local run.
-- **Makefile** — add `docker-build`, `docker-up` (compose up), and `docker-down`
-  targets alongside the existing bare-metal ones.
+  come from the environment (compose injects them with sensible `${VAR:-default}`
+  fallbacks; `.env` stays gitignored and out of the image via `.dockerignore`).
+  A real `SECRET_KEY` is required in any non-local run.
+- **Makefile** — `make docker-build`, `make docker-up` (build + compose up),
+  `make docker-down`, and `make docker-test` (run the suite in a container against
+  the throwaway Postgres) sit alongside the bare-metal targets.
 
 ## Roadmap
 
@@ -664,9 +666,10 @@ Cross-cutting concerns:
 10. ✓ Authentication & authorization: `app/core/security.py` (bcrypt + JWT), the
     auth deps, an `/auth` router (register/login), `/me/*` own-data routes with
     `get_owned_army` ownership, and admin-gated catalog writes (`User.is_admin`).
-11. Deployment & containerization: `Dockerfile`, `.dockerignore`, and a
-    `docker-compose.yml` (API + Postgres) with migrations run on start — see
-    "Deployment & containerization." *(Planned.)*
+11. ✓ Deployment & containerization: `Dockerfile`, `.dockerignore`,
+    `docker-entrypoint.sh` (migrate-then-serve), `docker-compose.yml`
+    (API + Postgres, healthcheck) + a `docker-compose.test.yml` overlay, and
+    `make docker-*` targets — see "Deployment & containerization."
 12. Custom service errors: a typed exception hierarchy in
     `app/core/services/errors.py` (`NotFoundError`, `ConflictError`,
     `ForbiddenError`, and per-service `*ValidationError`) replacing the builtin

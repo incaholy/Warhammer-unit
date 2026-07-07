@@ -30,7 +30,7 @@ admin-curated.
 | API — FastAPI routers + request/response schemas | `app/api/` | ✅ |
 | Security — hashing, JWT, current-user/admin deps | `app/core/security.py` | ✅ |
 | Dev tooling — Makefile, tests, `.env.example` | repo root | ✅ |
-| Deployment — `Dockerfile` + `docker-compose.yml` (API + Postgres) | repo root | 🔨 planned |
+| Deployment — `Dockerfile` + `docker-compose.yml` (API + Postgres) | repo root | ✅ |
 
 ## Services
 
@@ -65,7 +65,8 @@ admin-curated.
 - [x] Roster: `points_limit`, computed `points_total`
 - [x] Validation Tier 1 (points vs limit) + Tier 2 (faction / subfaction)
 - [x] Shortfall (army vs inventory — what to buy)
-- [x] Test suite (120 tests) + Makefile + `.env.example`
+- [x] Test suite (125 tests) + Makefile + `.env.example`
+- [x] Containerization: `Dockerfile` + `docker-compose` (API + Postgres), migrations on start
 
 ### To build 🔨 (backlog)
 - [ ] **Seed script** to bulk-load a real datasheet catalog (`scripts/seed_datasheets.py`) — *deferred; the catalog is fully enterable via the admin API in the meantime.*
@@ -100,15 +101,17 @@ admin-curated.
     shape. (Resolves the *To fix* mismatch below.)
 - [ ] **Validation Tier 3** — per-datasheet count limits ("0-1 per army", "max 3", epic hero once). Needs new `Unit` fields (`max_per_army`, `is_epic_hero`) + a migration.
 - [ ] **Validation Tier 4** — detachments / force-org rules (larger; edition-specific).
-- [ ] **Deployment & containerization** — make the app run anywhere, not just on
-  a dev laptop. *(Full spec: SPEC.md → "Deployment & containerization.")*
-  - **`Dockerfile`** — `python:3.12-slim`, install requirements, run
+- [x] **Deployment & containerization** — the app runs anywhere via containers,
+  not just a dev laptop. *(Full spec: SPEC.md → "Deployment & containerization.")*
+  - **`Dockerfile`** — `python:3.12-slim`, install requirements, serve with
     `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
   - **`docker-compose.yml`** — `api` + `db` (`postgres:16`, named volume,
     healthcheck); `DATABASE_URL` targets the `db` service, not `localhost`.
-  - **`.dockerignore`** — keep caches/`.env` out of the build context.
-  - **Migrations on start** — run `alembic upgrade head` before uvicorn serves.
-  - **Makefile** — add `docker-build` / `docker-up` / `docker-down` targets.
+    Plus a `docker-compose.test.yml` overlay (throwaway tmpfs Postgres).
+  - **`.dockerignore`** — keeps caches/`.env` out of the build context.
+  - **Migrations on start** — `docker-entrypoint.sh` runs `alembic upgrade head`
+    before uvicorn serves.
+  - **Makefile** — `docker-build` / `docker-up` / `docker-down` / `docker-test`.
 - [ ] **Custom service errors** — replace the builtin `LookupError`/`ValueError`
   with a typed hierarchy so errors carry a **field** and the right status.
   *(Full spec: SPEC.md → "Custom service errors.")*

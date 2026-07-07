@@ -1,0 +1,38 @@
+# One-command local stack: the API plus its Postgres. Defaults let
+#   docker compose up
+# work out of the box; override any value via the shell or a .env file.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-warhammer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-warhammer}
+      POSTGRES_DB: ${POSTGRES_DB:-warhammer_unit}
+    ports:
+      # Host 5433 → container 5432, so this never clashes with a local
+      # Homebrew Postgres already on 5432. The API reaches the DB over the
+      # compose network (db:5432) regardless of this mapping.
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-warhammer}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Targets the DB by compose service name (db), not localhost.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-warhammer}:${POSTGRES_PASSWORD:-warhammer}@db:5432/${POSTGRES_DB:-warhammer_unit}
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-2880}
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres-data:

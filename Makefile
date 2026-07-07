@@ -31,7 +31,10 @@ DB_SUPERPASS ?=
 APP_HOST ?= 127.0.0.1
 APP_PORT ?= 8000
 
-.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test
+# ---- Docker ----
+COMPOSE ?= docker compose
+
+.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test docker-build docker-up docker-down docker-test
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -82,3 +85,16 @@ run: ## Run the FastAPI app locally with auto-reload.
 
 test: ## Run the test suite.
 	@$(PYTEST) tests/ -v
+
+docker-build: ## Build the API Docker image.
+	@$(COMPOSE) build
+
+docker-up: ## Start the app + Postgres with docker compose (migrations run on start).
+	@$(COMPOSE) up --build
+
+docker-down: ## Stop and remove the docker compose stack (keeps the DB volume).
+	@$(COMPOSE) down
+
+docker-test: ## Run the suite in a container against a throwaway Postgres.
+	@$(COMPOSE) -f docker-compose.yml -f docker-compose.test.yml up --build \
+		--abort-on-container-exit --exit-code-from api

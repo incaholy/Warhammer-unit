@@ -1,0 +1,23 @@
+# Overlay for running the suite in a container against a throwaway Postgres:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build \
+#       --abort-on-container-exit --exit-code-from api
+# (Or `make docker-test`.) Data lives in tmpfs so nothing persists between runs;
+# the api service runs pytest instead of uvicorn.
+#
+# Note: the current pytest suite uses in-memory SQLite and needs none of this —
+# this is the Postgres-parity harness for later integration tests.
+#
+# Postgres writes to PGDATA (a tmpfs path here) rather than the base compose's
+# named volume, so test data is ephemeral without having to un-merge that mount.
+services:
+  db:
+    environment:
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-warhammer_unit_test}
+      PGDATA: /var/lib/postgresql/tmpdata
+    tmpfs:
+      - /var/lib/postgresql/tmpdata
+
+  api:
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-warhammer}:${POSTGRES_PASSWORD:-warhammer}@db:5432/${POSTGRES_TEST_DB:-warhammer_unit_test}
+    command: ["pytest", "tests/", "-v"]
