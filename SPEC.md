@@ -145,8 +145,13 @@ Catalog details:
   so changing the set needs no migration. The specific army (Tyranids, Necrons,
   Death Guard, …) is a `Subfaction`, not a faction.
 - `Subfaction` — `faction_id` foreign key and a `name`, with
-  `UNIQUE(faction_id, name)`. Subfaction names are free text for now (constraining
-  them needs a faction → allowed-subfactions map — a later follow-up).
+  `UNIQUE(faction_id, name)`. The name is **restricted to the armies allowed
+  under its parent faction**, defined in the `FACTION_SUBFACTIONS` map in
+  `models.py` (`faction → its armies`, e.g. `Xenos → (Aeldari, Necrons, Orks,
+  …)`). `create_subfaction` rejects any name not listed under the given faction,
+  which catches both misspellings and wrong-parent pairings (e.g. Ultramarines
+  under Xenos). Extend the map to add an army; no migration needed (the DB column
+  stays a `str`).
 - `Unit` — `unit_name`, a required `faction_id`, a nullable `subfaction_id`
   (null = available to any subfaction), the stat line, `points`, and a
   `keywords` list (stored as JSON). Abilities and weapons attach through the two
@@ -398,7 +403,11 @@ Request schemas (`*_Create` plus the small add/patch bodies):
   (`Imperium`/`Xenos`/`Chaos`/`Space Marines`); anything else is rejected with
   **422**, and the allowed values are published in the OpenAPI schema. The
   service (`create_faction`) re-checks the same set, so the seed/direct-session
-  path is guarded too (→ 400). `Subfaction_Create` — `{faction_id, name}`.
+  path is guarded too (→ 400). `Subfaction_Create` — `{faction_id, name}`, where
+  `name` must be an army allowed under that `faction_id` (see the
+  `FACTION_SUBFACTIONS` map). Unlike faction, this can't be a schema-level enum
+  (the valid set depends on the chosen faction), so `create_subfaction` validates
+  it in the service and rejects a bad pairing with **400**.
 - `Weapon_Create` — `{name, category, attacks, weapon_skill, strength,
   armor_piercing, damage, range_inches?, keywords?}`; `Ability_Create` —
   `{name, description}`.
