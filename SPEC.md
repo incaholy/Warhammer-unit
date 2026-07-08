@@ -508,6 +508,45 @@ automatically — which is the desired behaviour. ("Stats as of when I added it"
 would need a `version` on `Unit` plus a version stored on the entry; out of
 scope for now.)
 
+## Seeding the catalog
+
+**Planned — not yet built.** Migrations create tables, not rows, so the catalog
+ships **empty**. Before the app is useful — and especially before the frontend's
+"browse the catalog" view has anything to show — it needs a seed. This section
+specs the seed script referenced in "Populating the catalog" and roadmap step 8.
+
+- **Script** — `scripts/seed_datasheets.py`, run out of band (not an HTTP route).
+  It opens a session directly (`Session(get_engine())`, the "scripts" path from
+  `connection.py`) and drives the **service layer** (`UnitService`), not raw SQL,
+  so the same foreign-key checks, `CHECK` constraints, and validation that guard
+  the API also guard the seed. (Matches the "schema changes go through
+  models/migrations, never raw SQL" convention.)
+- **Data source** — a checked-in `scripts/data/datasheets.json` describing the
+  hierarchy: factions → subfactions, shared weapons/abilities, then units with
+  their stat line, `points`, `keywords`, and the weapons/abilities they link.
+  Keeping the data in a file (not inline in code) makes a new GW dataslate a data
+  edit, not a code change.
+- **Idempotency** — safe to run repeatedly. The services raise on duplicates
+  (`create_faction` → `ValueError`; `UNIQUE(faction_id, name)` on subfactions;
+  etc.), so the seed does **get-or-create by natural key**: faction by `name`,
+  subfaction by `(faction, name)`, unit by `(faction, unit_name)`, weapon/ability
+  by `name`. Existing rows are updated (or skipped), never duplicated — re-running
+  after a dataslate patches stats in place, which every army/inventory entry then
+  sees (datasheets are shared — see "Populating the catalog").
+- **Order of operations** — respects the foreign keys: factions → subfactions →
+  weapons + abilities → units → link weapons/abilities to units.
+- **Running it** — `make seed` (a thin wrapper over
+  `python -m scripts.seed_datasheets`), needing only `DATABASE_URL`. In the
+  container world it's a one-shot:
+  `docker compose run --rm api python -m scripts.seed_datasheets`. Because the
+  script uses a direct session, it needs **no admin user and no auth** — seeding
+  is separate from the admin-gated HTTP write routes (those are for ad-hoc edits
+  once the app is running).
+- **Scope** — ship a **small starter dataset** (a couple of factions and a
+  handful of units) so dev, tests, demos, and the frontend have real data
+  immediately; entering the full GW catalog is a later data-entry effort, not a
+  code one.
+
 ## Authentication & authorization
 
 Implemented. Users register and log in for a JWT; `/me/*` routes are token-scoped
@@ -658,8 +697,10 @@ Cross-cutting concerns:
 7. ✓ `POST /weapons` and `POST /abilities` routes (the catalog is fully
    enterable over HTTP), and the upsert `POST`s return 201 on create / 200 on
    increment.
-8. Seed script to bulk-load the real datasheet catalog — deferred; the catalog
-   is fully enterable via the API in the meantime.
+8. Seed script to bulk-load the datasheet catalog (`scripts/seed_datasheets.py`
+   + a small starter dataset) — see "Seeding the catalog." Deferred, but now the
+   recommended next step: it's the prerequisite for the frontend's catalog view.
+   *(Planned.)*
 9. ✓ Roster features on `Army`: `points_limit` + computed `points_total`, and
    list validation — Tier 1 (points vs limit) and Tier 2 (faction/subfaction).
    Datasheet count limits and detachment rules remain a later follow-up.
