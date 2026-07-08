@@ -1,8 +1,8 @@
 """UserService — create and fetch users.
 
 Takes a `Session` (session injection) so the API layer and tests control the
-transaction. Raises `LookupError` for not-found and `ValueError` for bad input,
-per the service conventions in SPEC.md.
+transaction. Raises `NotFoundError` for not-found and `ConflictError` for a taken
+username/email, per the service conventions in SPEC.md.
 """
 
 from uuid import UUID
@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.core.db.models import User
+from app.core.services.errors import ConflictError, NotFoundError
 
 
 class UserService:
@@ -18,7 +19,7 @@ class UserService:
 
     def create_user(self, username: str, email: str, password_hash: str) -> User:
         # Check for a taken username/email up front so we can raise a clear
-        # ValueError instead of surfacing a DB IntegrityError.
+        # ConflictError instead of surfacing a DB IntegrityError.
         clash = self.session.exec(
             select(User).where(
                 (User.username == username) | (User.email == email)
@@ -26,8 +27,8 @@ class UserService:
         ).first()
         if clash is not None:
             if clash.username == username:
-                raise ValueError(f"username {username!r} is already taken")
-            raise ValueError(f"email {email!r} is already taken")
+                raise ConflictError(f"username {username!r} is already taken")
+            raise ConflictError(f"email {email!r} is already taken")
 
         user = User(username=username, email=email, password_hash=password_hash)
         self.session.add(user)
@@ -38,5 +39,5 @@ class UserService:
     def get_user(self, user_id: UUID) -> User:
         user = self.session.get(User, user_id)
         if user is None:
-            raise LookupError(f"user {user_id} not found")
+            raise NotFoundError(f"user {user_id} not found")
         return user

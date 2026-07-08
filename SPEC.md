@@ -439,12 +439,17 @@ Read schemas nest the hierarchy:
 - `Validation_Read` is `{ok, points_total, points_limit, issues: [{kind, detail,
   unit: Unit_Read?}]}` — the `validate` report.
 
-Error mapping at the API layer:
+Error mapping at the API layer (see "Custom service errors" for the typed
+hierarchy; the plain builtins remain as fallbacks):
 
 | Service exception | HTTP status |
 |---|---|
-| `LookupError` (not found) | 404 |
-| `ValueError` / `TypeError` (bad input) | 400 |
+| `NotFoundError` (⊂ `LookupError`) | 404 |
+| `ConflictError` (⊂ `ValueError`) — duplicate | 409 |
+| `*ValidationError` (⊂ `ValueError`) — carries `field` | 400 |
+| `ForbiddenError` | 403 |
+| bare `LookupError` (fallback) | 404 |
+| bare `ValueError` / `TypeError` (fallback) | 400 |
 | Pydantic validation failure | 422 (FastAPI automatic) |
 
 ### App entry point (`app/main.py`)
@@ -460,15 +465,15 @@ uvicorn app.main:app --reload
 
 ## Custom service errors
 
-**Planned — not yet built.** Today services raise builtin exceptions —
-`LookupError` for not-found (→ 404) and `ValueError`/`TypeError` for bad input
-(→ 400) — which the API maps in `app/main.py` (see "Error mapping at the API
-layer"). That's simple but loses two things: **which field** was bad, and the
-difference between a **duplicate** (should be 409) and other bad input (400).
-This section specs a small typed-exception hierarchy in
-`app/core/services/errors.py`, mirroring `attention-api`. It is intentionally
-**backward-compatible**: each custom error subclasses the builtin it replaces, so
-the existing handlers keep mapping it correctly during the migration.
+**Implemented.** Services raise a typed hierarchy from
+`app/core/services/errors.py` instead of bare builtins, so errors carry the
+offending **field** and a **duplicate** gets its own **409** (rather than being
+lumped into 400). It is **backward-compatible**: each custom error subclasses the
+builtin it replaces (`NotFoundError(LookupError)`; the `ValueError` family), and a
+single `ServiceError` handler in `app/main.py` maps them by their `status_code` —
+chosen over the builtin `LookupError`/`ValueError` handlers because `ServiceError`
+precedes those in each subclass's MRO. The builtin handlers stay as fallbacks.
+Mirrors `attention-api`.
 
 Two families.
 
@@ -487,29 +492,53 @@ Two families.
 
 **Per-service validation errors** — one `ValueError` subclass per service,
 constructed as `(field, message)`, rendering `"{field}: {message}"` and exposing
-`.field`. Being `ValueError`s, they still map to **400** unhandled; a dedicated
-handler can promote them to **422** with the field attached:
+`.field`. They map to **400** (bad request), and their handler adds the offending
+`field` to the response body. We keep them at **400**, not 422: 422 is reserved
+for FastAPI's *request-shape* validation (a malformed body), whereas these are
+semantically-invalid-but-well-formed requests (a business rule failed).
 
-- `UserValidationError` — registration/account rules (e.g.
-  `UserValidationError("username", "is already taken")`, empty/oversized fields).
-- `UnitValidationError` — catalog input (unknown updatable field, `category` not
-  `range`/`melee`).
+- `UserValidationError` — registration/account rules (empty/oversized fields).
+- `UnitValidationError` — catalog input across `UnitService` (unknown updatable
+  field; `category` not `range`/`melee`; a faction name outside `FactionName`; a
+  subfaction not allowed under its faction).
 - `ArmyValidationError` — roster input (`amount < 1` on set, `points_limit < 0`).
 - `InventoryValidationError` — inventory input (`amount < 1` on set).
 
-**API layer.** Exception handlers (in `app/main.py`, or a new `app/api/errors.py`
-if they grow) catch the base types and build the response from
-`.status_code`/`.field`/`.message`. The body stays close to FastAPI's current
-default — `{"detail": message, "field": field?}` — i.e. **no `{data, meta}`
-envelope** (that was intentionally deferred). Because `NotFoundError ⊂ LookupError`
-and every `*ValidationError ⊂ ValueError`, the current handlers keep working
-before the new ones land, so the migration is incremental.
+**Naming principle — name an error by how it's *handled*, not where it's raised.**
+`attention-api` mixes both styles on purpose, and so do we:
 
-**Migration.** Per service, swap `raise LookupError(...)` → `raise
-NotFoundError(...)`, and each `raise ValueError("...")` → the typed
-`*ValidationError(field, msg)` (or `ConflictError` for duplicates). Update the
-CLAUDE.md "services raise `LookupError`/`ValueError`" convention once done, and
-extend the "Error mapping at the API layer" table with the 409/422 rows.
+- **Generic** for cross-cutting failures nothing branches on: a `NotFoundError`
+  is a not-found regardless of resource (its `message` names the row). Minting
+  `UnitNotFoundError`/`ArmyNotFoundError` that all become an identical 404 is
+  class-proliferation for no gain.
+- **Resource-named** for validation, grouped per service (`UnitValidationError`,
+  …) — this is attention's `MessageValidationError` shape, and the `.field`
+  carries the specifics.
+- **Rule-named** (like attention's `ChallengeAlreadyExistsError`) *only* when a
+  failure needs its own status, its own handler, or the frontend must react
+  differently. Here every duplicate starts as a generic `ConflictError` (→ 409);
+  split out `DuplicateFactionError(ConflictError)` *later* only if the UI must
+  tell one duplicate from another. Add specificity when the handling diverges,
+  not before.
+
+**API layer.** A single `@app.exception_handler(ServiceError)` in `app/main.py`
+builds the response from `exc.status_code` and `exc.field`: the body is
+`{"detail": message, "field": field?}` — close to FastAPI's default, i.e. **no
+`{data, meta}` envelope** (that was intentionally deferred). It's picked over the
+builtin `LookupError`/`ValueError` handlers because Starlette matches handlers by
+walking the exception's MRO, where `ServiceError` sits ahead of them. Those
+builtin handlers remain as fallbacks for any un-migrated raise.
+
+**Status codes.** `NotFoundError` → 404, `ConflictError` → 409,
+`ForbiddenError` → 403, and the `*ValidationError` family → 400 (with `field`).
+Validation stays 400, not 422: 422 is reserved for FastAPI's request-shape
+validation (a malformed body), whereas these are well-formed requests that fail a
+business rule.
+
+**Done.** All four services now raise the typed errors; `errors.py` +
+the handler are in place, and the test suite covers the 404/409/400 mapping and
+the `field` payload. `ForbiddenError` is defined but not yet raised (ownership on
+`/me/armies/{id}` still 404s through `get_owned_army`).
 
 ## Populating the catalog
 
@@ -730,7 +759,9 @@ Cross-cutting concerns:
     `docker-entrypoint.sh` (migrate-then-serve), `docker-compose.yml`
     (API + Postgres, healthcheck) + a `docker-compose.test.yml` overlay, and
     `make docker-*` targets — see "Deployment & containerization."
-12. Custom service errors: a typed exception hierarchy in
+12. ✓ Custom service errors: a typed exception hierarchy in
     `app/core/services/errors.py` (`NotFoundError`, `ConflictError`,
     `ForbiddenError`, and per-service `*ValidationError`) replacing the builtin
-    `LookupError`/`ValueError` — see "Custom service errors." *(Planned.)*
+    `LookupError`/`ValueError` across all services; a single `ServiceError`
+    handler maps them (409 for duplicates, `field` on validation) — see "Custom
+    service errors."

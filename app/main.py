@@ -18,12 +18,25 @@ from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
+from app.core.services.errors import ServiceError
 
 app = FastAPI(title="Warhammer Unit Backend")
 
 
 # --- service exception -> HTTP mapping (keeps routers thin) ---
 
+@app.exception_handler(ServiceError)
+def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
+    # Typed service errors carry their own status + optional field. Chosen over
+    # the builtin handlers below because ServiceError precedes LookupError /
+    # ValueError in each subclass's MRO.
+    body = {"detail": exc.message}
+    if exc.field is not None:
+        body["field"] = exc.field
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
+# Fallbacks for any un-migrated raises of the plain builtins.
 @app.exception_handler(LookupError)
 def _not_found(request: Request, exc: LookupError) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": str(exc)})

@@ -18,10 +18,10 @@ def test_register(client):
     assert "is_admin" not in body  # User_Read doesn't include it
 
 
-def test_register_duplicate_returns_400(client):
+def test_register_duplicate_returns_409(client):
     _register(client, username="dup", email="a@test.io")
     resp = _register(client, username="dup", email="b@test.io")
-    assert resp.status_code == 400
+    assert resp.status_code == 409  # duplicate = conflict
 
 
 def test_login_returns_token(client):

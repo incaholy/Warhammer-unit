@@ -1,6 +1,7 @@
 """UnitService — the catalog of unit datasheets.
 
-Session-injected. Raises `LookupError` for not-found, per SPEC.md conventions.
+Session-injected. Raises `NotFoundError` for not-found, `ConflictError` for
+duplicates, and `UnitValidationError` for bad input, per SPEC.md conventions.
 """
 
 from typing import Optional
@@ -16,6 +17,11 @@ from app.core.db.models import (
     Subfaction,
     Unit,
     Weapon,
+)
+from app.core.services.errors import (
+    ConflictError,
+    NotFoundError,
+    UnitValidationError,
 )
 
 
@@ -46,9 +52,9 @@ class UnitService:
         keywords: Optional[list[str]] = None,
     ) -> Unit:
         if self.session.get(Faction, faction_id) is None:
-            raise LookupError(f"faction {faction_id} not found")
+            raise NotFoundError(f"faction {faction_id} not found")
         if subfaction_id is not None and self.session.get(Subfaction, subfaction_id) is None:
-            raise LookupError(f"subfaction {subfaction_id} not found")
+            raise NotFoundError(f"subfaction {subfaction_id} not found")
 
         unit = Unit(
             faction_id=faction_id,
@@ -72,7 +78,7 @@ class UnitService:
     def get_unit(self, unit_id: UUID) -> Unit:
         unit = self.session.get(Unit, unit_id)
         if unit is None:
-            raise LookupError(f"unit {unit_id} not found")
+            raise NotFoundError(f"unit {unit_id} not found")
         return unit
 
     def list_units(
@@ -103,15 +109,15 @@ class UnitService:
         unit = self.get_unit(unit_id)
         unknown = set(fields) - self._UPDATABLE
         if unknown:
-            raise ValueError(f"cannot update fields: {sorted(unknown)}")
+            raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
         if fields.get("faction_id") is not None and (
             self.session.get(Faction, fields["faction_id"]) is None
         ):
-            raise LookupError(f"faction {fields['faction_id']} not found")
+            raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
             self.session.get(Subfaction, fields["subfaction_id"]) is None
         ):
-            raise LookupError(f"subfaction {fields['subfaction_id']} not found")
+            raise NotFoundError(f"subfaction {fields['subfaction_id']} not found")
 
         for key, value in fields.items():
             setattr(unit, key, value)
@@ -138,7 +144,7 @@ class UnitService:
         keywords: Optional[list[str]] = None,
     ) -> Weapon:
         if category not in ("range", "melee"):
-            raise ValueError("category must be 'range' or 'melee'")
+            raise UnitValidationError("category", "must be 'range' or 'melee'")
         weapon = Weapon(
             name=name,
             category=category,
@@ -166,7 +172,7 @@ class UnitService:
         unit = self.get_unit(unit_id)
         weapon = self.session.get(Weapon, weapon_id)
         if weapon is None:
-            raise LookupError(f"weapon {weapon_id} not found")
+            raise NotFoundError(f"weapon {weapon_id} not found")
         if weapon not in unit.weapons:
             unit.weapons.append(weapon)
             self.session.add(unit)
@@ -178,7 +184,7 @@ class UnitService:
         unit = self.get_unit(unit_id)
         ability = self.session.get(Ability, ability_id)
         if ability is None:
-            raise LookupError(f"ability {ability_id} not found")
+            raise NotFoundError(f"ability {ability_id} not found")
         if ability not in unit.abilities:
             unit.abilities.append(ability)
             self.session.add(unit)
@@ -198,11 +204,11 @@ class UnitService:
             FactionName(name)
         except ValueError:
             allowed = ", ".join(f.value for f in FactionName)
-            raise ValueError(
-                f"{name!r} is not a recognized faction (allowed: {allowed})"
+            raise UnitValidationError(
+                "name", f"{name!r} is not a recognized faction (allowed: {allowed})"
             ) from None
         if self.session.exec(select(Faction).where(Faction.name == name)).first():
-            raise ValueError(f"faction {name!r} already exists")
+            raise ConflictError(f"faction {name!r} already exists")
         faction = Faction(name=name)
         self.session.add(faction)
         self.session.commit()
@@ -212,13 +218,14 @@ class UnitService:
     def create_subfaction(self, faction_id: UUID, name: str) -> Subfaction:
         faction = self.session.get(Faction, faction_id)
         if faction is None:
-            raise LookupError(f"faction {faction_id} not found")
+            raise NotFoundError(f"faction {faction_id} not found")
         # The subfaction must be one of the armies allowed under this faction.
         allowed = FACTION_SUBFACTIONS.get(FactionName(faction.name), ())
         if name not in allowed:
-            raise ValueError(
+            raise UnitValidationError(
+                "name",
                 f"{name!r} is not a subfaction of {faction.name} "
-                f"(allowed: {', '.join(allowed) or 'none'})"
+                f"(allowed: {', '.join(allowed) or 'none'})",
             )
         clash = self.session.exec(
             select(Subfaction).where(
@@ -226,7 +233,7 @@ class UnitService:
             )
         ).first()
         if clash is not None:
-            raise ValueError(
+            raise ConflictError(
                 f"subfaction {name!r} already exists for that faction"
             )
         sub = Subfaction(faction_id=faction_id, name=name)

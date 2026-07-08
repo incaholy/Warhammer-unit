@@ -12,10 +12,10 @@ def test_create_faction(admin_client):
     assert "id" in body
 
 
-def test_create_faction_duplicate_returns_400(admin_client):
+def test_create_faction_duplicate_returns_409(admin_client):
     admin_client.post("/factions", json={"name": "Chaos"})
     resp = admin_client.post("/factions", json={"name": "Chaos"})
-    assert resp.status_code == 400
+    assert resp.status_code == 409  # duplicate = conflict
 
 
 def test_list_factions_is_public(client, make_faction):
@@ -69,13 +69,13 @@ def test_create_subfaction_unknown_faction_returns_404(admin_client):
     assert resp.status_code == 404
 
 
-def test_create_subfaction_duplicate_returns_400(admin_client):
+def test_create_subfaction_duplicate_returns_409(admin_client):
     faction = admin_client.post("/factions", json={"name": "Chaos"}).json()
     admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"})
     resp = admin_client.post(
         "/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"}
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 409  # duplicate = conflict
 
 
 def test_create_subfaction_wrong_faction_returns_400(admin_client):
@@ -85,6 +85,7 @@ def test_create_subfaction_wrong_faction_returns_400(admin_client):
         "/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"}
     )
     assert resp.status_code == 400
+    assert resp.json()["field"] == "name"  # typed error surfaces the field
 
 
 def test_create_weapon(admin_client):

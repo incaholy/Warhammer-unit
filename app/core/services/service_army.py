@@ -1,7 +1,7 @@
 """ArmyService — a user's armies and the units inside them.
 
-Session-injected. `LookupError` for not-found, `ValueError` for bad amounts,
-per SPEC.md conventions.
+Session-injected. `NotFoundError` for not-found, `ArmyValidationError` for bad
+input, per SPEC.md conventions.
 """
 
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
+from app.core.services.errors import ArmyValidationError, NotFoundError
 
 
 @dataclass
@@ -61,11 +62,11 @@ class ArmyService:
         points_limit: Optional[int] = None,
     ) -> Army:
         if self.session.get(User, user_id) is None:
-            raise LookupError(f"user {user_id} not found")
+            raise NotFoundError(f"user {user_id} not found")
         if self.session.get(Faction, faction_id) is None:
-            raise LookupError(f"faction {faction_id} not found")
+            raise NotFoundError(f"faction {faction_id} not found")
         if subfaction_id is not None and self.session.get(Subfaction, subfaction_id) is None:
-            raise LookupError(f"subfaction {subfaction_id} not found")
+            raise NotFoundError(f"subfaction {subfaction_id} not found")
 
         army = Army(
             owner_user_id=user_id,
@@ -83,7 +84,7 @@ class ArmyService:
     def get_army(self, army_id: UUID) -> Army:
         army = self.session.get(Army, army_id)
         if army is None:
-            raise LookupError(f"army {army_id} not found")
+            raise NotFoundError(f"army {army_id} not found")
         return army
 
     def list_armies(self, user_id: UUID) -> list[Army]:
@@ -103,15 +104,15 @@ class ArmyService:
         army = self.get_army(army_id)
         unknown = set(fields) - self._UPDATABLE
         if unknown:
-            raise ValueError(f"cannot update fields: {sorted(unknown)}")
+            raise ArmyValidationError("fields", f"cannot update {sorted(unknown)}")
         if fields.get("faction_id") is not None and (
             self.session.get(Faction, fields["faction_id"]) is None
         ):
-            raise LookupError(f"faction {fields['faction_id']} not found")
+            raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
             self.session.get(Subfaction, fields["subfaction_id"]) is None
         ):
-            raise LookupError(f"subfaction {fields['subfaction_id']} not found")
+            raise NotFoundError(f"subfaction {fields['subfaction_id']} not found")
 
         for key, value in fields.items():
             setattr(army, key, value)
@@ -137,10 +138,12 @@ class ArmyService:
 
     def set_amount(self, army_id: UUID, unit_id: UUID, amount: int) -> ArmyUnit:
         if amount < 1:
-            raise ValueError("amount must be >= 1 (use remove_unit to remove)")
+            raise ArmyValidationError(
+                "amount", "must be >= 1 (use remove_unit to remove)"
+            )
         entry = self._find_entry(army_id, unit_id)
         if entry is None:
-            raise LookupError(f"unit {unit_id} is not in army {army_id}")
+            raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         entry.amount = amount
         self.session.add(entry)
         self.session.commit()
@@ -150,7 +153,7 @@ class ArmyService:
     def remove_unit(self, army_id: UUID, unit_id: UUID) -> None:
         entry = self._find_entry(army_id, unit_id)
         if entry is None:
-            raise LookupError(f"unit {unit_id} is not in army {army_id}")
+            raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         self.session.delete(entry)
         self.session.commit()
 
@@ -241,11 +244,11 @@ class ArmyService:
 
     def _require_army(self, army_id: UUID) -> None:
         if self.session.get(Army, army_id) is None:
-            raise LookupError(f"army {army_id} not found")
+            raise NotFoundError(f"army {army_id} not found")
 
     def _require_unit(self, unit_id: UUID) -> None:
         if self.session.get(Unit, unit_id) is None:
-            raise LookupError(f"unit {unit_id} not found")
+            raise NotFoundError(f"unit {unit_id} not found")
 
     def _find_entry(self, army_id: UUID, unit_id: UUID) -> Optional[ArmyUnit]:
         return self.session.exec(

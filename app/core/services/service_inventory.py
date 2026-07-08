@@ -1,7 +1,7 @@
 """InventoryService — the units a user physically owns (the `user_unit` table).
 
-Session-injected. `LookupError` for not-found, `ValueError` for bad amounts,
-per SPEC.md conventions.
+Session-injected. `NotFoundError` for not-found, `InventoryValidationError` for
+bad amounts, per SPEC.md conventions.
 """
 
 from typing import Optional
@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.core.db.models import Unit, User, UserUnit
+from app.core.services.errors import InventoryValidationError, NotFoundError
 
 
 class InventoryService:
@@ -31,10 +32,12 @@ class InventoryService:
 
     def set_amount(self, user_id: UUID, unit_id: UUID, amount: int) -> UserUnit:
         if amount < 1:
-            raise ValueError("amount must be >= 1 (use remove_unit to remove)")
+            raise InventoryValidationError(
+                "amount", "must be >= 1 (use remove_unit to remove)"
+            )
         entry = self._find_entry(user_id, unit_id)
         if entry is None:
-            raise LookupError(f"unit {unit_id} is not in {user_id}'s inventory")
+            raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         entry.amount = amount
         self.session.add(entry)
         self.session.commit()
@@ -44,7 +47,7 @@ class InventoryService:
     def remove_unit(self, user_id: UUID, unit_id: UUID) -> None:
         entry = self._find_entry(user_id, unit_id)
         if entry is None:
-            raise LookupError(f"unit {unit_id} is not in {user_id}'s inventory")
+            raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         self.session.delete(entry)
         self.session.commit()
 
@@ -59,11 +62,11 @@ class InventoryService:
 
     def _require_user(self, user_id: UUID) -> None:
         if self.session.get(User, user_id) is None:
-            raise LookupError(f"user {user_id} not found")
+            raise NotFoundError(f"user {user_id} not found")
 
     def _require_unit(self, unit_id: UUID) -> None:
         if self.session.get(Unit, unit_id) is None:
-            raise LookupError(f"unit {unit_id} not found")
+            raise NotFoundError(f"unit {unit_id} not found")
 
     def _find_entry(self, user_id: UUID, unit_id: UUID) -> Optional[UserUnit]:
         return self.session.exec(
