@@ -106,8 +106,8 @@ SQLModel, SQLAlchemy, Alembic, psycopg2, Pydantic, python-dotenv.
 
 | Model | Table | Half | Purpose |
 |---|---|---|---|
-| `Faction` | `factions` | catalog | A top-level army faction (e.g. Space Marines) |
-| `Subfaction` | `subfactions` | catalog | A subfaction of one faction (e.g. Ultramarines) |
+| `Faction` | `factions` | catalog | A top-level grouping / grand alliance (Imperium, Xenos, Chaos, Space Marines) |
+| `Subfaction` | `subfactions` | catalog | The specific army beneath a faction (e.g. Xenos → Tyranids) |
 | `Unit` | `units` | catalog | A datasheet's core stat line |
 | `Ability` | `abilities` | catalog | A named ability with a description |
 | `Weapon` | `weapons` | catalog | A single weapon profile (ranged or melee) |
@@ -138,9 +138,15 @@ User ──< UserUnit >── Unit
 ```
 
 Catalog details:
-- `Faction` — unique `name`.
+- `Faction` — unique `name`, **restricted to the canonical `FactionName` enum**
+  (`Imperium`, `Xenos`, `Chaos`, `Space Marines`; defined in `models.py`).
+  Factions are a fixed, known set, so this prevents an accidental junk faction
+  from a misspelling. The DB column stays a plain `str` — the enum lives in code,
+  so changing the set needs no migration. The specific army (Tyranids, Necrons,
+  Death Guard, …) is a `Subfaction`, not a faction.
 - `Subfaction` — `faction_id` foreign key and a `name`, with
-  `UNIQUE(faction_id, name)`.
+  `UNIQUE(faction_id, name)`. Subfaction names are free text for now (constraining
+  them needs a faction → allowed-subfactions map — a later follow-up).
 - `Unit` — `unit_name`, a required `faction_id`, a nullable `subfaction_id`
   (null = available to any subfaction), the stat line, `points`, and a
   `keywords` list (stored as JSON). Abilities and weapons attach through the two
@@ -388,7 +394,11 @@ Request schemas (`*_Create` plus the small add/patch bodies):
 - `Unit_Create` — `{faction_id, unit_name, movement, toughness, armor_save,
   wounds, leadership, objective_control, points, invulnerable_save?,
   subfaction_id?, keywords?}`.
-- `Faction_Create` — `{name}`; `Subfaction_Create` — `{faction_id, name}`.
+- `Faction_Create` — `{name}`, where `name` is a `FactionName` enum value
+  (`Imperium`/`Xenos`/`Chaos`/`Space Marines`); anything else is rejected with
+  **422**, and the allowed values are published in the OpenAPI schema. The
+  service (`create_faction`) re-checks the same set, so the seed/direct-session
+  path is guarded too (→ 400). `Subfaction_Create` — `{faction_id, name}`.
 - `Weapon_Create` — `{name, category, attacks, weapon_skill, strength,
   armor_piercing, damage, range_inches?, keywords?}`; `Ability_Create` —
   `{name, description}`.
