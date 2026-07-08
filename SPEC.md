@@ -243,7 +243,8 @@ exposes CRUD methods.
 
 | Service | Status | Methods |
 |---|---|---|
-| `UserService` | implemented (+ tests) | `create_user(username, email, password_hash)` (`ValueError` on duplicate username/email), `get_user(user_id)` |
+| `AuthService` | implemented (+ tests) | `register(username, email, password)` (hashes, delegates to `UserService`), `authenticate(identifier, password)` (username/email + password → `User` or `None`) |
+| `UserService` | implemented (+ tests) | `create_user(username, email, password_hash)` (`ConflictError` on duplicate username/email), `get_user(user_id)` |
 | `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `create_weapon`, `create_ability`, `link_weapon`, `link_ability`; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
 | `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `update_army`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall`, `points_total`, `validate` |
 | `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
@@ -454,14 +455,36 @@ hierarchy; the plain builtins remain as fallbacks):
 
 ### App entry point (`app/main.py`)
 
-`app/main.py` exists as a bare-bones app: the `FastAPI()` instance plus a
-`GET /health` liveness check. Still to add — the routers
-(`app.include_router(...)`) and the service-exception → HTTP handlers. Run
-locally with:
+`app/main.py` builds the `FastAPI()` instance, mounts every router
+(`app.include_router(...)`), registers the `ServiceError` → HTTP handler (plus
+the builtin fallbacks), and exposes a `GET /health` liveness check. Run locally
+with `uvicorn app.main:app --reload` (or `make run`).
 
-```
-uvicorn app.main:app --reload
-```
+### Planned additions (frontend-readiness)
+
+These are small, additive, non-breaking endpoints the frontend/admin UI will
+need. **Effort: all S** unless noted.
+
+- **`GET /weapons` and `GET /abilities`** — the catalog is admin-curated and
+  linking a weapon to a unit (`POST /units/{id}/weapons`) needs a `weapon_id`,
+  but there's currently no way to *list* weapons/abilities to pick from.
+  *Plan:* add `list_weapons()` / `list_abilities()` to `UnitService` (a plain
+  `select(...)`), then `GET /weapons` / `GET /abilities` routes returning
+  `list[Weapon_Read]` / `list[Ability_Read]` (public reads, like the rest of the
+  catalog). Mirrors the existing `list_factions` / `GET /factions`.
+- **`GET /factions/taxonomy`** — the allowed **faction names** are already in the
+  OpenAPI schema (the `FactionName` enum on `Faction_Create`), but the allowed
+  **subfactions per faction** live only in the service-side `FACTION_SUBFACTIONS`
+  map, so an admin UI has no way to render a subfaction dropdown.
+  *Plan:* a read route returning `{faction_name: [allowed subfactions]}` straight
+  from the map (no DB) — e.g. `{"Xenos": ["Aeldari", "Necrons", …], …}`. Public.
+- **`X-Total-Count` header on `GET /units`** — the list is paged but returns no
+  total, so the catalog view can't show "showing 20 of 137."
+  *Plan:* add a `UnitService.count_units(**filters)` (a `select(func.count())`
+  with the same `where` clauses as `list_units`) and set an `X-Total-Count`
+  response header in the route. Chosen over an `{items, total}` envelope because
+  it keeps the bare-list body **non-breaking** (see "Custom service errors" for
+  the same no-envelope stance).
 
 ## Custom service errors
 
@@ -628,9 +651,51 @@ to the caller, and catalog writes require an admin. The pieces:
   `/subfactions`, `/weapons`, `/abilities`) require an admin, enforced by the
   `get_current_admin` dependency (**403** otherwise). Admin status is the
   `User.is_admin` boolean (default `false`). Because it defaults false, the
-  **first admin** is made out of band — a manual `UPDATE users SET
-  is_admin = true WHERE username = '…'` (a `make` helper could wrap this). See
-  "Populating the catalog."
+  **first admin** is made out of band (see the bootstrap helper below).
+
+### Planned hardening
+
+- **First-admin bootstrap helper** *(Effort: S)* — replace the manual
+  `UPDATE users SET is_admin = true` with a script + `make` target.
+  *Plan:* `scripts/make_admin.py` opens a direct session (`Session(get_engine())`,
+  the scripts path from `connection.py`), looks the user up by username, sets
+  `is_admin = True`, and commits; `LookupError` if the user doesn't exist. Wrap in
+  `make create-admin USER=<username>`. No auth/HTTP — it's an operator action,
+  like the seed script. This unblocks catalog seeding/management.
+- **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
+  `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
+  keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
+  — it's a hardening step, not a core-loop blocker; revisit before public deploy.
+- **Real `SECRET_KEY` in production** *(Effort: S)* — a dev default is in place;
+  production must set a random `SECRET_KEY` (`python -c "import secrets;
+  print(secrets.token_urlsafe(32))"`) via the environment. Belongs to the deploy
+  checklist, not code.
+
+## Frontend integration
+
+**Planned — not yet built.** How the "Muster" browser UI (Vite/React) will talk
+to this API. The connection choice is **Option B: relative URLs + a proxy**, so
+CORS is a fallback, not the primary mechanism. Auth is a **Bearer JWT in the
+`Authorization` header** (not cookies), so there's no CSRF/`SameSite` concern.
+
+- **Repo layout** *(Effort: S)* — the frontend lives in a `frontend/` subfolder
+  (monorepo); the Python backend stays at the repo root untouched. Add `frontend/`
+  to `.dockerignore` so it never bloats the API image; the frontend gets its own
+  build.
+- **Dev — Vite proxy** *(Effort: S)* — the frontend calls relative paths
+  (`fetch("/units")`); `vite.config.js`'s `server.proxy` forwards to
+  `http://localhost:8000`, so the browser sees one origin and needs no CORS.
+- **Prod — reverse proxy** *(Effort: M)* — a small Caddy/nginx compose service
+  serves the built static files and forwards `/api` (or the API paths) to the
+  `api` service; still one origin, still no CORS.
+- **CORS fallback** *(Effort: S)* — add `CORSMiddleware` in `app/main.py` with an
+  **env-driven allow-list** (`ALLOWED_ORIGINS`, comma-separated; never `*`), for
+  the case where the frontend is genuinely hosted on another origin. `Authorization`
+  header allowed; no credentials/cookies. This is the one piece to add on the
+  backend before a cross-origin frontend can call it.
+- **Typed client from OpenAPI** *(Effort: S)* — generate the frontend's API types
+  from `/openapi.json` (e.g. `openapi-typescript`) so `Unit_Read`/`Army_Read`
+  stay in sync with `models.py`; a rename on the backend surfaces as a TS error.
 
 ## Testing
 
@@ -745,10 +810,9 @@ Cross-cutting concerns:
 7. ✓ `POST /weapons` and `POST /abilities` routes (the catalog is fully
    enterable over HTTP), and the upsert `POST`s return 201 on create / 200 on
    increment.
-8. Seed script to bulk-load the datasheet catalog (`scripts/seed_datasheets.py`
-   + a small starter dataset) — see "Seeding the catalog." Deferred, but now the
-   recommended next step: it's the prerequisite for the frontend's catalog view.
-   *(Planned.)*
+8. Seed script to bulk-load the datasheet catalog — deferred; now tracked in
+   "Remaining work" below (it's the top frontend prerequisite). See "Seeding the
+   catalog."
 9. ✓ Roster features on `Army`: `points_limit` + computed `points_total`, and
    list validation — Tier 1 (points vs limit) and Tier 2 (faction/subfaction).
    Datasheet count limits and detachment rules remain a later follow-up.
@@ -765,3 +829,36 @@ Cross-cutting concerns:
     `LookupError`/`ValueError` across all services; a single `ServiceError`
     handler maps them (409 for duplicates, `field` on validation) — see "Custom
     service errors."
+
+### Remaining work — ordered by ease of implementation
+
+Steps 1–12 above are the build history. What's left, easiest first, each linking
+to the section with its plan. The **S** items are small, additive, and mostly
+non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
+
+13. **(S) CORS + frontend connection** — `CORSMiddleware` with an env-driven
+    allow-list; the browser can't call the API cross-origin without it. See
+    "Frontend integration."
+14. **(S) First-admin bootstrap helper** — `scripts/make_admin.py` +
+    `make create-admin`; unblocks catalog seeding/management. See "Authentication
+    & authorization → Planned hardening."
+15. **(S) `GET /weapons` + `GET /abilities`** — list routes so the admin UI can
+    pick weapons/abilities to link. See "API layer → Planned additions."
+16. **(S) `GET /factions/taxonomy`** — expose `FACTION_SUBFACTIONS` for subfaction
+    dropdowns. See "API layer → Planned additions."
+17. **(S) `X-Total-Count` on `GET /units`** — a total for the catalog's "N results"
+    count. See "API layer → Planned additions."
+18. **(M) Seed script + starter dataset** — `scripts/seed_datasheets.py` +
+    `datasheets.json` + `make seed`; **the** frontend prerequisite (a catalog with
+    data). See "Seeding the catalog."
+19. **(M) Rate limiting on `/auth/*`** — `slowapi`, keyed by IP. Hardening; before
+    public deploy. See "Authentication & authorization → Planned hardening."
+20. **(M) Validation Tier 3** — per-datasheet count limits ("0-1 per army", epic
+    hero once). Needs new `Unit` fields (`max_per_army`, `is_epic_hero`) + a
+    migration + a new `validate` check.
+21. **(L) Validation Tier 4** — detachments / force-org rules (edition-specific).
+22. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the S/M
+    items above are its prerequisites. See "Frontend integration."
+
+**Deploy checklist (not code):** set a real `SECRET_KEY`; point `ALLOWED_ORIGINS`
+at the frontend's real origin.
