@@ -8,7 +8,14 @@ from uuid import UUID
 
 from sqlmodel import Session, select
 
-from app.core.db.models import Ability, Faction, Subfaction, Unit, Weapon
+from app.core.db.models import (
+    Ability,
+    Faction,
+    FactionName,
+    Subfaction,
+    Unit,
+    Weapon,
+)
 
 
 class UnitService:
@@ -184,6 +191,15 @@ class UnitService:
         return list(self.session.exec(select(Faction)).all())
 
     def create_faction(self, name: str) -> Faction:
+        # Guard the direct-session path (seed scripts, etc.) the same way the
+        # API schema guards HTTP: the name must be a canonical faction.
+        try:
+            FactionName(name)
+        except ValueError:
+            allowed = ", ".join(f.value for f in FactionName)
+            raise ValueError(
+                f"{name!r} is not a recognized faction (allowed: {allowed})"
+            ) from None
         if self.session.exec(select(Faction).where(Faction.name == name)).first():
             raise ValueError(f"faction {name!r} already exists")
         faction = Faction(name=name)

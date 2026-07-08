@@ -11,6 +11,7 @@ Schema follows app/core/db/test_units.md.
 """
 
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -42,6 +43,23 @@ class TimestampMixin(SQLModel):
 
 
 # ============================ Catalog ============================
+
+class FactionName(StrEnum):
+    """The canonical top-level Warhammer 40k factions (grand alliances).
+
+    A faction is the broad grouping; the specific army (Tyranids, Necrons,
+    Death Guard, …) is a `Subfaction` beneath it — e.g. faction ``Xenos`` →
+    subfaction ``Tyranids``. This set is fixed and known, so faction creation is
+    restricted to these values: a misspelling is simply not a member and is
+    rejected rather than creating a junk row. No migration is needed to change
+    it (the DB column stays a plain string).
+    """
+
+    IMPERIUM = "Imperium"
+    XENOS = "Xenos"
+    CHAOS = "Chaos"
+    SPACE_MARINES = "Space Marines"
+
 
 class Faction(TimestampMixin, table=True):
     __tablename__ = "factions"

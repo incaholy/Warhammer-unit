@@ -12,6 +12,7 @@ from sqlmodel import Session, SQLModel
 
 from app.api.unit import Ability_Read, Weapon_Read
 from app.core.db.connection import get_session
+from app.core.db.models import FactionName
 from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
@@ -30,7 +31,10 @@ class Faction_Read(SQLModel):
 
 
 class Faction_Create(SQLModel):
-    name: str
+    # Restricted to the canonical faction list: an unknown value (e.g. a
+    # misspelling) is rejected with 422, and the allowed set is published in the
+    # OpenAPI schema (so a frontend can render a dropdown).
+    name: FactionName
 
 
 class Subfaction_Create(SQLModel):

@@ -171,16 +171,22 @@ def test_create_faction(session):
 
 def test_create_faction_duplicate_raises_value_error(session):
     svc = UnitService(session)
-    svc.create_faction("Necrons")
+    svc.create_faction("Chaos")
     with pytest.raises(ValueError):
-        svc.create_faction("Necrons")
+        svc.create_faction("Chaos")
 
 
 def test_list_factions(session):
     svc = UnitService(session)
-    svc.create_faction("A")
-    svc.create_faction("B")
+    svc.create_faction("Imperium")
+    svc.create_faction("Xenos")
     assert len(svc.list_factions()) == 2
+
+
+def test_create_faction_unknown_name_raises_value_error(session):
+    svc = UnitService(session)
+    with pytest.raises(ValueError):
+        svc.create_faction("Nekrons")  # misspelling — not a canonical faction
 
 
 def test_create_subfaction(session, make_faction):

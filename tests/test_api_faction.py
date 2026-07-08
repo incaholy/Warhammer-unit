@@ -13,8 +13,8 @@ def test_create_faction(admin_client):
 
 
 def test_create_faction_duplicate_returns_400(admin_client):
-    admin_client.post("/factions", json={"name": "Necrons"})
-    resp = admin_client.post("/factions", json={"name": "Necrons"})
+    admin_client.post("/factions", json={"name": "Chaos"})
+    resp = admin_client.post("/factions", json={"name": "Chaos"})
     assert resp.status_code == 400
 
 
@@ -26,13 +26,19 @@ def test_list_factions_is_public(client, make_faction):
 
 
 def test_create_faction_requires_admin(auth_client):
-    resp = auth_client.post("/factions", json={"name": "X"})  # non-admin
+    resp = auth_client.post("/factions", json={"name": "Space Marines"})  # non-admin
     assert resp.status_code == 403
 
 
 def test_create_faction_requires_auth(client):
-    resp = client.post("/factions", json={"name": "X"})  # no token
+    resp = client.post("/factions", json={"name": "Space Marines"})  # no token
     assert resp.status_code == 401
+
+
+def test_create_faction_unknown_name_returns_422(admin_client):
+    # A misspelling isn't a canonical faction, so the enum-typed body rejects it.
+    resp = admin_client.post("/factions", json={"name": "Space Marnies"})
+    assert resp.status_code == 422
 
 
 def test_list_factions_with_subfactions(admin_client):
@@ -64,7 +70,7 @@ def test_create_subfaction_unknown_faction_returns_404(admin_client):
 
 
 def test_create_subfaction_duplicate_returns_400(admin_client):
-    faction = admin_client.post("/factions", json={"name": "Necrons"}).json()
+    faction = admin_client.post("/factions", json={"name": "Chaos"}).json()
     admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Sautekh"})
     resp = admin_client.post(
         "/subfactions", json={"faction_id": faction["id"], "name": "Sautekh"}
