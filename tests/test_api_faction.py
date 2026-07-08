@@ -71,9 +71,18 @@ def test_create_subfaction_unknown_faction_returns_404(admin_client):
 
 def test_create_subfaction_duplicate_returns_400(admin_client):
     faction = admin_client.post("/factions", json={"name": "Chaos"}).json()
-    admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Sautekh"})
+    admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"})
     resp = admin_client.post(
-        "/subfactions", json={"faction_id": faction["id"], "name": "Sautekh"}
+        "/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"}
+    )
+    assert resp.status_code == 400
+
+
+def test_create_subfaction_wrong_faction_returns_400(admin_client):
+    # Ultramarines is a Space Marines chapter, not a Xenos army.
+    faction = admin_client.post("/factions", json={"name": "Xenos"}).json()
+    resp = admin_client.post(
+        "/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"}
     )
     assert resp.status_code == 400
 

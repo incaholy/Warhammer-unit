@@ -61,6 +61,56 @@ class FactionName(StrEnum):
     SPACE_MARINES = "Space Marines"
 
 
+# The specific armies allowed under each faction. A subfaction is valid only if
+# it appears under its parent faction here, so `create_subfaction` rejects both
+# unknown names (typos) and wrong-parent pairings. This is the canonical list —
+# extend the tuples as needed; no migration required (the DB column stays a str).
+FACTION_SUBFACTIONS: dict[FactionName, tuple[str, ...]] = {
+    FactionName.IMPERIUM: (
+        "Adepta Sororitas",
+        "Adeptus Custodes",
+        "Adeptus Mechanicus",
+        "Astra Militarum",
+        "Imperial Knights",
+        "Grey Knights",
+        "Imperial Agents",
+    ),
+    FactionName.SPACE_MARINES: (
+        "Ultramarines",
+        "Blood Angels",
+        "Blood Ravens",
+        "Deathwatch",
+        "Imperial Fists",
+        "Iron Hands",
+        "Raven Guard",
+        "Salamanders",
+        "White Scars",
+        "Dark Angels",
+        "Space Wolves",
+        "Black Templars",
+    ),
+    FactionName.CHAOS: (
+        "Chaos Space Marines",
+        "Death Guard",
+        "Thousand Sons",
+        "World Eaters",
+        "Chaos Daemons",
+        "Chaos Knights",
+        "Emperor's Children",
+    ),
+    FactionName.XENOS: (
+        "Aeldari",
+        "Necrons",
+        "Orks",
+        "T'au Empire",
+        "Tyranids",
+        "Drukhari",
+        "Genestealer Cults",
+        "Leagues of Votann",
+    ),
+}
+
+
 class Faction(TimestampMixin, table=True):
     __tablename__ = "factions"
 

@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlmodel import Session, select
 
 from app.core.db.models import (
+    FACTION_SUBFACTIONS,
     Ability,
     Faction,
     FactionName,
@@ -209,8 +210,16 @@ class UnitService:
         return faction
 
     def create_subfaction(self, faction_id: UUID, name: str) -> Subfaction:
-        if self.session.get(Faction, faction_id) is None:
+        faction = self.session.get(Faction, faction_id)
+        if faction is None:
             raise LookupError(f"faction {faction_id} not found")
+        # The subfaction must be one of the armies allowed under this faction.
+        allowed = FACTION_SUBFACTIONS.get(FactionName(faction.name), ())
+        if name not in allowed:
+            raise ValueError(
+                f"{name!r} is not a subfaction of {faction.name} "
+                f"(allowed: {', '.join(allowed) or 'none'})"
+            )
         clash = self.session.exec(
             select(Subfaction).where(
                 Subfaction.faction_id == faction_id, Subfaction.name == name

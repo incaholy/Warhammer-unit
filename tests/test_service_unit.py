@@ -189,11 +189,11 @@ def test_create_faction_unknown_name_raises_value_error(session):
         svc.create_faction("Nekrons")  # misspelling — not a canonical faction
 
 
-def test_create_subfaction(session, make_faction):
-    f = make_faction()
+def test_create_subfaction(session):
     svc = UnitService(session)
-    sub = svc.create_subfaction(f.id, "Ultramarines")
-    assert sub.faction_id == f.id
+    faction = svc.create_faction("Space Marines")
+    sub = svc.create_subfaction(faction.id, "Ultramarines")
+    assert sub.faction_id == faction.id
     assert sub.name == "Ultramarines"
 
 
@@ -203,9 +203,16 @@ def test_create_subfaction_unknown_faction_raises_lookup_error(session):
         svc.create_subfaction(uuid.uuid4(), "X")
 
 
-def test_create_subfaction_duplicate_raises_value_error(session, make_faction):
-    f = make_faction()
+def test_create_subfaction_wrong_faction_raises_value_error(session):
     svc = UnitService(session)
-    svc.create_subfaction(f.id, "Sautekh")
+    faction = svc.create_faction("Space Marines")
     with pytest.raises(ValueError):
-        svc.create_subfaction(f.id, "Sautekh")
+        svc.create_subfaction(faction.id, "Necrons")  # Necrons is a Xenos army
+
+
+def test_create_subfaction_duplicate_raises_value_error(session):
+    svc = UnitService(session)
+    faction = svc.create_faction("Space Marines")
+    svc.create_subfaction(faction.id, "Ultramarines")
+    with pytest.raises(ValueError):
+        svc.create_subfaction(faction.id, "Ultramarines")
