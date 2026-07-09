@@ -13,10 +13,12 @@ from sqlmodel import Session, select
 from app.core.db.models import (
     FACTION_SUBFACTIONS,
     Ability,
+    ArmyUnit,
     Faction,
     FactionName,
     Subfaction,
     Unit,
+    UserUnit,
     Weapon,
 )
 from app.core.services.errors import (
@@ -152,8 +154,24 @@ class UnitService:
 
     def delete_unit(self, unit_id: UUID) -> None:
         unit = self.get_unit(unit_id)
+        # ArmyUnit/UserUnit reference units via RESTRICT FKs, so deleting a unit
+        # that's in any army or inventory would raise a raw IntegrityError (500).
+        # Guard it into a clean ConflictError (409) instead.
+        if self._unit_is_referenced(unit_id):
+            raise ConflictError(
+                f"unit {unit_id} is in use by an army or inventory"
+            )
         self.session.delete(unit)
         self.session.commit()
+
+    def _unit_is_referenced(self, unit_id: UUID) -> bool:
+        for model in (ArmyUnit, UserUnit):
+            hit = self.session.exec(
+                select(model).where(model.unit_id == unit_id).limit(1)
+            ).first()
+            if hit is not None:
+                return True
+        return False
 
     def create_weapon(
         self,

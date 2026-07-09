@@ -896,8 +896,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
     datasheet content is operator-supplied (JSON or admin API). See "Seeding the
     catalog."
-19. **(S, bug) Fix `delete_unit` 500** — guard against `ArmyUnit`/`UserUnit`
-    references → `ConflictError` (409). See "API layer → Catalog administration."
+19. ✓ **Fix `delete_unit` 500** — guards against `ArmyUnit`/`UserUnit` references
+    (`_unit_is_referenced`) → `ConflictError` (409). See "API layer → Catalog
+    administration."
 20. **(S) Unlink weapon/ability** — `DELETE /units/{id}/weapons/{weapon_id}` and
     `.../abilities/{ability_id}`. See "API layer → Catalog administration."
 21. **(S) Delete a subfaction** — guarded `DELETE /subfactions/{id}`. See "API

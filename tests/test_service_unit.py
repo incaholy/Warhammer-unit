@@ -113,6 +113,19 @@ def test_delete_unit_missing_raises_lookup_error(session):
         svc.delete_unit(uuid.uuid4())
 
 
+def test_delete_unit_in_use_raises_conflict(session, make_user, make_unit):
+    from app.core.db.models import UserUnit
+    from app.core.services.errors import ConflictError
+
+    user = make_user()
+    unit = make_unit()
+    session.add(UserUnit(owner_user_id=user.id, unit_id=unit.id, amount=1))
+    session.commit()
+    svc = UnitService(session)
+    with pytest.raises(ConflictError):
+        svc.delete_unit(unit.id)
+
+
 def test_link_weapon(session, make_unit):
     unit = make_unit()
     weapon = _weapon()

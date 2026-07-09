@@ -132,6 +132,16 @@ def test_delete_unit(admin_client, make_faction):
     assert admin_client.get(f"/units/{unit['id']}").status_code == 404
 
 
+def test_delete_unit_in_use_returns_409(admin_client, session, make_user, make_unit):
+    from app.core.db.models import UserUnit
+
+    unit = make_unit()
+    session.add(UserUnit(owner_user_id=make_user().id, unit_id=unit.id, amount=1))
+    session.commit()
+    resp = admin_client.delete(f"/units/{unit.id}")
+    assert resp.status_code == 409  # in use by an inventory
+
+
 def test_link_weapon(admin_client, session, make_faction):
     f = make_faction()
     unit = admin_client.post("/units", json=_unit_payload(f.id)).json()
