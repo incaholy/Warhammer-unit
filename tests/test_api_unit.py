@@ -71,6 +71,24 @@ def test_list_units_name_search_is_case_insensitive(client, make_unit):
     assert [u["unit_name"] for u in body] == ["Intercessor"]
 
 
+def test_list_units_sets_total_count_header(client, make_unit):
+    for name in ("Alpha", "Bravo", "Charlie"):
+        make_unit(unit_name=name)
+    resp = client.get("/units", params={"limit": 2})
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2  # page is limited
+    assert resp.headers["X-Total-Count"] == "3"  # but the total is the full count
+
+
+def test_list_units_total_count_respects_filter(client, make_faction, make_unit):
+    f = make_faction()
+    make_unit(faction=f)
+    make_unit(faction=f)
+    make_unit()  # different faction
+    resp = client.get("/units", params={"faction_id": str(f.id)})
+    assert resp.headers["X-Total-Count"] == "2"
+
+
 def test_list_units_paginates_in_stable_order(client, make_unit):
     for name in ("Charlie", "Alpha", "Bravo"):  # inserted out of order
         make_unit(unit_name=name)

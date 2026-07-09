@@ -842,12 +842,14 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 14. **(S) First-admin bootstrap helper** — `scripts/make_admin.py` +
     `make create-admin`; unblocks catalog seeding/management. See "Authentication
     & authorization → Planned hardening."
-15. **(S) `GET /weapons` + `GET /abilities`** — list routes so the admin UI can
-    pick weapons/abilities to link. See "API layer → Planned additions."
-16. **(S) `GET /factions/taxonomy`** — expose `FACTION_SUBFACTIONS` for subfaction
+15. ✓ **`GET /weapons` + `GET /abilities`** — list routes so the admin UI can
+    pick weapons/abilities to link (`list_weapons`/`list_abilities` on
+    `UnitService`). See "API layer → Planned additions."
+16. ✓ **`GET /factions/taxonomy`** — exposes `FACTION_SUBFACTIONS` for subfaction
     dropdowns. See "API layer → Planned additions."
-17. **(S) `X-Total-Count` on `GET /units`** — a total for the catalog's "N results"
-    count. See "API layer → Planned additions."
+17. ✓ **`X-Total-Count` on `GET /units`** — `UnitService.count_units` sets the
+    total header for the catalog's "N results" count. See "API layer → Planned
+    additions."
 18. **(M) Seed script + starter dataset** — `scripts/seed_datasheets.py` +
     `datasheets.json` + `make seed`; **the** frontend prerequisite (a catalog with
     data). See "Seeding the catalog."

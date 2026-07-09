@@ -7,6 +7,7 @@ duplicates, and `UnitValidationError` for bad input, per SPEC.md conventions.
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.db.models import (
@@ -81,6 +82,26 @@ class UnitService:
             raise NotFoundError(f"unit {unit_id} not found")
         return unit
 
+    def _apply_unit_filters(
+        self,
+        statement,
+        faction_id: Optional[UUID],
+        subfaction_id: Optional[UUID],
+        q: Optional[str],
+    ):
+        """Apply the shared `list_units`/`count_units` filters to a statement.
+
+        `faction_id`/`subfaction_id` are exact matches; `q` is a
+        case-insensitive substring match on the unit name.
+        """
+        if faction_id is not None:
+            statement = statement.where(Unit.faction_id == faction_id)
+        if subfaction_id is not None:
+            statement = statement.where(Unit.subfaction_id == subfaction_id)
+        if q:
+            statement = statement.where(Unit.unit_name.ilike(f"%{q}%"))
+        return statement
+
     def list_units(
         self,
         faction_id: Optional[UUID] = None,
@@ -89,21 +110,24 @@ class UnitService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Unit]:
-        """Catalog units, optionally filtered and paged.
-
-        `faction_id`/`subfaction_id` are exact matches; `q` is a
-        case-insensitive substring match on the unit name. Results are ordered
-        by name so `offset`/`limit` paging is stable.
-        """
-        statement = select(Unit)
-        if faction_id is not None:
-            statement = statement.where(Unit.faction_id == faction_id)
-        if subfaction_id is not None:
-            statement = statement.where(Unit.subfaction_id == subfaction_id)
-        if q:
-            statement = statement.where(Unit.unit_name.ilike(f"%{q}%"))
+        """A page of catalog units, filtered and ordered by name (stable paging)."""
+        statement = self._apply_unit_filters(
+            select(Unit), faction_id, subfaction_id, q
+        )
         statement = statement.order_by(Unit.unit_name).offset(offset).limit(limit)
         return list(self.session.exec(statement).all())
+
+    def count_units(
+        self,
+        faction_id: Optional[UUID] = None,
+        subfaction_id: Optional[UUID] = None,
+        q: Optional[str] = None,
+    ) -> int:
+        """Total units matching the same filters as `list_units` (ignores paging)."""
+        statement = self._apply_unit_filters(
+            select(func.count(Unit.id)), faction_id, subfaction_id, q
+        )
+        return self.session.exec(statement).one()
 
     def update_unit(self, unit_id: UUID, **fields) -> Unit:
         unit = self.get_unit(unit_id)
@@ -161,12 +185,18 @@ class UnitService:
         self.session.refresh(weapon)
         return weapon
 
+    def list_weapons(self) -> list[Weapon]:
+        return list(self.session.exec(select(Weapon)).all())
+
     def create_ability(self, name: str, description: str) -> Ability:
         ability = Ability(name=name, description=description)
         self.session.add(ability)
         self.session.commit()
         self.session.refresh(ability)
         return ability
+
+    def list_abilities(self) -> list[Ability]:
+        return list(self.session.exec(select(Ability)).all())
 
     def link_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
         unit = self.get_unit(unit_id)

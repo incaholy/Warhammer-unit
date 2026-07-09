@@ -121,3 +121,33 @@ def test_create_ability(admin_client):
     )
     assert resp.status_code == 201
     assert resp.json()["name"] == "Oath of Moment"
+
+
+def test_list_weapons_is_public(client, admin_client):
+    admin_client.post(
+        "/weapons",
+        json={
+            "name": "Bolt rifle", "category": "range", "attacks": "2",
+            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
+            "damage": "1", "range_inches": 24,
+        },
+    )
+    resp = client.get("/weapons")  # public read
+    assert resp.status_code == 200
+    assert [w["name"] for w in resp.json()] == ["Bolt rifle"]
+
+
+def test_list_abilities_is_public(client, admin_client):
+    admin_client.post("/abilities", json={"name": "Oath", "description": "reroll"})
+    resp = client.get("/abilities")  # public read
+    assert resp.status_code == 200
+    assert [a["name"] for a in resp.json()] == ["Oath"]
+
+
+def test_faction_taxonomy(client):
+    resp = client.get("/factions/taxonomy")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body) == {"Imperium", "Xenos", "Chaos", "Space Marines"}
+    assert "Necrons" in body["Xenos"]
+    assert "Ultramarines" in body["Space Marines"]

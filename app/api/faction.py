@@ -12,7 +12,7 @@ from sqlmodel import Session, SQLModel
 
 from app.api.unit import Ability_Read, Weapon_Read
 from app.core.db.connection import get_session
-from app.core.db.models import FactionName
+from app.core.db.models import FACTION_SUBFACTIONS, FactionName
 from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
@@ -70,6 +70,16 @@ def list_factions(
     return service.list_factions()
 
 
+@router.get("/factions/taxonomy", response_model=dict[str, list[str]])
+def faction_taxonomy() -> dict[str, list[str]]:
+    """The allowed subfactions under each faction (for building dropdowns).
+
+    Sourced from the `FACTION_SUBFACTIONS` map, not the DB — these are the values
+    `create_subfaction` will accept, whether or not any have been created yet.
+    """
+    return {faction.value: list(subs) for faction, subs in FACTION_SUBFACTIONS.items()}
+
+
 @router.post(
     "/factions",
     response_model=Faction_Read,
@@ -107,6 +117,13 @@ def create_weapon(
     return service.create_weapon(**payload.model_dump())
 
 
+@router.get("/weapons", response_model=list[Weapon_Read])
+def list_weapons(
+    service: UnitService = Depends(get_catalog_service),
+) -> list[Weapon_Read]:
+    return service.list_weapons()
+
+
 @router.post(
     "/abilities",
     response_model=Ability_Read,
@@ -117,3 +134,10 @@ def create_ability(
     payload: Ability_Create, service: UnitService = Depends(get_catalog_service)
 ) -> Ability_Read:
     return service.create_ability(payload.name, payload.description)
+
+
+@router.get("/abilities", response_model=list[Ability_Read])
+def list_abilities(
+    service: UnitService = Depends(get_catalog_service),
+) -> list[Ability_Read]:
+    return service.list_abilities()

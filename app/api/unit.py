@@ -110,6 +110,7 @@ def create_unit(
 
 @router.get("", response_model=list[Unit_Read])
 def list_units(
+    response: Response,
     faction_id: Optional[UUID] = None,
     subfaction_id: Optional[UUID] = None,
     q: Optional[str] = Query(default=None, description="case-insensitive name search"),
@@ -117,6 +118,10 @@ def list_units(
     offset: int = Query(default=0, ge=0),
     service: UnitService = Depends(get_unit_service),
 ) -> list[Unit_Read]:
+    # Total across the filter (ignoring paging) so the catalog can show "N of M".
+    response.headers["X-Total-Count"] = str(
+        service.count_units(faction_id=faction_id, subfaction_id=subfaction_id, q=q)
+    )
     return service.list_units(
         faction_id=faction_id,
         subfaction_id=subfaction_id,
