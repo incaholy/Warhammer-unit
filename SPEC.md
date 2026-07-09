@@ -660,8 +660,9 @@ to the caller, and catalog writes require an admin. The pieces:
   *Plan:* `scripts/make_admin.py` opens a direct session (`Session(get_engine())`,
   the scripts path from `connection.py`), looks the user up by username, sets
   `is_admin = True`, and commits; `LookupError` if the user doesn't exist. Wrap in
-  `make create-admin USER=<username>`. No auth/HTTP — it's an operator action,
-  like the seed script. This unblocks catalog seeding/management.
+  `make create-admin USERNAME=<name>` (not `USER=`, which collides with the shell's
+  login-name env var). No auth/HTTP — it's an operator action, like the seed
+  script. This unblocks catalog seeding/management.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
   keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
@@ -838,9 +839,10 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 
 13. ✓ **CORS** — `CORSMiddleware` in `app/main.py`, allow-list from the
     `ALLOWED_ORIGINS` env var (off when unset). See "Frontend integration."
-14. **(S) First-admin bootstrap helper** — `scripts/make_admin.py` +
-    `make create-admin`; unblocks catalog seeding/management. See "Authentication
-    & authorization → Planned hardening."
+14. ✓ **First-admin bootstrap helper** — `scripts/make_admin.py` (a testable
+    `promote(session, username)` + a CLI) and `make create-admin USERNAME=<name>`;
+    unblocks catalog seeding/management. See "Authentication & authorization →
+    Planned hardening."
 15. ✓ **`GET /weapons` + `GET /abilities`** — list routes so the admin UI can
     pick weapons/abilities to link (`list_weapons`/`list_abilities` on
     `UnitService`). See "API layer → Planned additions."
