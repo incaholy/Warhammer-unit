@@ -184,7 +184,9 @@ Deletes cascade down the ownership hierarchy and protect the catalog. Deleting a
 foreign keys (`units`/`armies` → factions/subfactions, and the `unit_id` on
 `army_units`/`user_unit`) use the default RESTRICT, so you can't delete a unit or
 faction that's still referenced. Removing a `UserUnit` touches no army — a list
-can keep referencing a unit the user just sold.
+can keep referencing a unit the user just sold. (Deleting a referenced row will be
+guarded at the service layer to raise `ConflictError` → 409 rather than a raw
+`IntegrityError` → 500 — planned; see "API layer → Catalog administration.")
 
 Unit stat line maps to the datasheet: `movement` (M), `toughness` (T),
 `armor_save` (Sv), `wounds` (W), `invulnerable_save` (nullable Inv),
@@ -486,6 +488,37 @@ need. **Effort: all S** unless noted.
   it keeps the bare-list body **non-breaking** (see "Custom service errors" for
   the same no-envelope stance).
 
+### Catalog administration (planned)
+
+Admin catalog CRUD is uneven: units are fully editable, but weapons, abilities,
+and subfactions are **create-only**, there's no way to **unlink** a wrongly-linked
+weapon/ability, and deleting a referenced row **500s**. These are all admin-gated,
+additive routes. A **shared delete guard** underpins the deletes — `Unit`,
+`Subfaction`, and `Faction` are referenced by RESTRICT foreign keys, so before
+deleting one, check for references and raise `ConflictError` (→ 409) instead of
+letting a raw `IntegrityError` surface as a 500. Weapons/abilities need no guard:
+their link rows (`unit_weapons`/`unit_abilities`) cascade.
+
+- **Fix `delete_unit` (bug)** *(S)* — guard against `ArmyUnit`/`UserUnit`
+  references → `ConflictError`. Today deleting an in-use unit 500s. No route change
+  (409 flows through the `ServiceError` handler).
+- **Unlink weapon/ability** *(S)* — `unlink_weapon(unit_id, weapon_id)` /
+  `unlink_ability(unit_id, ability_id)` on `UnitService` (idempotent), exposed as
+  `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
+  Mirrors the existing `POST` link routes.
+- **Editable weapons + abilities** *(M)* — `update_weapon`/`delete_weapon` and
+  `update_ability`/`delete_ability` (partial update; bad `category` or unknown
+  field → `UnitValidationError`; 404 if missing), exposed as `PATCH`/`DELETE
+  /weapons/{id}` and `/abilities/{id}` (new all-optional `Weapon_Update` /
+  `Ability_Update`). The high-value gap — stat/description typos are otherwise
+  permanent.
+- **Delete a subfaction** *(S)* — `delete_subfaction(id)` (guarded) +
+  `DELETE /subfactions/{id}` → 204. No `PATCH`: the name is map-constrained, so
+  delete-and-recreate covers a mistake.
+- **Factions stay create + list only** — the four `FactionName` values are fixed
+  and can't be mistyped (422 blocks that), so edit/delete would add a
+  guarded-delete failure mode for no real use case. Out of scope unless needed.
+
 ## Custom service errors
 
 **Implemented.** Services raise a typed hierarchy from
@@ -664,7 +697,13 @@ to the caller, and catalog writes require an admin. The pieces:
   `is_admin = True`, and commits; `LookupError` if the user doesn't exist. Wrap in
   `make create-admin USERNAME=<name>` (not `USER=`, which collides with the shell's
   login-name env var). No auth/HTTP — it's an operator action, like the seed
-  script. This unblocks catalog seeding/management.
+  script. This unblocks catalog seeding/management. **(Built — roadmap 14.)**
+- **Admin promotion via API** *(Effort: S)* — the *first* admin is bootstrapped out
+  of band (above), but there's currently no way for an existing admin to promote
+  another user. *Plan:* `UserService.set_admin(user_id, is_admin)` (`NotFoundError`
+  if missing) behind an admin-only `PATCH /users/{id}` `{is_admin}` → `User_Read`.
+  Optionally refuse to demote the last admin (skip initially). Keeps the bootstrap
+  for the first admin; adds team scaling.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
   keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
@@ -857,7 +896,17 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
     datasheet content is operator-supplied (JSON or admin API). See "Seeding the
     catalog."
-19. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
+19. **(S, bug) Fix `delete_unit` 500** — guard against `ArmyUnit`/`UserUnit`
+    references → `ConflictError` (409). See "API layer → Catalog administration."
+20. **(S) Unlink weapon/ability** — `DELETE /units/{id}/weapons/{weapon_id}` and
+    `.../abilities/{ability_id}`. See "API layer → Catalog administration."
+21. **(S) Delete a subfaction** — guarded `DELETE /subfactions/{id}`. See "API
+    layer → Catalog administration."
+22. **(S, optional) Admin promotion via API** — admin-only `PATCH /users/{id}`
+    `{is_admin}`. See "Authentication & authorization → Planned hardening."
+23. **(M) Editable weapons + abilities** — `PATCH`/`DELETE /weapons/{id}` and
+    `/abilities/{id}`. See "API layer → Catalog administration."
+24. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 
 **Deploy checklist (not code):** set a real `SECRET_KEY`; point `ALLOWED_ORIGINS`
