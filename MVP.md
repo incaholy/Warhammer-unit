@@ -38,8 +38,8 @@ admin-curated.
 | Service | Responsibility | Status |
 |---|---|---|
 | `AuthService` | register (hash password) + authenticate (username/email + password) | ✅ implemented + tested |
-| `UserService` | create / fetch users | ✅ implemented + tested |
-| `UnitService` | the catalog — units, factions, subfactions, weapons, abilities (+ linking, filtering, counts) | ✅ implemented + tested |
+| `UserService` | create / fetch users, grant/revoke admin | ✅ implemented + tested |
+| `UnitService` | the catalog — full CRUD for units, weapons, abilities; factions/subfactions (+ link/unlink, filtering, counts) | ✅ implemented + tested |
 | `InventoryService` | a user's owned units (`user_unit`) — add/set/remove/list | ✅ implemented + tested |
 | `ArmyService` | armies + their units, plus `points_total`, `shortfall`, `validate` | ✅ implemented + tested |
 
@@ -50,8 +50,9 @@ admin-curated.
   `GET /factions/taxonomy`, `GET /weapons`, `GET /abilities`).
 - **Authenticated (own data)**: `GET /me`, `/me/inventory/*`, `/me/armies/*`
   (armies ownership-checked → 404 for someone else's).
-- **Admin only**: catalog **writes** (`/units`, `/factions`, `/subfactions`,
-  `/weapons`, `/abilities`).
+- **Admin only**: catalog **writes** — units (create/update/delete + link/unlink
+  weapons & abilities), weapons & abilities (create/update/delete), factions
+  (create), subfactions (create/delete); plus admin promotion (`PATCH /users/{id}`).
 
 ## Feature checklist
 
@@ -61,7 +62,9 @@ admin-curated.
 - [x] Own-data routing (`/me/*`) — identity from token, not path
 - [x] Army ownership check (`get_owned_army`) — stranger's `army_id` → 404
 - [x] Admin-gated catalog writes; public catalog reads
-- [x] Catalog CRUD: units, factions, subfactions, weapons, abilities + link weapon/ability
+- [x] Catalog CRUD: units (create/update/delete, link **and unlink** weapons/abilities), weapons & abilities (create/update/delete), factions (create), subfactions (create/delete)
+- [x] Delete guard: deleting a referenced unit/subfaction → 409 (not a 500)
+- [x] Admin promotion via API (`PATCH /users/{id}` `{is_admin}`, admin-only)
 - [x] Faction/subfaction name constraints (`FactionName` enum → 422; `FACTION_SUBFACTIONS` map → 400)
 - [x] Catalog reads: `GET /units` (filter by faction/subfaction/`q` + `limit`/`offset` + `X-Total-Count`), `GET /units/{id}`, `GET /factions`, `GET /factions/taxonomy`, `GET /weapons`, `GET /abilities`
 - [x] Inventory: upsert-add (201/200), set amount, remove, list
@@ -72,7 +75,7 @@ admin-curated.
 - [x] Typed service errors (`NotFoundError` 404 / `ConflictError` 409 / `*ValidationError` 400 with `field`)
 - [x] Containerization: `Dockerfile` + `docker-compose` (API + Postgres), migrations on start
 - [x] CORS (env `ALLOWED_ORIGINS`), first-admin helper (`make create-admin`), seed script (`make seed`)
-- [x] Test suite (147 tests) + Makefile + `.env.example`
+- [x] Test suite (168 tests) + Makefile + `.env.example`
 
 ### To build 🔨 (backlog)
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
