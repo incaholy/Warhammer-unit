@@ -59,6 +59,23 @@ class Ability_Create(SQLModel):
     description: str
 
 
+class Weapon_Update(SQLModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    attacks: Optional[str] = None
+    weapon_skill: Optional[int] = None
+    strength: Optional[int] = None
+    armor_piercing: Optional[int] = None
+    damage: Optional[str] = None
+    range_inches: Optional[int] = None
+    keywords: Optional[list[str]] = None
+
+
+class Ability_Update(SQLModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 def get_catalog_service(session: Session = Depends(get_session)) -> UnitService:
     return UnitService(session)
 
@@ -136,6 +153,31 @@ def list_weapons(
     return service.list_weapons()
 
 
+@router.patch(
+    "/weapons/{weapon_id}",
+    response_model=Weapon_Read,
+    dependencies=[Depends(get_current_admin)],
+)
+def update_weapon(
+    weapon_id: UUID,
+    payload: Weapon_Update,
+    service: UnitService = Depends(get_catalog_service),
+) -> Weapon_Read:
+    return service.update_weapon(weapon_id, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete(
+    "/weapons/{weapon_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
+def delete_weapon(
+    weapon_id: UUID, service: UnitService = Depends(get_catalog_service)
+) -> Response:
+    service.delete_weapon(weapon_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/abilities",
     response_model=Ability_Read,
@@ -153,3 +195,28 @@ def list_abilities(
     service: UnitService = Depends(get_catalog_service),
 ) -> list[Ability_Read]:
     return service.list_abilities()
+
+
+@router.patch(
+    "/abilities/{ability_id}",
+    response_model=Ability_Read,
+    dependencies=[Depends(get_current_admin)],
+)
+def update_ability(
+    ability_id: UUID,
+    payload: Ability_Update,
+    service: UnitService = Depends(get_catalog_service),
+) -> Ability_Read:
+    return service.update_ability(ability_id, **payload.model_dump(exclude_unset=True))
+
+
+@router.delete(
+    "/abilities/{ability_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
+def delete_ability(
+    ability_id: UUID, service: UnitService = Depends(get_catalog_service)
+) -> Response:
+    service.delete_ability(ability_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

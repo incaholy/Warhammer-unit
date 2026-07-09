@@ -36,6 +36,11 @@ class UnitService:
         "armor_save", "wounds", "invulnerable_save", "leadership",
         "objective_control", "points", "keywords",
     }
+    _WEAPON_UPDATABLE = {
+        "name", "category", "attacks", "weapon_skill", "strength",
+        "armor_piercing", "damage", "range_inches", "keywords",
+    }
+    _ABILITY_UPDATABLE = {"name", "description"}
 
     def __init__(self, session: Session):
         self.session = session
@@ -207,6 +212,30 @@ class UnitService:
     def list_weapons(self) -> list[Weapon]:
         return list(self.session.exec(select(Weapon)).all())
 
+    def update_weapon(self, weapon_id: UUID, **fields) -> Weapon:
+        weapon = self.session.get(Weapon, weapon_id)
+        if weapon is None:
+            raise NotFoundError(f"weapon {weapon_id} not found")
+        unknown = set(fields) - self._WEAPON_UPDATABLE
+        if unknown:
+            raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        if "category" in fields and fields["category"] not in ("range", "melee"):
+            raise UnitValidationError("category", "must be 'range' or 'melee'")
+        for key, value in fields.items():
+            setattr(weapon, key, value)
+        self.session.add(weapon)
+        self.session.commit()
+        self.session.refresh(weapon)
+        return weapon
+
+    def delete_weapon(self, weapon_id: UUID) -> None:
+        weapon = self.session.get(Weapon, weapon_id)
+        if weapon is None:
+            raise NotFoundError(f"weapon {weapon_id} not found")
+        # unit_weapons links cascade, so no reference guard is needed.
+        self.session.delete(weapon)
+        self.session.commit()
+
     def create_ability(self, name: str, description: str) -> Ability:
         ability = Ability(name=name, description=description)
         self.session.add(ability)
@@ -216,6 +245,28 @@ class UnitService:
 
     def list_abilities(self) -> list[Ability]:
         return list(self.session.exec(select(Ability)).all())
+
+    def update_ability(self, ability_id: UUID, **fields) -> Ability:
+        ability = self.session.get(Ability, ability_id)
+        if ability is None:
+            raise NotFoundError(f"ability {ability_id} not found")
+        unknown = set(fields) - self._ABILITY_UPDATABLE
+        if unknown:
+            raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        for key, value in fields.items():
+            setattr(ability, key, value)
+        self.session.add(ability)
+        self.session.commit()
+        self.session.refresh(ability)
+        return ability
+
+    def delete_ability(self, ability_id: UUID) -> None:
+        ability = self.session.get(Ability, ability_id)
+        if ability is None:
+            raise NotFoundError(f"ability {ability_id} not found")
+        # unit_abilities links cascade, so no reference guard is needed.
+        self.session.delete(ability)
+        self.session.commit()
 
     def link_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
         unit = self.get_unit(unit_id)

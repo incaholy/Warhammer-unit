@@ -488,12 +488,13 @@ need. **Effort: all S** unless noted.
   it keeps the bare-list body **non-breaking** (see "Custom service errors" for
   the same no-envelope stance).
 
-### Catalog administration (planned)
+### Catalog administration
 
-Admin catalog CRUD is uneven: units are fully editable, but weapons, abilities,
-and subfactions are **create-only**, there's no way to **unlink** a wrongly-linked
-weapon/ability, and deleting a referenced row **500s**. These are all admin-gated,
-additive routes. A **shared delete guard** underpins the deletes — `Unit`,
+**Implemented (roadmap 19–23).** Admin catalog CRUD is now complete: units,
+weapons, and abilities are fully editable, subfactions can be deleted, wrongly-
+linked weapons/abilities can be unlinked, and deleting a referenced row returns a
+clean **409** instead of a 500. These are all admin-gated routes. A **shared
+delete guard** underpins the deletes — `Unit`,
 `Subfaction`, and `Faction` are referenced by RESTRICT foreign keys, so before
 deleting one, check for references and raise `ConflictError` (→ 409) instead of
 letting a raw `IntegrityError` surface as a 500. Weapons/abilities need no guard:
@@ -908,8 +909,10 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 22. ✓ **Admin promotion via API** — `UserService.set_admin` + admin-only
     `PATCH /users/{id}` `{is_admin}` → `UserAdmin_Read` (surfaces `is_admin`). See
     "Authentication & authorization → Planned hardening."
-23. **(M) Editable weapons + abilities** — `PATCH`/`DELETE /weapons/{id}` and
-    `/abilities/{id}`. See "API layer → Catalog administration."
+23. ✓ **Editable weapons + abilities** — `update_weapon`/`delete_weapon`,
+    `update_ability`/`delete_ability` + `PATCH`/`DELETE /weapons/{id}` and
+    `/abilities/{id}` (all-optional `Weapon_Update`/`Ability_Update`; links cascade,
+    so no delete guard). See "API layer → Catalog administration."
 24. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 

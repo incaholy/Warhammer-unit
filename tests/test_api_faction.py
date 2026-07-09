@@ -181,3 +181,56 @@ def test_delete_subfaction_in_use_returns_409(admin_client, make_unit):
 def test_delete_subfaction_requires_admin(auth_client):
     resp = auth_client.delete(f"/subfactions/{uuid.uuid4()}")  # non-admin
     assert resp.status_code == 403
+
+
+def _make_weapon(admin_client, name="Bolt rifle"):
+    return admin_client.post(
+        "/weapons",
+        json={
+            "name": name, "category": "range", "attacks": "2",
+            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
+            "damage": "1", "range_inches": 24,
+        },
+    ).json()
+
+
+def test_update_weapon(admin_client):
+    w = _make_weapon(admin_client)
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"strength": 5})
+    assert resp.status_code == 200
+    assert resp.json()["strength"] == 5
+
+
+def test_update_weapon_bad_category_returns_400(admin_client):
+    w = _make_weapon(admin_client)
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"category": "psychic"})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "category"
+
+
+def test_update_weapon_missing_returns_404(admin_client):
+    resp = admin_client.patch(f"/weapons/{uuid.uuid4()}", json={"strength": 5})
+    assert resp.status_code == 404
+
+
+def test_update_weapon_requires_admin(auth_client):
+    resp = auth_client.patch(f"/weapons/{uuid.uuid4()}", json={"strength": 5})
+    assert resp.status_code == 403
+
+
+def test_delete_weapon(admin_client):
+    w = _make_weapon(admin_client)
+    resp = admin_client.delete(f"/weapons/{w['id']}")
+    assert resp.status_code == 204
+    assert admin_client.get("/weapons").json() == []
+
+
+def test_update_and_delete_ability(admin_client):
+    a = admin_client.post(
+        "/abilities", json={"name": "Oath", "description": "old"}
+    ).json()
+    patched = admin_client.patch(f"/abilities/{a['id']}", json={"description": "new"})
+    assert patched.status_code == 200
+    assert patched.json()["description"] == "new"
+    assert admin_client.delete(f"/abilities/{a['id']}").status_code == 204
+    assert admin_client.get("/abilities").json() == []
