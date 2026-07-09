@@ -50,3 +50,18 @@ def test_duplicate_email_raises_value_error(session):
     svc.create_user(username="a", email="dup@test.io", password_hash="h")
     with pytest.raises(ValueError):
         svc.create_user(username="b", email="dup@test.io", password_hash="h")
+
+
+def test_set_admin_promotes(session):
+    svc = UserService(session)
+    user = svc.create_user("a", "a@test.io", "h")
+    assert user.is_admin is False
+    assert svc.set_admin(user.id, True).is_admin is True
+
+
+def test_set_admin_missing_raises_not_found(session):
+    from app.core.services.errors import NotFoundError
+
+    svc = UserService(session)
+    with pytest.raises(NotFoundError):
+        svc.set_admin(uuid.uuid4(), True)

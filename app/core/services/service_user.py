@@ -41,3 +41,12 @@ class UserService:
         if user is None:
             raise NotFoundError(f"user {user_id} not found")
         return user
+
+    def set_admin(self, user_id: UUID, is_admin: bool) -> User:
+        """Grant or revoke admin on a user; `NotFoundError` if they don't exist."""
+        user = self.get_user(user_id)
+        user.is_admin = is_admin
+        self.session.add(user)
+        self.session.commit()
+        self.session.refresh(user)
+        return user

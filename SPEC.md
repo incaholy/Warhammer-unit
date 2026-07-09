@@ -698,12 +698,12 @@ to the caller, and catalog writes require an admin. The pieces:
   `make create-admin USERNAME=<name>` (not `USER=`, which collides with the shell's
   login-name env var). No auth/HTTP — it's an operator action, like the seed
   script. This unblocks catalog seeding/management. **(Built — roadmap 14.)**
-- **Admin promotion via API** *(Effort: S)* — the *first* admin is bootstrapped out
-  of band (above), but there's currently no way for an existing admin to promote
-  another user. *Plan:* `UserService.set_admin(user_id, is_admin)` (`NotFoundError`
-  if missing) behind an admin-only `PATCH /users/{id}` `{is_admin}` → `User_Read`.
-  Optionally refuse to demote the last admin (skip initially). Keeps the bootstrap
-  for the first admin; adds team scaling.
+- **Admin promotion via API** *(Built — roadmap 22)* — the *first* admin is
+  bootstrapped out of band (above); an existing admin promotes/demotes others via
+  `UserService.set_admin(user_id, is_admin)` (`NotFoundError` if missing) behind an
+  admin-only `PATCH /users/{id}` `{is_admin}`. Returns `UserAdmin_Read` (like
+  `User_Read` but surfacing `is_admin`, since `User_Read` deliberately hides it).
+  Last-admin-lockout protection was left out for now.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
   keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
@@ -905,8 +905,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 21. ✓ **Delete a subfaction** — guarded `delete_subfaction` (units/armies →
     `ConflictError` 409) + `DELETE /subfactions/{id}` → 204. See "API layer →
     Catalog administration."
-22. **(S, optional) Admin promotion via API** — admin-only `PATCH /users/{id}`
-    `{is_admin}`. See "Authentication & authorization → Planned hardening."
+22. ✓ **Admin promotion via API** — `UserService.set_admin` + admin-only
+    `PATCH /users/{id}` `{is_admin}` → `UserAdmin_Read` (surfaces `is_admin`). See
+    "Authentication & authorization → Planned hardening."
 23. **(M) Editable weapons + abilities** — `PATCH`/`DELETE /weapons/{id}` and
     `/abilities/{id}`. See "API layer → Catalog administration."
 24. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
