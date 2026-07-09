@@ -857,13 +857,7 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
     datasheet content is operator-supplied (JSON or admin API). See "Seeding the
     catalog."
-19. **(M) Rate limiting on `/auth/*`** — `slowapi`, keyed by IP. Hardening; before
-    public deploy. See "Authentication & authorization → Planned hardening."
-20. **(M) Validation Tier 3** — per-datasheet count limits ("0-1 per army", epic
-    hero once). Needs new `Unit` fields (`max_per_army`, `is_epic_hero`) + a
-    migration + a new `validate` check.
-21. **(L) Validation Tier 4** — detachments / force-org rules (edition-specific).
-22. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the S/M
+19. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 
 **Deploy checklist (not code):** set a real `SECRET_KEY`; point `ALLOWED_ORIGINS`
