@@ -581,10 +581,12 @@ scope for now.)
 
 ## Seeding the catalog
 
-**Planned — not yet built.** Migrations create tables, not rows, so the catalog
-ships **empty**. Before the app is useful — and especially before the frontend's
-"browse the catalog" view has anything to show — it needs a seed. This section
-specs the seed script referenced in "Populating the catalog" and roadmap step 8.
+**Implemented (machinery); data is operator-supplied.** Migrations create tables,
+not rows, so the catalog ships **empty**. `scripts/seed_datasheets.py` bulk-loads
+it from `scripts/data/datasheets.json` — but that file **ships empty**: datasheet
+content is entered by the operator (fill the JSON, or add units via the admin API;
+both go through the same validation). The schema is documented in
+`scripts/data/README.md`. This realizes the plan below.
 
 - **Script** — `scripts/seed_datasheets.py`, run out of band (not an HTTP route).
   It opens a session directly (`Session(get_engine())`, the "scripts" path from
@@ -851,9 +853,10 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 17. ✓ **`X-Total-Count` on `GET /units`** — `UnitService.count_units` sets the
     total header for the catalog's "N results" count. See "API layer → Planned
     additions."
-18. **(M) Seed script + starter dataset** — `scripts/seed_datasheets.py` +
-    `datasheets.json` + `make seed`; **the** frontend prerequisite (a catalog with
-    data). See "Seeding the catalog."
+18. ✓ **Seed script** — `scripts/seed_datasheets.py` (get-or-create, idempotent) +
+    `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
+    datasheet content is operator-supplied (JSON or admin API). See "Seeding the
+    catalog."
 19. **(M) Rate limiting on `/auth/*`** — `slowapi`, keyed by IP. Hardening; before
     public deploy. See "Authentication & authorization → Planned hardening."
 20. **(M) Validation Tier 3** — per-datasheet count limits ("0-1 per army", epic
