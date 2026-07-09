@@ -902,8 +902,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 20. ✓ **Unlink weapon/ability** — idempotent `unlink_weapon`/`unlink_ability` +
     `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
     See "API layer → Catalog administration."
-21. **(S) Delete a subfaction** — guarded `DELETE /subfactions/{id}`. See "API
-    layer → Catalog administration."
+21. ✓ **Delete a subfaction** — guarded `delete_subfaction` (units/armies →
+    `ConflictError` 409) + `DELETE /subfactions/{id}` → 204. See "API layer →
+    Catalog administration."
 22. **(S, optional) Admin promotion via API** — admin-only `PATCH /users/{id}`
     `{is_admin}`. See "Authentication & authorization → Planned hardening."
 23. **(M) Editable weapons + abilities** — `PATCH`/`DELETE /weapons/{id}` and

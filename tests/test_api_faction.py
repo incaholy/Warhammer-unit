@@ -151,3 +151,33 @@ def test_faction_taxonomy(client):
     assert set(body) == {"Imperium", "Xenos", "Chaos", "Space Marines"}
     assert "Necrons" in body["Xenos"]
     assert "Ultramarines" in body["Space Marines"]
+
+
+def _make_subfaction(admin_client, faction="Space Marines", name="Ultramarines"):
+    f = admin_client.post("/factions", json={"name": faction}).json()
+    return admin_client.post(
+        "/subfactions", json={"faction_id": f["id"], "name": name}
+    ).json()
+
+
+def test_delete_subfaction(admin_client):
+    sub = _make_subfaction(admin_client)
+    resp = admin_client.delete(f"/subfactions/{sub['id']}")
+    assert resp.status_code == 204
+
+
+def test_delete_subfaction_missing_returns_404(admin_client):
+    resp = admin_client.delete(f"/subfactions/{uuid.uuid4()}")
+    assert resp.status_code == 404
+
+
+def test_delete_subfaction_in_use_returns_409(admin_client, make_unit):
+    sub = _make_subfaction(admin_client)
+    make_unit(subfaction_id=uuid.UUID(sub["id"]))  # a unit now references it
+    resp = admin_client.delete(f"/subfactions/{sub['id']}")
+    assert resp.status_code == 409
+
+
+def test_delete_subfaction_requires_admin(auth_client):
+    resp = auth_client.delete(f"/subfactions/{uuid.uuid4()}")  # non-admin
+    assert resp.status_code == 403

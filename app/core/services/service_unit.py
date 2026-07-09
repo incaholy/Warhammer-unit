@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 from app.core.db.models import (
     FACTION_SUBFACTIONS,
     Ability,
+    Army,
     ArmyUnit,
     Faction,
     FactionName,
@@ -311,3 +312,25 @@ class UnitService:
         self.session.commit()
         self.session.refresh(sub)
         return sub
+
+    def delete_subfaction(self, subfaction_id: UUID) -> None:
+        sub = self.session.get(Subfaction, subfaction_id)
+        if sub is None:
+            raise NotFoundError(f"subfaction {subfaction_id} not found")
+        # units.subfaction_id / armies.subfaction_id reference it via RESTRICT FKs,
+        # so guard the delete into a ConflictError (409) rather than a 500.
+        if self._subfaction_is_referenced(subfaction_id):
+            raise ConflictError(
+                f"subfaction {subfaction_id} is in use by a unit or army"
+            )
+        self.session.delete(sub)
+        self.session.commit()
+
+    def _subfaction_is_referenced(self, subfaction_id: UUID) -> bool:
+        for model in (Unit, Army):
+            hit = self.session.exec(
+                select(model).where(model.subfaction_id == subfaction_id).limit(1)
+            ).first()
+            if hit is not None:
+                return True
+        return False

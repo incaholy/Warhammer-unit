@@ -7,7 +7,7 @@ sibling resources. Catalog writes are admin/seed in principle.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.api.unit import Ability_Read, Weapon_Read
@@ -103,6 +103,18 @@ def create_subfaction(
     service: UnitService = Depends(get_catalog_service),
 ) -> Subfaction_Read:
     return service.create_subfaction(payload.faction_id, payload.name)
+
+
+@router.delete(
+    "/subfactions/{subfaction_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
+def delete_subfaction(
+    subfaction_id: UUID, service: UnitService = Depends(get_catalog_service)
+) -> Response:
+    service.delete_subfaction(subfaction_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
