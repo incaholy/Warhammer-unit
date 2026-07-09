@@ -187,3 +187,31 @@ def link_ability(
     service: UnitService = Depends(get_unit_service),
 ) -> Unit_Read:
     return service.link_ability(unit_id, payload.ability_id)
+
+
+@router.delete(
+    "/{unit_id}/weapons/{weapon_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
+def unlink_weapon(
+    unit_id: UUID,
+    weapon_id: UUID,
+    service: UnitService = Depends(get_unit_service),
+) -> Response:
+    service.unlink_weapon(unit_id, weapon_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{unit_id}/abilities/{ability_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(get_current_admin)],
+)
+def unlink_ability(
+    unit_id: UUID,
+    ability_id: UUID,
+    service: UnitService = Depends(get_unit_service),
+) -> Response:
+    service.unlink_ability(unit_id, ability_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

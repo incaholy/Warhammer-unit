@@ -240,6 +240,28 @@ class UnitService:
             self.session.refresh(unit)
         return unit
 
+    def unlink_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
+        """Detach a weapon from a unit; idempotent (no error if not linked)."""
+        unit = self.get_unit(unit_id)
+        weapon = self.session.get(Weapon, weapon_id)
+        if weapon is not None and weapon in unit.weapons:
+            unit.weapons.remove(weapon)
+            self.session.add(unit)
+            self.session.commit()
+            self.session.refresh(unit)
+        return unit
+
+    def unlink_ability(self, unit_id: UUID, ability_id: UUID) -> Unit:
+        """Detach an ability from a unit; idempotent (no error if not linked)."""
+        unit = self.get_unit(unit_id)
+        ability = self.session.get(Ability, ability_id)
+        if ability is not None and ability in unit.abilities:
+            unit.abilities.remove(ability)
+            self.session.add(unit)
+            self.session.commit()
+            self.session.refresh(unit)
+        return unit
+
     # ---- factions & subfactions (catalog reference data) ----
 
     def list_factions(self) -> list[Faction]:

@@ -171,3 +171,53 @@ def test_link_ability(admin_client, session, make_faction):
     )
     assert resp.status_code == 200
     assert [a["name"] for a in resp.json()["abilities"]] == ["Oath"]
+
+
+def test_unlink_weapon(admin_client, session, make_faction):
+    f = make_faction()
+    unit = admin_client.post("/units", json=_unit_payload(f.id)).json()
+    weapon = Weapon(
+        name="Bolt rifle", category="range", range_inches=24, attacks="2",
+        weapon_skill=3, strength=4, armor_piercing=1, damage="1",
+    )
+    session.add(weapon)
+    session.commit()
+    session.refresh(weapon)
+    admin_client.post(f"/units/{unit['id']}/weapons", json={"weapon_id": str(weapon.id)})
+    resp = admin_client.delete(f"/units/{unit['id']}/weapons/{weapon.id}")
+    assert resp.status_code == 204
+    assert admin_client.get(f"/units/{unit['id']}").json()["weapons"] == []
+
+
+def test_unlink_ability(admin_client, session, make_faction):
+    f = make_faction()
+    unit = admin_client.post("/units", json=_unit_payload(f.id)).json()
+    ability = Ability(name="Oath", description="reroll")
+    session.add(ability)
+    session.commit()
+    session.refresh(ability)
+    admin_client.post(f"/units/{unit['id']}/abilities", json={"ability_id": str(ability.id)})
+    resp = admin_client.delete(f"/units/{unit['id']}/abilities/{ability.id}")
+    assert resp.status_code == 204
+    assert admin_client.get(f"/units/{unit['id']}").json()["abilities"] == []
+
+
+def test_unlink_weapon_not_linked_is_idempotent(admin_client, session, make_faction):
+    f = make_faction()
+    unit = admin_client.post("/units", json=_unit_payload(f.id)).json()
+    weapon = Weapon(
+        name="Chainsword", category="melee", attacks="3",
+        weapon_skill=3, strength=4, armor_piercing=1, damage="1",
+    )
+    session.add(weapon)
+    session.commit()
+    session.refresh(weapon)
+    # never linked → still a clean 204
+    resp = admin_client.delete(f"/units/{unit['id']}/weapons/{weapon.id}")
+    assert resp.status_code == 204
+
+
+def test_unlink_weapon_requires_admin(auth_client):
+    # the admin gate runs before the body, so ids need not exist
+    resp = auth_client.delete(f"/units/{uuid.uuid4()}/weapons/{uuid.uuid4()}")
+    assert resp.status_code == 403

@@ -899,8 +899,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 19. ✓ **Fix `delete_unit` 500** — guards against `ArmyUnit`/`UserUnit` references
     (`_unit_is_referenced`) → `ConflictError` (409). See "API layer → Catalog
     administration."
-20. **(S) Unlink weapon/ability** — `DELETE /units/{id}/weapons/{weapon_id}` and
-    `.../abilities/{ability_id}`. See "API layer → Catalog administration."
+20. ✓ **Unlink weapon/ability** — idempotent `unlink_weapon`/`unlink_ability` +
+    `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
+    See "API layer → Catalog administration."
 21. **(S) Delete a subfaction** — guarded `DELETE /subfactions/{id}`. See "API
     layer → Catalog administration."
 22. **(S, optional) Admin promotion via API** — admin-only `PATCH /users/{id}`
