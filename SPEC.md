@@ -836,9 +836,8 @@ Steps 1–12 above are the build history. What's left, easiest first, each linki
 to the section with its plan. The **S** items are small, additive, and mostly
 non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 
-13. **(S) CORS + frontend connection** — `CORSMiddleware` with an env-driven
-    allow-list; the browser can't call the API cross-origin without it. See
-    "Frontend integration."
+13. ✓ **CORS** — `CORSMiddleware` in `app/main.py`, allow-list from the
+    `ALLOWED_ORIGINS` env var (off when unset). See "Frontend integration."
 14. **(S) First-admin bootstrap helper** — `scripts/make_admin.py` +
     `make create-admin`; unblocks catalog seeding/management. See "Authentication
     & authorization → Planned hardening."

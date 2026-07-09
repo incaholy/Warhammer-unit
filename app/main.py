@@ -9,7 +9,10 @@ which map them to HTTP status codes (SPEC.md "Error mapping"). Routers are
 mounted at the bottom.
 """
 
+import os
+
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.army import router as army_router
@@ -21,6 +24,19 @@ from app.api.user import router as user_router
 from app.core.services.errors import ServiceError
 
 app = FastAPI(title="Warhammer Unit Backend")
+
+# CORS fallback for a cross-origin frontend. The primary path is same-origin via
+# a proxy (SPEC "Frontend integration"), so this only matters when the frontend is
+# hosted elsewhere. Allow-list from ALLOWED_ORIGINS (comma-separated); never "*".
+# Auth is a Bearer header, so credentials/cookies stay off.
+_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if _origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # --- service exception -> HTTP mapping (keeps routers thin) ---
