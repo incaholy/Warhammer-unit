@@ -186,11 +186,8 @@ def add_unit(
     service: ArmyService = Depends(get_army_service),
 ) -> ArmyUnit_Read:
     # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    existed = any(
-        u.unit_id == payload.unit_id for u in service.list_army_units(army.id)
-    )
-    entry = service.add_unit(army.id, payload.unit_id, payload.amount)
-    if existed:
+    entry, created = service.add_unit(army.id, payload.unit_id, payload.amount)
+    if not created:
         response.status_code = status.HTTP_200_OK
     return entry
 

@@ -123,20 +123,25 @@ class ArmyService:
 
     # -------------------------- units in an army --------------------------
 
-    def add_unit(self, army_id: UUID, unit_id: UUID, amount: int = 1) -> ArmyUnit:
+    def add_unit(
+        self, army_id: UUID, unit_id: UUID, amount: int = 1
+    ) -> tuple[ArmyUnit, bool]:
+        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
+        without re-querying the army's units."""
         if amount < 1:
             raise ArmyValidationError("amount", "must be >= 1")
         self._require_army(army_id)
         self._require_unit(unit_id)
         entry = self._find_entry(army_id, unit_id)
-        if entry is None:
+        created = entry is None
+        if created:
             entry = ArmyUnit(army_id=army_id, unit_id=unit_id, amount=amount)
             self.session.add(entry)
         else:
             entry.amount += amount  # upsert: increment
         self.session.commit()
         self.session.refresh(entry)
-        return entry
+        return entry, created
 
     def set_amount(self, army_id: UUID, unit_id: UUID, amount: int) -> ArmyUnit:
         if amount < 1:

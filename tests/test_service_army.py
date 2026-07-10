@@ -88,8 +88,9 @@ def test_add_unit_to_army(session, make_army, make_unit):
     army = make_army()
     unit = make_unit()
     svc = ArmyService(session)
-    entry = svc.add_unit(army.id, unit.id, amount=2)
+    entry, created = svc.add_unit(army.id, unit.id, amount=2)
     assert entry.amount == 2
+    assert created is True
 
 
 def test_add_unit_twice_increments_amount(session, make_army, make_unit):
@@ -97,8 +98,9 @@ def test_add_unit_twice_increments_amount(session, make_army, make_unit):
     unit = make_unit()
     svc = ArmyService(session)
     svc.add_unit(army.id, unit.id, amount=2)
-    entry = svc.add_unit(army.id, unit.id, amount=3)
+    entry, created = svc.add_unit(army.id, unit.id, amount=3)
     assert entry.amount == 5  # upsert increments
+    assert created is False  # second add hits the existing row
 
 
 def test_add_unit_unknown_unit_raises_lookup_error(session, make_army):
@@ -166,7 +168,7 @@ def test_army_may_include_a_unit_the_user_does_not_own(
     svc = ArmyService(session)
     army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)
     # the user owns none of this unit; adding it to the army is still allowed
-    entry = svc.add_unit(army.id, unit.id, amount=2)
+    entry, _ = svc.add_unit(army.id, unit.id, amount=2)
     assert entry.amount == 2
 
 

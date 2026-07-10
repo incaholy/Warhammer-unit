@@ -25,8 +25,9 @@ def test_add_unit_to_inventory(session, make_user, make_unit):
     user = make_user()
     unit = make_unit()
     svc = InventoryService(session)
-    entry = svc.add_unit(user.id, unit.id, amount=3)
+    entry, created = svc.add_unit(user.id, unit.id, amount=3)
     assert entry.amount == 3
+    assert created is True
 
 
 def test_add_unit_twice_increments_amount(session, make_user, make_unit):
@@ -34,8 +35,9 @@ def test_add_unit_twice_increments_amount(session, make_user, make_unit):
     unit = make_unit()
     svc = InventoryService(session)
     svc.add_unit(user.id, unit.id, amount=1)
-    entry = svc.add_unit(user.id, unit.id, amount=2)
+    entry, created = svc.add_unit(user.id, unit.id, amount=2)
     assert entry.amount == 3  # upsert increments
+    assert created is False  # second add hits the existing row
 
 
 def test_add_unit_unknown_user_raises_lookup_error(session, make_unit):

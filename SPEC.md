@@ -956,9 +956,10 @@ parsing in the Makefile.)
   owns `/app`) and switches to it with `USER`; dropped the redundant `chmod`
   (`docker-entrypoint.sh` is committed `100755`, and `COPY` preserves the bit). Not
   live-verified (Docker daemon down).
-- [ ] **Upsert 201-vs-200 scan** — the inventory/army "add unit" routes run a full
-  `list_*` and scan it in Python to choose 201 vs 200 (extra round-trip, racy under
-  concurrency). *Fix:* return a `created` flag from `add_unit`.
+- [x] **Upsert 201-vs-200 scan** — *fixed:* `InventoryService`/`ArmyService.add_unit`
+  now return `(entry, created)`, so the routes pick 201 vs 200 from the flag instead
+  of scanning a full `list_*` (one fewer query, no read-then-write race). Callers +
+  tests updated to unpack (and assert the flag).
 
 ### Consistency / cleanup 🧹
 - [ ] **Remove dead `ForbiddenError`** — defined in `errors.py`, never raised, and

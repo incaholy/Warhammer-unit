@@ -54,12 +54,10 @@ def add_unit(
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
     # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    existed = any(
-        e.unit_id == payload.unit_id
-        for e in service.list_inventory(current_user.id)
+    entry, created = service.add_unit(
+        current_user.id, payload.unit_id, payload.amount
     )
-    entry = service.add_unit(current_user.id, payload.unit_id, payload.amount)
-    if existed:
+    if not created:
         response.status_code = status.HTTP_200_OK
     return entry
 

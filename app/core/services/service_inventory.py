@@ -17,20 +17,25 @@ class InventoryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> UserUnit:
+    def add_unit(
+        self, user_id: UUID, unit_id: UUID, amount: int = 1
+    ) -> tuple[UserUnit, bool]:
+        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
+        without re-querying the inventory."""
         if amount < 1:
             raise InventoryValidationError("amount", "must be >= 1")
         self._require_user(user_id)
         self._require_unit(unit_id)
         entry = self._find_entry(user_id, unit_id)
-        if entry is None:
+        created = entry is None
+        if created:
             entry = UserUnit(owner_user_id=user_id, unit_id=unit_id, amount=amount)
             self.session.add(entry)
         else:
             entry.amount += amount  # upsert: increment
         self.session.commit()
         self.session.refresh(entry)
-        return entry
+        return entry, created
 
     def set_amount(self, user_id: UUID, unit_id: UUID, amount: int) -> UserUnit:
         if amount < 1:
