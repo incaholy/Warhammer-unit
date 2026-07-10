@@ -181,7 +181,7 @@ class ArmyService:
             if need > 0:
                 rows.append(
                     Shortfall(
-                        unit=self.session.get(Unit, entry.unit_id),
+                        unit=self._unit_or_404(entry.unit_id),
                         in_list=entry.amount,
                         owned=have,
                         need=need,
@@ -197,7 +197,7 @@ class ArmyService:
         for entry in self.session.exec(
             select(ArmyUnit).where(ArmyUnit.army_id == army_id)
         ).all():
-            total += entry.amount * self.session.get(Unit, entry.unit_id).points
+            total += entry.amount * self._unit_or_404(entry.unit_id).points
         return total
 
     def validate(self, army_id: UUID) -> ValidationReport:
@@ -207,7 +207,7 @@ class ArmyService:
         for entry in self.session.exec(
             select(ArmyUnit).where(ArmyUnit.army_id == army_id)
         ).all():
-            unit = self.session.get(Unit, entry.unit_id)
+            unit = self._unit_or_404(entry.unit_id)
             total += entry.amount * unit.points
             if unit.faction_id != army.faction_id:
                 issues.append(
@@ -251,6 +251,14 @@ class ArmyService:
     def _require_unit(self, unit_id: UUID) -> None:
         if self.session.get(Unit, unit_id) is None:
             raise NotFoundError(f"unit {unit_id} not found")
+
+    def _unit_or_404(self, unit_id: UUID) -> Unit:
+        """Load a unit referenced by an ArmyUnit; a `NotFoundError` (not an
+        AttributeError/500) if the catalog row is somehow missing."""
+        unit = self.session.get(Unit, unit_id)
+        if unit is None:
+            raise NotFoundError(f"unit {unit_id} not found")
+        return unit
 
     def _find_entry(self, army_id: UUID, unit_id: UUID) -> Optional[ArmyUnit]:
         return self.session.exec(

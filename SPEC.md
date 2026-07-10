@@ -944,10 +944,10 @@ parsing in the Makefile.)
   `APP_ENV=production`. `.env.example` documents `APP_ENV`. +3 tests.
 
 ### Robustness ⚠️
-- [ ] **Guard roster `Unit` lookups** — `ArmyService.shortfall`/`points_total`/
-  `validate` call `session.get(Unit, …)` without a None check, so a dangling
-  `ArmyUnit` yields `AttributeError` → 500. *Fix:* fetch into a local and skip/raise
-  `NotFoundError`.
+- [x] **Guard roster `Unit` lookups** — *fixed:* `shortfall`/`points_total`/
+  `validate` route their catalog lookups through a new `_unit_or_404` helper, so a
+  dangling `ArmyUnit` raises `NotFoundError` (404) instead of `AttributeError` (500).
+  +1 test.
 - [ ] **Seed script error handling** — `scripts/seed_datasheets.py` `KeyError`s when
   a unit references an unknown weapon/faction, and gives a raw traceback on malformed
   JSON or a mid-file failure. *Fix:* friendly messages + a clean non-zero exit.

@@ -286,3 +286,15 @@ def test_add_unit_below_one_raises(session, make_army, make_unit):
     svc = ArmyService(session)
     with pytest.raises(ArmyValidationError):
         svc.add_unit(army.id, unit.id, amount=0)
+
+
+def test_roster_lookup_guards_missing_unit(session):
+    # shortfall/points_total/validate all route catalog lookups through
+    # _unit_or_404, so a missing unit surfaces as NotFoundError (404) rather than
+    # an AttributeError (500). (A dangling ArmyUnit can't be built normally — the
+    # FK is RESTRICT — so we exercise the guard helper directly.)
+    from app.core.services.errors import NotFoundError
+
+    svc = ArmyService(session)
+    with pytest.raises(NotFoundError):
+        svc._unit_or_404(uuid.uuid4())
