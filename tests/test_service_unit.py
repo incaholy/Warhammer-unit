@@ -382,3 +382,25 @@ def test_delete_subfaction_in_use_raises_conflict(session, make_unit):
     make_unit(subfaction_id=sub.id)  # a unit references it
     with pytest.raises(ConflictError):
         svc.delete_subfaction(sub.id)
+
+
+# ---- delete cascades the link rows (no reference guard needed for weapons/abilities) ----
+
+def test_delete_weapon_cascades_unit_link(session, make_unit):
+    unit = make_unit()
+    svc = UnitService(session)
+    w = _svc_weapon(svc)
+    svc.link_weapon(unit.id, w.id)
+    assert [x.name for x in svc.get_unit(unit.id).weapons] == ["Bolt rifle"]
+    svc.delete_weapon(w.id)  # succeeds despite the link (unit_weapons cascades)
+    assert svc.get_unit(unit.id).weapons == []
+
+
+def test_delete_ability_cascades_unit_link(session, make_unit):
+    unit = make_unit()
+    svc = UnitService(session)
+    a = svc.create_ability("Oath", "reroll")
+    svc.link_ability(unit.id, a.id)
+    assert [x.name for x in svc.get_unit(unit.id).abilities] == ["Oath"]
+    svc.delete_ability(a.id)  # succeeds despite the link (unit_abilities cascades)
+    assert svc.get_unit(unit.id).abilities == []

@@ -979,9 +979,9 @@ parsing in the Makefile.)
   field, bad category), `delete_weapon`/`delete_ability` (404), `list_weapons`/
   `list_abilities`, `count_units` (filters), `delete_subfaction` (success/404/409),
   and the `link_*` not-found error paths.
-- [ ] **Verify the delete-CASCADE** — no test links a weapon/ability to a unit,
-  deletes it, and asserts the unit no longer lists it (the "links cascade, no guard
-  needed" claim is unverified).
+- [x] **Verify the delete-CASCADE** — *fixed:* two tests link a weapon/ability to a
+  unit, delete it (succeeds despite the reference), and assert the unit no longer
+  lists it — confirming `unit_weapons`/`unit_abilities` cascade.
 - [ ] **`validate()` combined issues** — add a test with multiple simultaneous issue
   kinds and one pinning the `ok`/tier semantics.
 - [ ] **Fix conftest fragility** — `auth_client`/`admin_client` share one
