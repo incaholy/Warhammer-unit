@@ -952,8 +952,10 @@ parsing in the Makefile.)
   unknown faction/subfaction/weapon/ability references and missing unit fields into
   clear messages naming the offending record; `main()` catches read/JSON/service
   errors and exits non-zero via `_fail` (no raw traceback). +2 tests.
-- [ ] **Dockerfile hardening** — the image runs as root; add a non-root `USER`. Drop
-  the redundant `chmod +x docker-entrypoint.sh` (the file is already committed `755`).
+- [x] **Dockerfile hardening** — *fixed:* creates a non-root `appuser` (uid 1000,
+  owns `/app`) and switches to it with `USER`; dropped the redundant `chmod`
+  (`docker-entrypoint.sh` is committed `100755`, and `COPY` preserves the bit). Not
+  live-verified (Docker daemon down).
 - [ ] **Upsert 201-vs-200 scan** — the inventory/army "add unit" routes run a full
   `list_*` and scan it in Python to choose 201 vs 200 (extra round-trip, racy under
   concurrency). *Fix:* return a `created` flag from `add_unit`.

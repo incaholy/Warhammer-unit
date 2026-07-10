@@ -8,8 +8,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Then the application (and the entrypoint that migrates before serving).
+# docker-entrypoint.sh is committed executable (0755), so COPY preserves the bit.
 COPY . .
-RUN chmod +x /app/docker-entrypoint.sh
+
+# Run as a non-root user rather than root.
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8000
 
