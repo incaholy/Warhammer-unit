@@ -985,6 +985,7 @@ parsing in the Makefile.)
 - [x] **`validate()` combined issues** — *fixed:* a test where one over-costed,
   wrong-faction unit trips both `over_points` (Tier 1) and `wrong_faction` (Tier 2)
   at once, asserting both kinds present, `ok` False, and the right `points_total`.
-- [ ] **Fix conftest fragility** — `auth_client`/`admin_client` share one
-  `TestClient` (mutating its `Authorization` header), so a single test can't use both.
-  Give each its own client.
+- [x] **Fix conftest fragility** — *fixed:* `auth_client`/`admin_client` each build
+  their own `TestClient` via a `_authed_client` helper (depending on `client` only
+  for the session-override lifecycle), so a single test can use both. Added a
+  regression test asserting they're independent.

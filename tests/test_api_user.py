@@ -34,3 +34,10 @@ def test_promote_missing_user_returns_404(admin_client):
 
     resp = admin_client.patch(f"/users/{uuid.uuid4()}", json={"is_admin": True})
     assert resp.status_code == 404
+
+
+def test_auth_and_admin_clients_are_independent(auth_client, admin_client):
+    # both are separate authenticated clients, usable together in one test
+    assert auth_client.user.id != admin_client.user.id
+    assert auth_client.get("/me").json()["id"] == str(auth_client.user.id)
+    assert admin_client.get("/me").json()["id"] == str(admin_client.user.id)
