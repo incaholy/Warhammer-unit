@@ -29,7 +29,7 @@ admin-curated.
 | Services — business logic (session-injected) | `app/core/services/` | ✅ |
 | API — FastAPI routers + request/response schemas | `app/api/` | ✅ |
 | Security — hashing, JWT, current-user/admin deps | `app/core/security.py` | ✅ |
-| Operator scripts — seed catalog, make admin | `scripts/` | ✅ |
+| Operator scripts — seed catalog, make admin (+ Wahapedia scraper planned) | `scripts/` | ✅ |
 | Dev tooling — Makefile, tests, `.env.example` | repo root | ✅ |
 | Deployment — `Dockerfile` + `docker-compose.yml` (API + Postgres) | repo root | ✅ |
 
@@ -80,6 +80,13 @@ admin-curated.
 - [x] Quality pass: whole-roadmap review + Improvements (should-fix / robustness / consistency / coverage) — see SPEC.md "Improvements"
 
 ### To build 🔨 (backlog)
+- [ ] **Catalog scraper (Wahapedia)** — *change of plan for seeding.* Instead of
+  hand-filling `datasheets.json`, `scripts/scrape_wahapedia.py` will scrape
+  datasheets from Wahapedia (e.g. the White Scars page) into that JSON, then
+  `make seed` loads it (**scrape → JSON → seed**). Includes polite fetching + a
+  disk cache, mapping to our `FactionName`/`FACTION_SUBFACTIONS` taxonomy, and a
+  parser test against a saved HTML fixture. *(Full plan: SPEC.md → "Scraping the
+  catalog (Wahapedia)".)*
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
   scope; the backend is **frontend-ready** (seed, CORS, typed errors, catalog reads
   with a total count all in place). See SPEC.md "Frontend integration".
