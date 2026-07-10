@@ -64,6 +64,7 @@ admin-curated.
 - [x] Admin-gated catalog writes; public catalog reads
 - [x] Catalog CRUD: units (create/update/delete, link **and unlink** weapons/abilities), weapons & abilities (create/update/delete), factions (create), subfactions (create/delete)
 - [x] Delete guard: deleting a referenced unit/subfaction → 409 (not a 500)
+- [x] Input guard: `add_unit` (inventory + army) rejects amount < 1 (422 schema / 400 service)
 - [x] Admin promotion via API (`PATCH /users/{id}` `{is_admin}`, admin-only)
 - [x] Faction/subfaction name constraints (`FactionName` enum → 422; `FACTION_SUBFACTIONS` map → 400)
 - [x] Catalog reads: `GET /units` (filter by faction/subfaction/`q` + `limit`/`offset` + `X-Total-Count`), `GET /units/{id}`, `GET /factions`, `GET /factions/taxonomy`, `GET /weapons`, `GET /abilities`
@@ -73,9 +74,10 @@ admin-curated.
 - [x] Validation Tier 1 (points vs limit) + Tier 2 (faction / subfaction)
 - [x] Shortfall (army vs inventory — what to buy)
 - [x] Typed service errors (`NotFoundError` 404 / `ConflictError` 409 / `*ValidationError` 400 with `field`)
-- [x] Containerization: `Dockerfile` + `docker-compose` (API + Postgres), migrations on start
+- [x] Containerization: `Dockerfile` (non-root user) + `docker-compose` (API + Postgres), migrations on start
 - [x] CORS (env `ALLOWED_ORIGINS`), first-admin helper (`make create-admin`), seed script (`make seed`)
-- [x] Test suite (168 tests) + Makefile + `.env.example`
+- [x] Test suite (202 tests) + Makefile + `.env.example`
+- [x] Quality pass: whole-roadmap review + Improvements (should-fix / robustness / consistency / coverage) — see SPEC.md "Improvements"
 
 ### To build 🔨 (backlog)
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
@@ -83,7 +85,7 @@ admin-curated.
   with a total count all in place). See SPEC.md "Frontend integration".
 
 ### To add / harden ⚙️ (config & ops)
-- [ ] Set a real `SECRET_KEY` in production (a dev default is in place) — deploy-time.
+- [ ] Set a real `SECRET_KEY` in production — the app now refuses to start without it unless `APP_ENV=dev`, and `docker-compose` requires it; just provide the value at deploy-time.
 - [ ] Point `ALLOWED_ORIGINS` at the frontend's real origin — deploy-time (the CORS middleware itself is built).
 - [ ] Rate limiting on `/auth/*` (brute-force protection) — deferred; not yet needed. Plan in SPEC.md "Auth → Planned hardening".
 
