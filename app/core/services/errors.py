@@ -36,12 +36,6 @@ class ConflictError(ServiceError, ValueError):
     status_code = 409
 
 
-class ForbiddenError(ServiceError):
-    """An ownership/permission violation. → 403."""
-
-    status_code = 403
-
-
 class ValidationError(ServiceError, ValueError):
     """Base for per-service validation errors. → 400, carries `field`.
 

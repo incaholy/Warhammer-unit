@@ -450,7 +450,6 @@ hierarchy; the plain builtins remain as fallbacks):
 | `NotFoundError` (⊂ `LookupError`) | 404 |
 | `ConflictError` (⊂ `ValueError`) — duplicate | 409 |
 | `*ValidationError` (⊂ `ValueError`) — carries `field` | 400 |
-| `ForbiddenError` | 403 |
 | bare `LookupError` (fallback) | 404 |
 | bare `ValueError` / `TypeError` (fallback) | 400 |
 | Pydantic validation failure | 422 (FastAPI automatic) |
@@ -542,10 +541,11 @@ Two families.
 - `ConflictError(ValueError)` — a uniqueness clash: duplicate `username`/`email`,
   duplicate faction name, duplicate subfaction-for-faction. Wants **→ 409**; needs
   its own handler to get 409, else falls back to 400 (it's a `ValueError`).
-- `ForbiddenError(Exception)` — an ownership/permission violation. **→ 403** via a
-  dedicated handler. (Ownership on `/me/armies/{id}` stays a **404** through
-  `get_owned_army` to hide existence; `ForbiddenError` is for the cases where
-  revealing "exists but not yours" is acceptable.)
+
+(Ownership on `/me/armies/{id}` intentionally stays a **404** through
+`get_owned_army` to hide existence rather than a 403, so there's no
+`ForbiddenError` in the hierarchy today — add one if a case ever needs to reveal
+"exists but not yours.")
 
 **Per-service validation errors** — one `ValueError` subclass per service,
 constructed as `(field, message)`, rendering `"{field}: {message}"` and exposing
@@ -586,16 +586,14 @@ builtin `LookupError`/`ValueError` handlers because Starlette matches handlers b
 walking the exception's MRO, where `ServiceError` sits ahead of them. Those
 builtin handlers remain as fallbacks for any un-migrated raise.
 
-**Status codes.** `NotFoundError` → 404, `ConflictError` → 409,
-`ForbiddenError` → 403, and the `*ValidationError` family → 400 (with `field`).
-Validation stays 400, not 422: 422 is reserved for FastAPI's request-shape
-validation (a malformed body), whereas these are well-formed requests that fail a
-business rule.
+**Status codes.** `NotFoundError` → 404, `ConflictError` → 409, and the
+`*ValidationError` family → 400 (with `field`). Validation stays 400, not 422: 422
+is reserved for FastAPI's request-shape validation (a malformed body), whereas
+these are well-formed requests that fail a business rule.
 
 **Done.** All four services now raise the typed errors; `errors.py` +
 the handler are in place, and the test suite covers the 404/409/400 mapping and
-the `field` payload. `ForbiddenError` is defined but not yet raised (ownership on
-`/me/armies/{id}` still 404s through `get_owned_army`).
+the `field` payload.
 
 ## Populating the catalog
 
@@ -867,11 +865,10 @@ Cross-cutting concerns:
     (API + Postgres, healthcheck) + a `docker-compose.test.yml` overlay, and
     `make docker-*` targets — see "Deployment & containerization."
 12. ✓ Custom service errors: a typed exception hierarchy in
-    `app/core/services/errors.py` (`NotFoundError`, `ConflictError`,
-    `ForbiddenError`, and per-service `*ValidationError`) replacing the builtin
-    `LookupError`/`ValueError` across all services; a single `ServiceError`
-    handler maps them (409 for duplicates, `field` on validation) — see "Custom
-    service errors."
+    `app/core/services/errors.py` (`NotFoundError`, `ConflictError`, and
+    per-service `*ValidationError`) replacing the builtin `LookupError`/`ValueError`
+    across all services; a single `ServiceError` handler maps them (409 for
+    duplicates, `field` on validation) — see "Custom service errors."
 
 ### Remaining work — ordered by ease of implementation
 
@@ -962,9 +959,10 @@ parsing in the Makefile.)
   tests updated to unpack (and assert the flag).
 
 ### Consistency / cleanup 🧹
-- [ ] **Remove dead `ForbiddenError`** — defined in `errors.py`, never raised, and
-  (unlike the other leaves) subclasses no builtin, so the incremental-migration
-  handler wouldn't even map it. Drop it, or wire it into an ownership path + handler.
+- [x] **Remove dead `ForbiddenError`** — *fixed:* dropped the unused class from
+  `errors.py` and its SPEC references (error-map table, shared-errors list, status
+  codes, roadmap 12). Ownership stays 404 via `get_owned_army`; re-add if a real
+  403 case appears.
 - [ ] **Stale docstrings** — `models.py:10` references `app/core/db/test_units.md`
   (doesn't exist); the four `tests/test_service_*.py` files still open with "these
   fail until `<service>` exists" TDD preambles + outdated contracts. Update/remove.
