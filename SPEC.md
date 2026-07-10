@@ -966,9 +966,9 @@ parsing in the Makefile.)
 - [x] **Stale docstrings** — *fixed:* `models.py` now points at SPEC.md ("DB
   layer") instead of the nonexistent `test_units.md`; the four `test_service_*.py`
   TDD preambles + outdated contracts are replaced with concise one-line summaries.
-- [ ] **Error-taxonomy consistency** — `get_owned_army` (`app/api/army.py`) and
-  `scripts/make_admin.py:promote` raise stdlib `LookupError`; switch to
-  `NotFoundError` to match the rest of the codebase.
+- [x] **Error-taxonomy consistency** — *fixed:* `get_owned_army` and
+  `make_admin.promote` now raise `NotFoundError` instead of stdlib `LookupError`
+  (still → 404; the make_admin test asserts the typed error).
 - [ ] **Merge the duplicate service factory** — `get_unit_service` (unit.py) and
   `get_catalog_service` (faction.py) both `return UnitService(session)`; share one.
 

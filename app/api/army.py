@@ -15,6 +15,7 @@ from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
 from app.core.db.models import Army, User
 from app.core.security import get_current_user
+from app.core.services.errors import NotFoundError
 from app.core.services.service_army import ArmyService
 
 router = APIRouter(prefix="/me/armies", tags=["armies"])
@@ -91,9 +92,9 @@ def get_owned_army(
     service: ArmyService = Depends(get_army_service),
 ) -> Army:
     """Load an army the current user owns, else 404 (hides existence)."""
-    army = service.get_army(army_id)  # LookupError -> 404 if missing
+    army = service.get_army(army_id)  # NotFoundError -> 404 if missing
     if army.owner_user_id != current_user.id:
-        raise LookupError(f"army {army_id} not found")
+        raise NotFoundError(f"army {army_id} not found")
     return army
 
 
