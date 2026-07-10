@@ -933,9 +933,10 @@ parsing in the Makefile.)
   on `InventoryAdd`/`ArmyUnitAdd` (→ 422 at the API) **and** an `amount >= 1` guard
   in both services' `add_unit` raising `*ValidationError("amount", …)` (→ 400 for
   direct callers). +4 tests.
-- [ ] **`make docker-test` is broken** — `.dockerignore` excludes `tests/`, but
-  `docker-compose.test.yml` runs `pytest tests/` inside that image, so it finds
-  nothing. *Fix:* stop ignoring `tests/` (or build a test image that includes them).
+- [x] **`make docker-test` is broken** — *fixed:* stopped ignoring `tests/` in
+  `.dockerignore` (pytest already ships in `requirements.txt`, so that was the only
+  gap). Not yet live-verified — needs a `make docker-test` run once the Docker
+  daemon is up.
 - [ ] **`SECRET_KEY` fails open** — `app/core/security.py` defaults it to
   `"dev-secret-change-me"`, so a prod deploy that forgets to set it ships a
   publicly-known JWT signing key (forgeable admin tokens). *Fix:* fail fast at

@@ -28,8 +28,8 @@ htmlcov/
 .idea/
 .DS_Store
 
-# Not needed at runtime
-tests/
+# Not needed at runtime (tests/ IS kept — docker-compose.test.yml runs pytest
+# tests/ inside the image, and pytest ships in requirements.txt).
 *.md
 Dockerfile
 .dockerignore
