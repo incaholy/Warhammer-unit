@@ -29,7 +29,10 @@ services:
     environment:
       # Targets the DB by compose service name (db), not localhost.
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-warhammer}:${POSTGRES_PASSWORD:-warhammer}@db:5432/${POSTGRES_DB:-warhammer_unit}
-      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+      # Containers run as non-dev, so a real SECRET_KEY is required (compose fails
+      # to start if it's unset — set it in .env or the shell). No silent default.
+      APP_ENV: ${APP_ENV:-production}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (see .env.example) — it must not be blank}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-2880}
     ports:
       - "8000:8000"

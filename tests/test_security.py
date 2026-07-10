@@ -61,3 +61,24 @@ def test_get_current_admin_forbids_non_admin(make_user):
 def test_get_current_admin_allows_admin(make_user):
     user = make_user(is_admin=True)
     assert get_current_admin(user=user).id == user.id
+
+
+def test_resolve_secret_key_dev_default():
+    from app.core.security import _DEV_SECRET, _resolve_secret_key
+
+    assert _resolve_secret_key("dev", None) == _DEV_SECRET
+
+
+def test_resolve_secret_key_uses_provided_value():
+    from app.core.security import _resolve_secret_key
+
+    assert _resolve_secret_key("production", "real-key") == "real-key"
+
+
+def test_resolve_secret_key_required_outside_dev():
+    import pytest
+
+    from app.core.security import _resolve_secret_key
+
+    with pytest.raises(RuntimeError):
+        _resolve_secret_key("production", None)

@@ -1,12 +1,15 @@
 """Password hashing, JWT tokens, and the auth dependencies.
 
 Config comes from the environment (loaded from `.env`):
-  SECRET_KEY                   — JWT signing key (override in production!)
+  SECRET_KEY                   — JWT signing key. REQUIRED unless APP_ENV=dev.
+  APP_ENV                      — "dev" (default) enables a throwaway key; any
+                                 other value requires a real SECRET_KEY.
   ACCESS_TOKEN_EXPIRE_MINUTES  — token lifetime (default 2880 = 2 days)
 """
 
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -21,7 +24,24 @@ from app.core.db.models import User
 
 load_dotenv()
 
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+_DEV_SECRET = "dev-secret-change-me"
+
+
+def _resolve_secret_key(app_env: str, secret_key: Optional[str]) -> str:
+    """The JWT signing key. A throwaway default is allowed only in dev; any other
+    environment must set `SECRET_KEY`, so a prod deploy can't silently ship a
+    publicly-known key (which would make admin tokens forgeable)."""
+    if secret_key is None:
+        if app_env != "dev":
+            raise RuntimeError(
+                "SECRET_KEY must be set when APP_ENV != 'dev' "
+                "(an unset key would sign JWTs with a public default)"
+            )
+        return _DEV_SECRET
+    return secret_key
+
+
+SECRET_KEY = _resolve_secret_key(os.getenv("APP_ENV", "dev"), os.getenv("SECRET_KEY"))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "2880"))
 

@@ -937,10 +937,11 @@ parsing in the Makefile.)
   `.dockerignore` (pytest already ships in `requirements.txt`, so that was the only
   gap). Not yet live-verified — needs a `make docker-test` run once the Docker
   daemon is up.
-- [ ] **`SECRET_KEY` fails open** — `app/core/security.py` defaults it to
-  `"dev-secret-change-me"`, so a prod deploy that forgets to set it ships a
-  publicly-known JWT signing key (forgeable admin tokens). *Fix:* fail fast at
-  startup when unset outside local dev; use `${SECRET_KEY:?…}` in compose.
+- [x] **`SECRET_KEY` fails open** — *fixed:* the throwaway default is now allowed
+  only when `APP_ENV=dev` (default); any other env with `SECRET_KEY` unset raises at
+  startup (`_resolve_secret_key`). `docker-compose.yml` uses `${SECRET_KEY:?…}`
+  (compose refuses to start without it — verified) and defaults containers to
+  `APP_ENV=production`. `.env.example` documents `APP_ENV`. +3 tests.
 
 ### Robustness ⚠️
 - [ ] **Guard roster `Unit` lookups** — `ArmyService.shortfall`/`points_total`/
