@@ -81,12 +81,13 @@ admin-curated.
 
 ### To build 🔨 (backlog)
 - [ ] **Catalog scraper (Wahapedia)** — *change of plan for seeding.* Instead of
-  hand-filling `datasheets.json`, `scripts/scrape_wahapedia.py` will scrape
-  datasheets from Wahapedia (e.g. the White Scars page) into that JSON, then
-  `make seed` loads it (**scrape → JSON → seed**). Includes polite fetching + a
-  disk cache, mapping to our `FactionName`/`FACTION_SUBFACTIONS` taxonomy, and a
-  parser test against a saved HTML fixture. *(Full plan: SPEC.md → "Scraping the
-  catalog (Wahapedia)".)*
+  hand-filling `datasheets.json`, `scripts/scrape_wahapedia.py` will scrape a
+  faction's **collated datasheets page** (e.g. `space-marines/datasheets.html` — all
+  its datasheets in one fetch) into that JSON, then `make seed` loads it (**scrape →
+  JSON → seed**). Faction-wide units map to `subfaction=null`; per-chapter pages tag
+  the chapter-specific ones. Includes polite fetching + a disk cache and a parser
+  test against a saved HTML fixture. *(Full plan: SPEC.md → "Scraping the catalog
+  (Wahapedia)".)*
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
   scope; the backend is **frontend-ready** (seed, CORS, typed errors, catalog reads
   with a total count all in place). See SPEC.md "Frontend integration".

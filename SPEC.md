@@ -656,8 +656,10 @@ edits. The JSON schema is documented in `scripts/data/README.md`.
 ## Scraping the catalog (Wahapedia)
 
 **Planned — not yet built.** Datasheet content will be **scraped from Wahapedia**
-(e.g. `https://wahapedia.ru/wh40k10ed/factions/space-marines/white-scars`) instead
-of hand-entered. The scraper emits the *same* `scripts/data/datasheets.json` the
+instead of hand-entered. The primary source is a faction's **collated datasheets
+page** — e.g. `https://wahapedia.ru/wh40k10ed/factions/space-marines/datasheets.html`
+— which lists *every* datasheet for a faction on one page (so one fetch covers a
+whole faction). The scraper emits the *same* `scripts/data/datasheets.json` the
 seed already consumes, so seeding stays a decoupled two-stage pipeline:
 **scrape → `datasheets.json` → `make seed` → DB**. Keeping the scrape separate from
 the seed means the output is reviewable/diffable, re-seedable offline, and there's
@@ -670,12 +672,17 @@ Workshop's IP. Before scraping: read its `robots.txt` and terms; scrape **polite
 the site. Treat the result as personal/dev use, not redistribution.
 
 **Pieces.**
-- **`scripts/scrape_wahapedia.py`** — fetch a faction/subfaction page, parse its
-  datasheets, and write `datasheets.json`.
-- **Fetch** — `httpx`/`requests` + the disk cache above. Inspect the page first:
-  Wahapedia is largely server-rendered, so `beautifulsoup4` + `lxml` should suffice;
-  fall back to a headless browser (Playwright) *only* if the datasheet content turns
-  out to be JS-rendered.
+- **`scripts/scrape_wahapedia.py`** — fetch a faction's collated datasheets page,
+  parse every datasheet, and write `datasheets.json`.
+- **Page sources** — the **collated `/{faction}/datasheets.html`** is the primary
+  target: one request yields all of a faction's datasheets. The per-subfaction
+  landing pages (e.g. `.../space-marines/white-scars`) are a *secondary* source,
+  used only to tag which datasheets are chapter-specific (see "Normalize").
+- **Fetch** — `httpx`/`requests` + the disk cache above; one collated page per
+  faction keeps the request count tiny. Inspect the page first: Wahapedia is largely
+  server-rendered, so `beautifulsoup4` + `lxml` should suffice; fall back to a
+  headless browser (Playwright) *only* if the datasheet content turns out to be
+  JS-rendered.
 - **Parse → our schema** — map each datasheet card to the seed JSON:
   - stat line `M/T/Sv/W/Ld/OC` (+ optional `Inv`) → `movement`, `toughness`,
     `armor_save`, `wounds`, `leadership`, `objective_control`, `invulnerable_save`
@@ -685,11 +692,15 @@ the site. Treat the result as personal/dev use, not redistribution.
     `keywords`);
   - abilities → `Ability` rows (name + text); the keywords line → the unit's
     `keywords`.
-- **Normalize to our taxonomy** — the URL's faction/chapter maps to `FactionName` +
-  `FACTION_SUBFACTIONS`: `.../space-marines/white-scars` → faction `Space Marines`,
-  subfaction `White Scars`. A small URL/label → canonical-name map does this;
-  anything not in the enum/map is rejected exactly as `create_faction` /
-  `create_subfaction` already reject it.
+- **Normalize to our taxonomy** — the faction comes from the collated page's URL
+  (`.../space-marines/datasheets.html` → `FactionName` `Space Marines`). Most units
+  on the collated page are **faction-wide** (usable by any chapter) → `subfaction =
+  null` in our model (which already means "available to any subfaction"). Only
+  **chapter-specific** datasheets get a subfaction, identified by which units a
+  per-subfaction page lists (e.g. White Scars) → subfaction `White Scars`. A small
+  URL/label → canonical-name map handles both; anything not in `FactionName` /
+  `FACTION_SUBFACTIONS` is rejected exactly as `create_faction`/`create_subfaction`
+  already reject it.
 
 **Decisions to make.**
 - **Points** — Wahapedia lists points per unit size (5 models = X, 10 = Y), but
@@ -964,9 +975,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `/abilities/{id}` (all-optional `Weapon_Update`/`Ability_Update`; links cascade,
     so no delete guard). See "API layer → Catalog administration."
 24. **(M/L) Catalog scraper (Wahapedia)** — `scripts/scrape_wahapedia.py` fetches a
-    faction/subfaction page, parses its datasheets, and writes `datasheets.json` for
-    `make seed` (scrape → JSON → seed). Politeness/caching + an HTML-fixture parser
-    test. See "Scraping the catalog (Wahapedia)."
+    faction's collated `datasheets.html`, parses every datasheet, and writes
+    `datasheets.json` for `make seed` (scrape → JSON → seed). Politeness/caching + an
+    HTML-fixture parser test. See "Scraping the catalog (Wahapedia)."
 25. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 
