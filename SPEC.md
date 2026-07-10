@@ -963,9 +963,9 @@ parsing in the Makefile.)
   `errors.py` and its SPEC references (error-map table, shared-errors list, status
   codes, roadmap 12). Ownership stays 404 via `get_owned_army`; re-add if a real
   403 case appears.
-- [ ] **Stale docstrings** — `models.py:10` references `app/core/db/test_units.md`
-  (doesn't exist); the four `tests/test_service_*.py` files still open with "these
-  fail until `<service>` exists" TDD preambles + outdated contracts. Update/remove.
+- [x] **Stale docstrings** — *fixed:* `models.py` now points at SPEC.md ("DB
+  layer") instead of the nonexistent `test_units.md`; the four `test_service_*.py`
+  TDD preambles + outdated contracts are replaced with concise one-line summaries.
 - [ ] **Error-taxonomy consistency** — `get_owned_army` (`app/api/army.py`) and
   `scripts/make_admin.py:promote` raise stdlib `LookupError`; switch to
   `NotFoundError` to match the rest of the codebase.

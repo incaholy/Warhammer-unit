@@ -1,14 +1,4 @@
-"""Tests for UserService.
-
-These fail until app/core/services/service_user.py exists with a UserService
-class that matches this contract:
-
-    UserService(session)
-      create_user(username, email, password_hash) -> User
-          raises ValueError on duplicate username or email
-      get_user(user_id) -> User
-          raises LookupError if not found
-"""
+"""Tests for UserService — create/fetch users and grant/revoke admin."""
 
 import uuid
 

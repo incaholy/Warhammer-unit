@@ -1,16 +1,4 @@
-"""Tests for UnitService (catalog).
-
-These fail until app/core/services/service_unit.py exists with a UnitService
-class that matches this contract:
-
-    UnitService(session)
-      create_unit(faction_id, unit_name, movement, toughness, armor_save,
-                  wounds, leadership, objective_control, points,
-                  invulnerable_save=None, subfaction_id=None, keywords=None)
-          -> Unit ; raises LookupError if the faction does not exist
-      get_unit(unit_id) -> Unit ; raises LookupError if not found
-      list_units() -> list[Unit]
-"""
+"""Tests for UnitService — the catalog (units, factions, subfactions, weapons, abilities)."""
 
 import uuid
 

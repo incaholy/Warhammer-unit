@@ -1,17 +1,4 @@
-"""Tests for InventoryService (a user's owned units = user_unit).
-
-These fail until app/core/services/service_inventory.py exists with an
-InventoryService class that matches this contract:
-
-    InventoryService(session)
-      add_unit(user_id, unit_id, amount=1) -> UserUnit
-          upsert: increments amount if the unit is already owned.
-          raises LookupError if the user or unit does not exist
-      set_amount(user_id, unit_id, amount) -> UserUnit
-          absolute set; raises ValueError if amount < 1
-      remove_unit(user_id, unit_id) -> None
-      list_inventory(user_id) -> list[UserUnit]
-"""
+"""Tests for InventoryService — a user's owned units (the user_unit table)."""
 
 import uuid
 

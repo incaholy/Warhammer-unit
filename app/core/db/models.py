@@ -7,7 +7,7 @@ Two halves:
 - Collection (per-user): a user owns armies and an inventory (user_unit). Both
   armies (army_units) and the inventory point at catalog units with an amount.
 
-Schema follows app/core/db/test_units.md.
+The schema and its rationale are documented in SPEC.md ("DB layer").
 """
 
 from datetime import datetime, timezone

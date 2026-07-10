@@ -1,24 +1,4 @@
-"""Tests for ArmyService.
-
-These fail until app/core/services/service_army.py exists with an ArmyService
-class that matches this contract:
-
-    ArmyService(session)
-      create_army(user_id, name, faction_id, subfaction_id=None, description=None)
-          -> Army ; raises LookupError if the user or faction does not exist
-      get_army(army_id) -> Army ; raises LookupError if not found
-      list_armies(user_id) -> list[Army]
-      delete_army(army_id) -> None
-      add_unit(army_id, unit_id, amount=1) -> ArmyUnit
-          upsert: increments amount if the unit is already in the army.
-          raises LookupError if the army or unit does not exist
-      set_amount(army_id, unit_id, amount) -> ArmyUnit
-          absolute set; raises ValueError if amount < 1
-      remove_unit(army_id, unit_id) -> None
-      list_army_units(army_id) -> list[ArmyUnit]
-      shortfall(army_id) -> list of rows with .unit, .in_list, .owned, .need
-          need = max(0, in_list - owned) against the army owner's inventory
-"""
+"""Tests for ArmyService — armies + their units, points_total, shortfall, validate."""
 
 import uuid
 
