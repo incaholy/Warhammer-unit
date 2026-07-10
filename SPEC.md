@@ -974,11 +974,11 @@ parsing in the Makefile.)
   `get_catalog_service`; removed the now-unused `Session`/`get_session` imports.
 
 ### Test coverage 🧪
-- [ ] **Service-level gaps** — add `UnitService` tests for `unlink_weapon`/
-  `unlink_ability` (incl. the not-linked path), `update_weapon`/`update_ability`
-  (unknown field, bad category), `delete_weapon`/`delete_ability` (404), `count_units`
-  (with filters), `delete_subfaction` (success/404/409), and `link_*` error paths —
-  most are currently API-only or untested.
+- [x] **Service-level gaps** — *fixed:* added ~20 `UnitService` tests covering
+  `unlink_weapon` (incl. not-linked), `update_weapon`/`update_ability` (unknown
+  field, bad category), `delete_weapon`/`delete_ability` (404), `list_weapons`/
+  `list_abilities`, `count_units` (filters), `delete_subfaction` (success/404/409),
+  and the `link_*` not-found error paths.
 - [ ] **Verify the delete-CASCADE** — no test links a weapon/ability to a unit,
   deletes it, and asserts the unit no longer lists it (the "links cascade, no guard
   needed" claim is unverified).
