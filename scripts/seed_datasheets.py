@@ -25,6 +25,7 @@ subfactions from `FACTION_SUBFACTIONS`; see scripts/data/README.md):
 """
 
 import json
+import sys
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -34,6 +35,18 @@ from app.core.db.models import Ability, Faction, Subfaction, Unit, Weapon
 from app.core.services.service_unit import UnitService
 
 DATA_PATH = Path(__file__).parent / "data" / "datasheets.json"
+
+
+class SeedError(Exception):
+    """A problem in datasheets.json — a bad cross-reference or malformed record."""
+
+
+def _ref(mapping: dict, key, what: str):
+    """Look up a name in one of the id maps, with a clear message if it's absent."""
+    try:
+        return mapping[key]
+    except KeyError:
+        raise SeedError(f"{what}: {key!r} is not defined in datasheets.json") from None
 
 
 def seed(session: Session, data: dict) -> dict:
@@ -62,57 +75,90 @@ def seed(session: Session, data: dict) -> dict:
 
     weapon_ids: dict[str, object] = {}
     for w in data.get("weapons", []):
-        weapon = session.exec(select(Weapon).where(Weapon.name == w["name"])).first()
-        if weapon is None:
-            weapon = svc.create_weapon(**w)
-            counts["weapons"] += 1
-        weapon_ids[w["name"]] = weapon.id
+        try:
+            weapon = session.exec(select(Weapon).where(Weapon.name == w["name"])).first()
+            if weapon is None:
+                weapon = svc.create_weapon(**w)
+                counts["weapons"] += 1
+            weapon_ids[w["name"]] = weapon.id
+        except (KeyError, TypeError) as exc:
+            raise SeedError(f"bad weapon entry {w.get('name', w)!r}: {exc}") from None
 
     ability_ids: dict[str, object] = {}
     for a in data.get("abilities", []):
-        ability = session.exec(select(Ability).where(Ability.name == a["name"])).first()
-        if ability is None:
-            ability = svc.create_ability(a["name"], a["description"])
-            counts["abilities"] += 1
-        ability_ids[a["name"]] = ability.id
+        try:
+            ability = session.exec(select(Ability).where(Ability.name == a["name"])).first()
+            if ability is None:
+                ability = svc.create_ability(a["name"], a["description"])
+                counts["abilities"] += 1
+            ability_ids[a["name"]] = ability.id
+        except KeyError as exc:
+            raise SeedError(f"bad ability entry {a.get('name', a)!r}: {exc}") from None
 
     for u in data.get("units", []):
-        faction_id = faction_ids[u["faction"]]
-        sub = u.get("subfaction")
-        subfaction_id = subfaction_ids[(u["faction"], sub)] if sub else None
-        unit = session.exec(
-            select(Unit).where(
-                Unit.faction_id == faction_id, Unit.unit_name == u["unit_name"]
+        try:
+            name = u["unit_name"]
+            faction_id = _ref(
+                faction_ids, u["faction"], f"unit {name!r} references unknown faction"
             )
-        ).first()
-        if unit is None:
-            unit = svc.create_unit(
-                faction_id=faction_id,
-                unit_name=u["unit_name"],
-                movement=u["movement"],
-                toughness=u["toughness"],
-                armor_save=u["armor_save"],
-                wounds=u["wounds"],
-                leadership=u["leadership"],
-                objective_control=u["objective_control"],
-                points=u["points"],
-                invulnerable_save=u.get("invulnerable_save"),
-                subfaction_id=subfaction_id,
-                keywords=u.get("keywords"),
+            sub = u.get("subfaction")
+            subfaction_id = (
+                _ref(subfaction_ids, (u["faction"], sub),
+                     f"unit {name!r} references unknown subfaction")
+                if sub else None
             )
-            counts["units"] += 1
+            unit = session.exec(
+                select(Unit).where(Unit.faction_id == faction_id, Unit.unit_name == name)
+            ).first()
+            if unit is None:
+                unit = svc.create_unit(
+                    faction_id=faction_id,
+                    unit_name=name,
+                    movement=u["movement"],
+                    toughness=u["toughness"],
+                    armor_save=u["armor_save"],
+                    wounds=u["wounds"],
+                    leadership=u["leadership"],
+                    objective_control=u["objective_control"],
+                    points=u["points"],
+                    invulnerable_save=u.get("invulnerable_save"),
+                    subfaction_id=subfaction_id,
+                    keywords=u.get("keywords"),
+                )
+                counts["units"] += 1
+        except KeyError as exc:
+            raise SeedError(
+                f"unit {u.get('unit_name', '?')!r} is missing required field {exc}"
+            ) from None
         for wname in u.get("weapons", []):
-            svc.link_weapon(unit.id, weapon_ids[wname])  # idempotent
+            svc.link_weapon(unit.id, _ref(weapon_ids, wname, f"unit {name!r} links unknown weapon"))
         for aname in u.get("abilities", []):
-            svc.link_ability(unit.id, ability_ids[aname])  # idempotent
+            svc.link_ability(unit.id, _ref(ability_ids, aname, f"unit {name!r} links unknown ability"))
 
     return counts
 
 
+def _fail(message: str) -> None:
+    print(f"seed error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def main() -> None:
-    data = json.loads(DATA_PATH.read_text())
-    with Session(get_engine()) as session:
-        counts = seed(session, data)
+    try:
+        raw = DATA_PATH.read_text()
+    except OSError as exc:
+        _fail(f"cannot read {DATA_PATH}: {exc}")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _fail(f"{DATA_PATH} is not valid JSON: {exc}")
+    try:
+        with Session(get_engine()) as session:
+            counts = seed(session, data)
+    except (SeedError, ValueError, TypeError, LookupError) as exc:
+        # SeedError = bad reference/shape; ValueError family = the service's
+        # ConflictError/*ValidationError; LookupError = NotFoundError.
+        _fail(str(exc))
     print("seeded:", ", ".join(f"{v} {k}" for k, v in counts.items()) or "nothing")
 
 

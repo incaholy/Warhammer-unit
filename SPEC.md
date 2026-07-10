@@ -948,9 +948,10 @@ parsing in the Makefile.)
   `validate` route their catalog lookups through a new `_unit_or_404` helper, so a
   dangling `ArmyUnit` raises `NotFoundError` (404) instead of `AttributeError` (500).
   +1 test.
-- [ ] **Seed script error handling** — `scripts/seed_datasheets.py` `KeyError`s when
-  a unit references an unknown weapon/faction, and gives a raw traceback on malformed
-  JSON or a mid-file failure. *Fix:* friendly messages + a clean non-zero exit.
+- [x] **Seed script error handling** — *fixed:* a `SeedError` + `_ref` helper turn
+  unknown faction/subfaction/weapon/ability references and missing unit fields into
+  clear messages naming the offending record; `main()` catches read/JSON/service
+  errors and exits non-zero via `_fail` (no raw traceback). +2 tests.
 - [ ] **Dockerfile hardening** — the image runs as root; add a non-root `USER`. Drop
   the redundant `chmod +x docker-entrypoint.sh` (the file is already committed `755`).
 - [ ] **Upsert 201-vs-200 scan** — the inventory/army "add unit" routes run a full

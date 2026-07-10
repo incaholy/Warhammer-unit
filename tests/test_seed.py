@@ -55,3 +55,36 @@ def test_seed_rejects_non_canonical_faction(session):
 
     with pytest.raises(UnitValidationError):
         seed(session, {"factions": [{"name": "Nekrons", "subfactions": []}]})
+
+
+def test_seed_unknown_weapon_ref_raises_seed_error(session):
+    import pytest
+
+    from scripts.seed_datasheets import SeedError, seed
+
+    data = {
+        "factions": [{"name": "Xenos", "subfactions": ["Necrons"]}],
+        "weapons": [], "abilities": [],
+        "units": [{
+            "unit_name": "Ghost", "faction": "Xenos", "subfaction": "Necrons",
+            "movement": 5, "toughness": 4, "armor_save": 4, "wounds": 1,
+            "leadership": 6, "objective_control": 2, "points": 10,
+            "weapons": ["Nonexistent Gun"], "abilities": [],
+        }],
+    }
+    with pytest.raises(SeedError):
+        seed(session, data)
+
+
+def test_seed_missing_unit_field_raises_seed_error(session):
+    import pytest
+
+    from scripts.seed_datasheets import SeedError, seed
+
+    data = {
+        "factions": [{"name": "Xenos", "subfactions": []}],
+        "weapons": [], "abilities": [],
+        "units": [{"unit_name": "Incomplete", "faction": "Xenos"}],  # missing stats
+    }
+    with pytest.raises(SeedError):
+        seed(session, data)
