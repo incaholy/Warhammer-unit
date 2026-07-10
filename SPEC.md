@@ -982,8 +982,9 @@ parsing in the Makefile.)
 - [x] **Verify the delete-CASCADE** — *fixed:* two tests link a weapon/ability to a
   unit, delete it (succeeds despite the reference), and assert the unit no longer
   lists it — confirming `unit_weapons`/`unit_abilities` cascade.
-- [ ] **`validate()` combined issues** — add a test with multiple simultaneous issue
-  kinds and one pinning the `ok`/tier semantics.
+- [x] **`validate()` combined issues** — *fixed:* a test where one over-costed,
+  wrong-faction unit trips both `over_points` (Tier 1) and `wrong_faction` (Tier 2)
+  at once, asserting both kinds present, `ok` False, and the right `points_total`.
 - [ ] **Fix conftest fragility** — `auth_client`/`admin_client` share one
   `TestClient` (mutating its `Authorization` header), so a single test can't use both.
   Give each its own client.

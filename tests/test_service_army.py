@@ -280,3 +280,18 @@ def test_roster_lookup_guards_missing_unit(session):
     svc = ArmyService(session)
     with pytest.raises(NotFoundError):
         svc._unit_or_404(uuid.uuid4())
+
+
+def test_validate_reports_multiple_issues(session, make_user, make_faction, make_unit):
+    # one over-costed, wrong-faction unit trips both Tier-1 and Tier-2 at once
+    user = make_user()
+    f1, f2 = make_faction(), make_faction()
+    svc = ArmyService(session)
+    army = svc.create_army(user_id=user.id, name="A", faction_id=f1.id, points_limit=100)
+    svc.add_unit(army.id, make_unit(faction=f2, points=80).id, amount=2)  # 160 > 100 + wrong faction
+    report = svc.validate(army.id)
+    assert report.ok is False
+    kinds = {i.kind for i in report.issues}
+    assert "over_points" in kinds
+    assert "wrong_faction" in kinds
+    assert report.points_total == 160
