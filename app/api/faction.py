@@ -8,10 +8,9 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlmodel import Session, SQLModel
+from sqlmodel import SQLModel
 
-from app.api.unit import Ability_Read, Weapon_Read
-from app.core.db.connection import get_session
+from app.api.unit import Ability_Read, Weapon_Read, get_unit_service
 from app.core.db.models import FACTION_SUBFACTIONS, FactionName
 from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
@@ -76,13 +75,9 @@ class Ability_Update(SQLModel):
     description: Optional[str] = None
 
 
-def get_catalog_service(session: Session = Depends(get_session)) -> UnitService:
-    return UnitService(session)
-
-
 @router.get("/factions", response_model=list[Faction_Read])
 def list_factions(
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> list[Faction_Read]:
     return service.list_factions()
 
@@ -104,7 +99,7 @@ def faction_taxonomy() -> dict[str, list[str]]:
     dependencies=[Depends(get_current_admin)],
 )
 def create_faction(
-    payload: Faction_Create, service: UnitService = Depends(get_catalog_service)
+    payload: Faction_Create, service: UnitService = Depends(get_unit_service)
 ) -> Faction_Read:
     return service.create_faction(payload.name)
 
@@ -117,7 +112,7 @@ def create_faction(
 )
 def create_subfaction(
     payload: Subfaction_Create,
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> Subfaction_Read:
     return service.create_subfaction(payload.faction_id, payload.name)
 
@@ -128,7 +123,7 @@ def create_subfaction(
     dependencies=[Depends(get_current_admin)],
 )
 def delete_subfaction(
-    subfaction_id: UUID, service: UnitService = Depends(get_catalog_service)
+    subfaction_id: UUID, service: UnitService = Depends(get_unit_service)
 ) -> Response:
     service.delete_subfaction(subfaction_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -141,14 +136,14 @@ def delete_subfaction(
     dependencies=[Depends(get_current_admin)],
 )
 def create_weapon(
-    payload: Weapon_Create, service: UnitService = Depends(get_catalog_service)
+    payload: Weapon_Create, service: UnitService = Depends(get_unit_service)
 ) -> Weapon_Read:
     return service.create_weapon(**payload.model_dump())
 
 
 @router.get("/weapons", response_model=list[Weapon_Read])
 def list_weapons(
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> list[Weapon_Read]:
     return service.list_weapons()
 
@@ -161,7 +156,7 @@ def list_weapons(
 def update_weapon(
     weapon_id: UUID,
     payload: Weapon_Update,
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> Weapon_Read:
     return service.update_weapon(weapon_id, **payload.model_dump(exclude_unset=True))
 
@@ -172,7 +167,7 @@ def update_weapon(
     dependencies=[Depends(get_current_admin)],
 )
 def delete_weapon(
-    weapon_id: UUID, service: UnitService = Depends(get_catalog_service)
+    weapon_id: UUID, service: UnitService = Depends(get_unit_service)
 ) -> Response:
     service.delete_weapon(weapon_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -185,14 +180,14 @@ def delete_weapon(
     dependencies=[Depends(get_current_admin)],
 )
 def create_ability(
-    payload: Ability_Create, service: UnitService = Depends(get_catalog_service)
+    payload: Ability_Create, service: UnitService = Depends(get_unit_service)
 ) -> Ability_Read:
     return service.create_ability(payload.name, payload.description)
 
 
 @router.get("/abilities", response_model=list[Ability_Read])
 def list_abilities(
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> list[Ability_Read]:
     return service.list_abilities()
 
@@ -205,7 +200,7 @@ def list_abilities(
 def update_ability(
     ability_id: UUID,
     payload: Ability_Update,
-    service: UnitService = Depends(get_catalog_service),
+    service: UnitService = Depends(get_unit_service),
 ) -> Ability_Read:
     return service.update_ability(ability_id, **payload.model_dump(exclude_unset=True))
 
@@ -216,7 +211,7 @@ def update_ability(
     dependencies=[Depends(get_current_admin)],
 )
 def delete_ability(
-    ability_id: UUID, service: UnitService = Depends(get_catalog_service)
+    ability_id: UUID, service: UnitService = Depends(get_unit_service)
 ) -> Response:
     service.delete_ability(ability_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

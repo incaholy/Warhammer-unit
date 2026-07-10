@@ -969,8 +969,9 @@ parsing in the Makefile.)
 - [x] **Error-taxonomy consistency** — *fixed:* `get_owned_army` and
   `make_admin.promote` now raise `NotFoundError` instead of stdlib `LookupError`
   (still → 404; the make_admin test asserts the typed error).
-- [ ] **Merge the duplicate service factory** — `get_unit_service` (unit.py) and
-  `get_catalog_service` (faction.py) both `return UnitService(session)`; share one.
+- [x] **Merge the duplicate service factory** — *fixed:* `faction.py` now imports
+  `get_unit_service` from `unit.py` instead of defining an identical
+  `get_catalog_service`; removed the now-unused `Session`/`get_session` imports.
 
 ### Test coverage 🧪
 - [ ] **Service-level gaps** — add `UnitService` tests for `unlink_weapon`/
