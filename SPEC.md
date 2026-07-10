@@ -918,3 +918,69 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 
 **Deploy checklist (not code):** set a real `SECRET_KEY`; point `ALLOWED_ORIGINS`
 at the frontend's real origin.
+
+## Improvements
+
+Findings from the whole-roadmap quality review (2026-07). The **Should-fix** items
+are real correctness/security holes; the rest are hardening and cleanup. (Three
+bigger refactors from the review are intentionally *not* tracked here: DRYing the
+`InventoryService`/`ArmyService` junction logic, a composite FK to enforce
+unit/army subfaction-belongs-to-faction at the DB level, and lazy `DATABASE_URL`
+parsing in the Makefile.)
+
+### Should-fix 🐞
+- [ ] **`add_unit` accepts 0/negative amounts** — `InventoryAdd.amount` /
+  `ArmyUnitAdd.amount` are `int = 1` with no lower bound, and neither service's
+  `add_unit` guards it (unlike `set_amount`). A 0/negative slips to the DB CHECK as
+  a raw 500, or decrements an existing row below 1. *Fix:* `Field(default=1, ge=1)`
+  on both schemas **and** an `amount >= 1` check in `InventoryService.add_unit` /
+  `ArmyService.add_unit` (raising the service's `*ValidationError("amount", …)`).
+- [ ] **`make docker-test` is broken** — `.dockerignore` excludes `tests/`, but
+  `docker-compose.test.yml` runs `pytest tests/` inside that image, so it finds
+  nothing. *Fix:* stop ignoring `tests/` (or build a test image that includes them).
+- [ ] **`SECRET_KEY` fails open** — `app/core/security.py` defaults it to
+  `"dev-secret-change-me"`, so a prod deploy that forgets to set it ships a
+  publicly-known JWT signing key (forgeable admin tokens). *Fix:* fail fast at
+  startup when unset outside local dev; use `${SECRET_KEY:?…}` in compose.
+
+### Robustness ⚠️
+- [ ] **Guard roster `Unit` lookups** — `ArmyService.shortfall`/`points_total`/
+  `validate` call `session.get(Unit, …)` without a None check, so a dangling
+  `ArmyUnit` yields `AttributeError` → 500. *Fix:* fetch into a local and skip/raise
+  `NotFoundError`.
+- [ ] **Seed script error handling** — `scripts/seed_datasheets.py` `KeyError`s when
+  a unit references an unknown weapon/faction, and gives a raw traceback on malformed
+  JSON or a mid-file failure. *Fix:* friendly messages + a clean non-zero exit.
+- [ ] **Dockerfile hardening** — the image runs as root; add a non-root `USER`. Drop
+  the redundant `chmod +x docker-entrypoint.sh` (the file is already committed `755`).
+- [ ] **Upsert 201-vs-200 scan** — the inventory/army "add unit" routes run a full
+  `list_*` and scan it in Python to choose 201 vs 200 (extra round-trip, racy under
+  concurrency). *Fix:* return a `created` flag from `add_unit`.
+
+### Consistency / cleanup 🧹
+- [ ] **Remove dead `ForbiddenError`** — defined in `errors.py`, never raised, and
+  (unlike the other leaves) subclasses no builtin, so the incremental-migration
+  handler wouldn't even map it. Drop it, or wire it into an ownership path + handler.
+- [ ] **Stale docstrings** — `models.py:10` references `app/core/db/test_units.md`
+  (doesn't exist); the four `tests/test_service_*.py` files still open with "these
+  fail until `<service>` exists" TDD preambles + outdated contracts. Update/remove.
+- [ ] **Error-taxonomy consistency** — `get_owned_army` (`app/api/army.py`) and
+  `scripts/make_admin.py:promote` raise stdlib `LookupError`; switch to
+  `NotFoundError` to match the rest of the codebase.
+- [ ] **Merge the duplicate service factory** — `get_unit_service` (unit.py) and
+  `get_catalog_service` (faction.py) both `return UnitService(session)`; share one.
+
+### Test coverage 🧪
+- [ ] **Service-level gaps** — add `UnitService` tests for `unlink_weapon`/
+  `unlink_ability` (incl. the not-linked path), `update_weapon`/`update_ability`
+  (unknown field, bad category), `delete_weapon`/`delete_ability` (404), `count_units`
+  (with filters), `delete_subfaction` (success/404/409), and `link_*` error paths —
+  most are currently API-only or untested.
+- [ ] **Verify the delete-CASCADE** — no test links a weapon/ability to a unit,
+  deletes it, and asserts the unit no longer lists it (the "links cascade, no guard
+  needed" claim is unverified).
+- [ ] **`validate()` combined issues** — add a test with multiple simultaneous issue
+  kinds and one pinning the `ok`/tier semantics.
+- [ ] **Fix conftest fragility** — `auth_client`/`admin_client` share one
+  `TestClient` (mutating its `Authorization` header), so a single test can't use both.
+  Give each its own client.
