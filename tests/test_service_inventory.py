@@ -105,3 +105,13 @@ def test_removing_inventory_entry_leaves_armies_untouched(
 
     # selling a model (removing inventory) leaves the user's armies untouched
     assert session.get(Army, army.id) is not None
+
+
+def test_add_unit_below_one_raises(session, make_user, make_unit):
+    from app.core.services.errors import InventoryValidationError
+
+    user = make_user()
+    unit = make_unit()
+    svc = InventoryService(session)
+    with pytest.raises(InventoryValidationError):
+        svc.add_unit(user.id, unit.id, amount=0)

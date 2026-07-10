@@ -124,6 +124,8 @@ class ArmyService:
     # -------------------------- units in an army --------------------------
 
     def add_unit(self, army_id: UUID, unit_id: UUID, amount: int = 1) -> ArmyUnit:
+        if amount < 1:
+            raise ArmyValidationError("amount", "must be >= 1")
         self._require_army(army_id)
         self._require_unit(unit_id)
         entry = self._find_entry(army_id, unit_id)

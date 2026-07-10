@@ -60,3 +60,11 @@ def test_remove_unit(auth_client, make_unit):
     resp = auth_client.delete(f"/me/inventory/{unit.id}")
     assert resp.status_code == 204
     assert auth_client.get("/me/inventory").json() == []
+
+
+def test_add_unit_zero_amount_returns_422(auth_client, make_unit):
+    unit = make_unit()
+    resp = auth_client.post(
+        "/me/inventory", json={"unit_id": str(unit.id), "amount": 0}
+    )
+    assert resp.status_code == 422  # schema ge=1

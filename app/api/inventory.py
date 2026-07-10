@@ -7,7 +7,7 @@ can only ever touch their own inventory.
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlmodel import Session, SQLModel
+from sqlmodel import Field, Session, SQLModel
 
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
@@ -25,7 +25,7 @@ class UserUnit_Read(SQLModel):
 
 class InventoryAdd(SQLModel):
     unit_id: UUID
-    amount: int = 1
+    amount: int = Field(default=1, ge=1)
 
 
 class AmountSet(SQLModel):

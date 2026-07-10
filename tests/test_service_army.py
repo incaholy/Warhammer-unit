@@ -276,3 +276,13 @@ def test_validate_wrong_subfaction(
     report = svc.validate(army.id)
     assert report.ok is False
     assert any(i.kind == "wrong_subfaction" for i in report.issues)
+
+
+def test_add_unit_below_one_raises(session, make_army, make_unit):
+    from app.core.services.errors import ArmyValidationError
+
+    army = make_army()
+    unit = make_unit()
+    svc = ArmyService(session)
+    with pytest.raises(ArmyValidationError):
+        svc.add_unit(army.id, unit.id, amount=0)

@@ -18,6 +18,8 @@ class InventoryService:
         self.session = session
 
     def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> UserUnit:
+        if amount < 1:
+            raise InventoryValidationError("amount", "must be >= 1")
         self._require_user(user_id)
         self._require_unit(unit_id)
         entry = self._find_entry(user_id, unit_id)

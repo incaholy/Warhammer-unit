@@ -174,3 +174,12 @@ def test_validate_endpoint_reports_over_points(auth_client, make_faction, make_u
     resp = auth_client.get(f"/me/armies/{army['id']}/validate")
     assert resp.json()["ok"] is False
     assert any(i["kind"] == "over_points" for i in resp.json()["issues"])
+
+
+def test_add_unit_zero_amount_returns_422(auth_client, make_faction, make_unit):
+    army = _make_army(auth_client, make_faction())
+    unit = make_unit()
+    resp = auth_client.post(
+        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 0}
+    )
+    assert resp.status_code == 422  # schema ge=1

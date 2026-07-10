@@ -929,12 +929,10 @@ unit/army subfaction-belongs-to-faction at the DB level, and lazy `DATABASE_URL`
 parsing in the Makefile.)
 
 ### Should-fix 🐞
-- [ ] **`add_unit` accepts 0/negative amounts** — `InventoryAdd.amount` /
-  `ArmyUnitAdd.amount` are `int = 1` with no lower bound, and neither service's
-  `add_unit` guards it (unlike `set_amount`). A 0/negative slips to the DB CHECK as
-  a raw 500, or decrements an existing row below 1. *Fix:* `Field(default=1, ge=1)`
-  on both schemas **and** an `amount >= 1` check in `InventoryService.add_unit` /
-  `ArmyService.add_unit` (raising the service's `*ValidationError("amount", …)`).
+- [x] **`add_unit` accepts 0/negative amounts** — *fixed:* `Field(default=1, ge=1)`
+  on `InventoryAdd`/`ArmyUnitAdd` (→ 422 at the API) **and** an `amount >= 1` guard
+  in both services' `add_unit` raising `*ValidationError("amount", …)` (→ 400 for
+  direct callers). +4 tests.
 - [ ] **`make docker-test` is broken** — `.dockerignore` excludes `tests/`, but
   `docker-compose.test.yml` runs `pytest tests/` inside that image, so it finds
   nothing. *Fix:* stop ignoring `tests/` (or build a test image that includes them).
