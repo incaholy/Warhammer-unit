@@ -89,6 +89,13 @@ def test_parse_extracts_points_and_keywords():
     assert unit["keywords"] == ["Infantry", "Battleline", "Imperium", "Test Marine Squad"]
 
 
+def test_parse_fixed_subfaction_applies_to_every_unit():
+    # a non-Space-Marines page (e.g. Tyranids) maps every datasheet to one subfaction
+    data = parse_datasheets(FIXTURE, "Xenos", "Tyranids")
+    assert data["factions"] == [{"name": "Xenos", "subfactions": ["Tyranids"]}]
+    assert all(u.get("subfaction") == "Tyranids" for u in data["units"])
+
+
 def test_parse_chapter_codes_map_to_real_subfactions():
     # every code the scraper knows must be a real Space Marines subfaction
     from app.core.db.models import FACTION_SUBFACTIONS, FactionName

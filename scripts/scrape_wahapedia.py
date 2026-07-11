@@ -7,11 +7,13 @@ the parse layer is a **pure function** tested against a saved HTML fixture.
     python -m scripts.scrape_wahapedia      # scrape the configured factions
     make scrape
 
-v1 scope: **units + stat line + chapter → subfaction**. Two known limits:
-  - **Points are a placeholder (0)** — Wahapedia injects unit points via JavaScript,
-    so they aren't in the page HTML; backfill later (points source or admin API).
-  - **Weapons / abilities / keywords are not parsed yet** (Stage 2) — units seed
-    with empty lists.
+Scrapes the **full datasheet**: stat line, subfaction, weapons (ranged + melee, with
+their keywords), minimum-size points, unit keywords, and abilities (name + text).
+Configure which factions to scrape in `FACTIONS` below.
+
+Known limits: only the first stat profile of a multi-profile datasheet is read;
+points are minimum-size only; same-named units under one faction collapse on the
+seed's natural key.
 """
 
 import json
@@ -28,11 +30,19 @@ CACHE_DIR = Path(__file__).parent / "data" / "cache"
 BASE = "https://wahapedia.ru/wh40k10ed/factions"
 USER_AGENT = "warhammer-unit learning project (personal/dev use)"
 
-# faction url-slug -> our canonical FactionName value
-FACTIONS = {"space-marines": "Space Marines"}
+# Wahapedia faction url-slug -> (our FactionName value, fixed subfaction | None).
+# `None` = derive each datasheet's subfaction from its chapter color code — only
+# Space Marines works that way. Every *other* Wahapedia faction page maps to a single
+# one of OUR subfactions (e.g. the whole Tyranids page is Xenos / Tyranids). Add a
+# line here to scrape another faction; the subfaction must be in FACTION_SUBFACTIONS.
+FACTIONS: dict[str, tuple[str, Optional[str]]] = {
+    "space-marines": ("Space Marines", None),
+    "tyranids": ("Xenos", "Tyranids"),
+}
 
-# Wahapedia datasheet theme color code -> our subfaction name (must exist in
-# models.FACTION_SUBFACTIONS). "SM" = faction-wide -> no subfaction.
+# Space Marines datasheet theme color code -> chapter subfaction (must exist in
+# models.FACTION_SUBFACTIONS). "SM" = faction-wide -> no subfaction. Only used for
+# the Space Marines page (the one with a `None` fixed subfaction above).
 CHAPTER_CODES = {
     "CHBA": "Blood Angels", "CHDA": "Dark Angels", "CHDW": "Deathwatch",
     "CHIF": "Imperial Fists", "CHIH": "Iron Hands", "CHRG": "Raven Guard",
@@ -206,11 +216,14 @@ def parse_weapons(block) -> tuple[list[dict], list[str]]:
     return weapons, names
 
 
-def parse_datasheets(html: str, faction: str) -> dict:
-    """Pure parse: a faction's datasheets HTML -> the seed JSON structure.
+def parse_datasheets(html: str, faction: str, subfaction: Optional[str] = None) -> dict:
+    """Pure parse: a faction's datasheets HTML -> the seed JSON structure (factions,
+    weapons, abilities, units), each unit with stats, points, keywords, and its linked
+    weapons/abilities.
 
-    v1: units + the six-stat line + chapter→subfaction; points are a placeholder,
-    weapons/abilities/keywords are empty.
+    `subfaction`: if given (e.g. 'Tyranids'), every datasheet on the page gets it; if
+    None (Space Marines only), each unit's subfaction is derived from its chapter
+    color code (generic units -> no subfaction).
     """
     soup = BeautifulSoup(html, "lxml")
     units: list[dict] = []
@@ -240,10 +253,13 @@ def parse_datasheets(html: str, faction: str) -> dict:
         if any(stats.get(f) is None for f in STAT_FIELDS.values()):
             continue  # not a standard datasheet (no full stat line) — skip in v1
 
-        code = _theme_code(block)
-        subfaction = CHAPTER_CODES.get(code) if code and code != "SM" else None
-        if subfaction:
-            subfactions.add(subfaction)
+        if subfaction is not None:
+            unit_subfaction = subfaction  # the whole page is one subfaction
+        else:
+            code = _theme_code(block)
+            unit_subfaction = CHAPTER_CODES.get(code) if code and code != "SM" else None
+        if unit_subfaction:
+            subfactions.add(unit_subfaction)
 
         block_weapons, weapon_names = parse_weapons(block)
         for w in block_weapons:
@@ -268,8 +284,8 @@ def parse_datasheets(html: str, faction: str) -> dict:
             "weapons": list(dict.fromkeys(weapon_names)),  # dedupe, keep order
             "abilities": list(dict.fromkeys(ability_names)),
         }
-        if subfaction:
-            unit["subfaction"] = subfaction
+        if unit_subfaction:
+            unit["subfaction"] = unit_subfaction
         units.append(unit)
 
     return {
@@ -281,23 +297,29 @@ def parse_datasheets(html: str, faction: str) -> dict:
 
 
 def scrape_faction(slug: str) -> dict:
-    return parse_datasheets(fetch(f"{BASE}/{slug}/datasheets.html"), FACTIONS[slug])
+    faction, subfaction = FACTIONS[slug]
+    return parse_datasheets(fetch(f"{BASE}/{slug}/datasheets.html"), faction, subfaction)
 
 
 def main() -> None:
-    factions, units = [], []
-    weapons: dict[str, dict] = {}  # dedupe shared weapons across factions
+    faction_subs: dict[str, set] = {}  # our faction -> subfaction names (Xenos may span pages)
+    units: list[dict] = []
+    weapons: dict[str, dict] = {}  # dedupe shared weapons/abilities across pages
     abilities: dict[str, dict] = {}
     for slug in FACTIONS:
         data = scrape_faction(slug)
-        factions += data["factions"]
+        for f in data["factions"]:
+            faction_subs.setdefault(f["name"], set()).update(f["subfactions"])
         units += data["units"]
         for w in data["weapons"]:
             weapons.setdefault(w["name"], w)
         for a in data["abilities"]:
             abilities.setdefault(a["name"], a)
     out = {
-        "factions": factions,
+        "factions": [
+            {"name": name, "subfactions": sorted(subs)}
+            for name, subs in faction_subs.items()
+        ],
         "weapons": list(weapons.values()),
         "abilities": list(abilities.values()),
         "units": units,
@@ -307,7 +329,7 @@ def main() -> None:
     )
     print(
         f"scraped {len(units)} units, {len(weapons)} weapons, {len(abilities)} "
-        f"abilities across {len(factions)} faction(s) -> {DATA_PATH}"
+        f"abilities across {len(faction_subs)} faction(s) -> {DATA_PATH}"
     )
 
 

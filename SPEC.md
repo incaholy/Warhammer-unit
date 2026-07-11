@@ -711,15 +711,18 @@ the site. Treat the result as personal/dev use, not redistribution.
     `keywords`);
   - abilities → `Ability` rows (name + text); the keywords line → the unit's
     `keywords`.
-- **Normalize to our taxonomy** — the faction comes from the collated page's URL
-  (`.../space-marines/datasheets.html` → `FactionName` `Space Marines`). Most units
-  on the collated page are **faction-wide** (usable by any chapter) → `subfaction =
-  null` in our model (which already means "available to any subfaction"). Only
-  **chapter-specific** datasheets get a subfaction, identified by which units a
-  per-subfaction page lists (e.g. White Scars) → subfaction `White Scars`. A small
-  URL/label → canonical-name map handles both; anything not in `FactionName` /
-  `FACTION_SUBFACTIONS` is rejected exactly as `create_faction`/`create_subfaction`
-  already reject it.
+- **Normalize to our taxonomy** — the `FACTIONS` map keys a Wahapedia slug to
+  `(our faction, fixed subfaction | None)`. There are **two modes**:
+  - **Space Marines** (`("Space Marines", None)`) — the one page that mixes armies:
+    most datasheets are faction-wide → `subfaction = null` (our model's "any
+    subfaction"), and chapter-specific ones get their chapter from the datasheet's
+    color-theme code (`CHSA` → Salamanders), via `CHAPTER_CODES`.
+  - **Every other faction page** (e.g. `("Xenos", "Tyranids")`) — a whole Wahapedia
+    "faction" is a single one of *our* subfactions, so **every** datasheet on the
+    page gets that fixed subfaction. (Our four factions are Imperium/Xenos/Chaos/
+    Space Marines; the rest — Tyranids, Necrons, Death Guard, … — are subfactions.)
+  Adding a faction is one line in `FACTIONS`. The subfaction must be in
+  `FACTION_SUBFACTIONS` or the seed rejects it, exactly as `create_subfaction` does.
 
 **Decisions to make.**
 - **Points** *(done)* — **minimum-size** points, parsed from the static `.PriceTag`
