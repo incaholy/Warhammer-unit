@@ -33,7 +33,7 @@ def test_parse_extracts_units_stats_and_subfaction():
     assert "subfaction" not in generic  # SM theme -> faction-wide
     assert (generic["movement"], generic["toughness"], generic["armor_save"]) == (6, 4, 3)
     assert (generic["wounds"], generic["leadership"], generic["objective_control"]) == (2, 6, 2)
-    assert generic["points"] == 0  # placeholder in v1
+    assert generic["points"] == 80  # minimum-size cost from the PriceTag table
 
     chapter = by_name["Test Salamander Captain"]
     assert chapter["subfaction"] == "Salamanders"  # CHSA theme -> Salamanders
@@ -60,6 +60,17 @@ def test_parse_extracts_weapons_and_links_them():
     # the unit links both by name
     unit = next(u for u in data["units"] if u["unit_name"] == "Test Marine Squad")
     assert unit["weapons"] == ["Bolt rifle", "Close combat weapon"]
+
+
+def test_parse_extracts_points_and_keywords():
+    unit = next(
+        u for u in parse_datasheets(FIXTURE, "Space Marines")["units"]
+        if u["unit_name"] == "Test Marine Squad"
+    )
+    # minimum size (5 models = 80), NOT the 160 max nor the 15 enhancement
+    assert unit["points"] == 80
+    # unit KEYWORDS only (not FACTION KEYWORDS), title-cased
+    assert unit["keywords"] == ["Infantry", "Battleline", "Imperium", "Test Marine Squad"]
 
 
 def test_parse_chapter_codes_map_to_real_subfactions():

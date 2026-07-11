@@ -91,6 +91,43 @@ def _weapon_name_and_keywords(cell) -> tuple[str, list[str]]:
     return name, keywords
 
 
+def parse_points(block) -> int:
+    """Minimum-size points from the datasheet's `.PriceTag` table (0 if none).
+
+    Wahapedia lists points per unit size ('5 models' -> 80, '10 models' -> 160);
+    we store the smallest size's cost. (The `dsPointy` box is JS-filled and empty in
+    the HTML — these `.PriceTag` values are the static source.)
+    """
+    best: Optional[tuple[int, int]] = None  # (model_count, points)
+    for tag in block.select(".PriceTag"):
+        row = tag.find_parent("tr")
+        if row is None:
+            continue
+        # only unit-size prices ('N models'); skip enhancement/stratagem PriceTags
+        m = re.search(r"(\d+)\s*model", row.get_text(" ", strip=True), re.I)
+        pts = _stat_int(tag.get_text(strip=True))
+        if m is None or pts is None:
+            continue
+        size = int(m.group(1))
+        if best is None or size < best[0]:
+            best = (size, pts)
+    return best[1] if best else 0
+
+
+def parse_keywords(block) -> list[str]:
+    """The unit KEYWORDS (not FACTION KEYWORDS), title-cased.
+
+    Note: Wahapedia's column classes use a Cyrillic 'С' (`dsLeftСolKW`), so match on
+    the Latin substring `olKW` and pick the unit list by its 'KEYWORDS:' label."""
+    for kd in block.select('[class*="olKW"]'):
+        text = re.sub(r"\s+", " ", kd.get_text(" ", strip=True))
+        up = text.upper()
+        if up.startswith("KEYWORDS:") and "FACTION KEYWORDS:" not in up:
+            body = text.split(":", 1)[1]
+            return [k.strip().title() for k in body.split(",") if k.strip()]
+    return []
+
+
 def parse_weapons(block) -> tuple[list[dict], list[str]]:
     """A datasheet's weapons -> (weapon dicts, the unit's weapon names). Walks the
     weapon table rows tracking category from the RANGED/MELEE section headers."""
@@ -180,9 +217,9 @@ def parse_datasheets(html: str, faction: str) -> dict:
             "wounds": stats["wounds"],
             "leadership": stats["leadership"],
             "objective_control": stats["objective_control"],
-            "points": 0,  # PLACEHOLDER: Wahapedia injects points via JS; backfill later
+            "points": parse_points(block),  # minimum-size cost (0 if not listed)
             "invulnerable_save": None,
-            "keywords": [],
+            "keywords": parse_keywords(block),
             "weapons": list(dict.fromkeys(weapon_names)),  # dedupe, keep order
             "abilities": [],
         }

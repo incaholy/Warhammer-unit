@@ -671,12 +671,15 @@ and chapter → subfaction** (verified: parses 276 Space Marine units across 11
 chapters, and the output seeds cleanly + idempotently). Confirmed the page is
 server-rendered (BeautifulSoup + lxml; no headless browser). It also parses **weapons** (ranged + melee, per-profile rows; inline `.kwb2`
 keywords split from the name; AP stored as magnitude; shared weapons deduped and
-linked by name) — 431 weapons on the SM page, seeding cleanly. Deliberate limits /
-**TODO (Stage 2b)**: **points are a placeholder `0`** (Wahapedia injects unit points
-via JavaScript — not in the page HTML — so they need a separate source or admin
-backfill); **abilities and keywords are not parsed yet**; only the first stat
-profile of a multi-profile datasheet is read; same-named units under one faction
-collapse on the seed's natural key (~9/276 on the SM page). The scraped
+linked by name — 431 on the SM page), **points** (minimum-size cost from the static
+`.PriceTag` table — the `dsPointy` box is JS-filled/empty, but `.PriceTag` is in the
+HTML; enhancement/stratagem prices are excluded by requiring an "N models" row), and
+**unit keywords** (title-cased; the "olKW" column, Cyrillic-`С` class gotcha noted).
+All of it seeds cleanly. **TODO (Stage 2c)**: **abilities** (the `.dsAbility` blocks
+are overloaded — real abilities, unit composition, points, faction refs — so they
+need careful scoping); only the first stat profile of a multi-profile datasheet is
+read; same-named units under one faction collapse on the seed's natural key
+(~9/276 on the SM page). The scraped
 `datasheets.json` and the `scripts/data/cache/` HTML are **not committed** (GW IP —
 personal/dev use); run `make scrape` locally to (re)generate.
 
@@ -718,10 +721,10 @@ the site. Treat the result as personal/dev use, not redistribution.
   already reject it.
 
 **Decisions to make.**
-- **Points** *(decided)* — the target is **minimum-size** points, but Wahapedia
-  serves unit points via JavaScript (not in the page HTML), so v1 stores a
-  **placeholder `0`** and defers real points to a separate source or admin backfill.
-  Storing per-size points would be a later model change.
+- **Points** *(done)* — **minimum-size** points, parsed from the static `.PriceTag`
+  table (the `dsPointy` box is JS-filled, but `.PriceTag` values are in the HTML).
+  Only rows with an "N models" label count, so enhancement/stratagem prices are
+  excluded. Storing per-size points would be a later model change.
 - **Fail loud** — validate the scraped JSON against the seed schema before writing,
   so a Wahapedia layout change errors instead of seeding garbage.
 
@@ -992,9 +995,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     so no delete guard). See "API layer → Catalog administration."
 24. **(M/L) Catalog scraper (Wahapedia)** — *v1 built:* `scripts/scrape_wahapedia.py`
     + `make scrape` scrape a faction's collated `datasheets.html` → units with
-    stats + chapter→subfaction + **weapons** → `datasheets.json` (cached/polite
-    fetch, synthetic-fixture parser test). **TODO:** abilities/keywords, real points
-    (v1 uses placeholder 0). See "Scraping the catalog (Wahapedia)."
+    stats + chapter→subfaction + **weapons + points + keywords** → `datasheets.json`
+    (cached/polite fetch, synthetic-fixture parser test). **TODO:** abilities. See
+    "Scraping the catalog (Wahapedia)."
 25. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 
