@@ -128,6 +128,46 @@ def parse_keywords(block) -> list[str]:
     return []
 
 
+def _parse_one_ability(el) -> Optional[dict]:
+    """A `.dsAbility` block -> {name, description}, or None if it's not a real
+    ability (unit composition, a points table, or a bare faction/core reference)."""
+    if el.select_one(".dsUl") or el.select_one(".PriceTag") or el.find("table"):
+        return None  # composition / points, not an ability
+    bold = el.find("b")
+    if bold is None:
+        return None
+    name = re.sub(r"\s+", " ", bold.get_text(" ", strip=True)).rstrip(":").strip()
+    tmp = BeautifulSoup(str(el), "lxml")  # copy so we can drop the name to get the body
+    if tmp.find("b"):
+        tmp.find("b").decompose()
+    desc = re.sub(r"\s+", " ", tmp.get_text(" ", strip=True))
+    desc = re.sub(r"^(FACTION|CORE|WARGEAR)\s*:\s*", "", desc, flags=re.I).strip(" :")
+    if not name or len(desc) < 4:
+        return None  # a bare reference (e.g. 'FACTION: Oath of Moment') — skip
+    return {"name": name, "description": desc}
+
+
+def parse_abilities(block) -> tuple[list[dict], list[str]]:
+    """A datasheet's abilities -> (ability dicts, names). Scoped to the ABILITIES
+    section (from its header to the next section header), so unit composition,
+    the points table, etc. are excluded."""
+    abilities, names, collecting = [], [], False
+    for el in block.select(".dsHeader, .dsAbility"):
+        if "dsHeader" in (el.get("class") or []):
+            head = el.get_text(strip=True).upper()
+            if head == "ABILITIES":
+                collecting = True
+            elif collecting and head:  # a new section header ends the abilities
+                break
+            continue
+        if collecting:
+            ability = _parse_one_ability(el)
+            if ability:
+                abilities.append(ability)
+                names.append(ability["name"])
+    return abilities, names
+
+
 def parse_weapons(block) -> tuple[list[dict], list[str]]:
     """A datasheet's weapons -> (weapon dicts, the unit's weapon names). Walks the
     weapon table rows tracking category from the RANGED/MELEE section headers."""
@@ -176,6 +216,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
     units: list[dict] = []
     subfactions: set[str] = set()
     weapons: dict[str, dict] = {}  # by name — weapons are shared across units
+    abilities: dict[str, dict] = {}  # by name — abilities are shared too
 
     for block in soup.select("div.datasheet"):
         name_el = block.select_one(".dsH2Header > div")
@@ -208,6 +249,10 @@ def parse_datasheets(html: str, faction: str) -> dict:
         for w in block_weapons:
             weapons.setdefault(w["name"], w)  # first definition wins (shared weapons)
 
+        block_abilities, ability_names = parse_abilities(block)
+        for a in block_abilities:
+            abilities.setdefault(a["name"], a)
+
         unit = {
             "unit_name": name,
             "faction": faction,
@@ -221,7 +266,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
             "invulnerable_save": None,
             "keywords": parse_keywords(block),
             "weapons": list(dict.fromkeys(weapon_names)),  # dedupe, keep order
-            "abilities": [],
+            "abilities": list(dict.fromkeys(ability_names)),
         }
         if subfaction:
             unit["subfaction"] = subfaction
@@ -230,7 +275,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
     return {
         "factions": [{"name": faction, "subfactions": sorted(subfactions)}],
         "weapons": list(weapons.values()),
-        "abilities": [],
+        "abilities": list(abilities.values()),
         "units": units,
     }
 
@@ -242,24 +287,27 @@ def scrape_faction(slug: str) -> dict:
 def main() -> None:
     factions, units = [], []
     weapons: dict[str, dict] = {}  # dedupe shared weapons across factions
+    abilities: dict[str, dict] = {}
     for slug in FACTIONS:
         data = scrape_faction(slug)
         factions += data["factions"]
         units += data["units"]
         for w in data["weapons"]:
             weapons.setdefault(w["name"], w)
+        for a in data["abilities"]:
+            abilities.setdefault(a["name"], a)
     out = {
         "factions": factions,
         "weapons": list(weapons.values()),
-        "abilities": [],
+        "abilities": list(abilities.values()),
         "units": units,
     }
     DATA_PATH.write_text(
         json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     print(
-        f"scraped {len(units)} units, {len(weapons)} weapons "
-        f"across {len(factions)} faction(s) -> {DATA_PATH}"
+        f"scraped {len(units)} units, {len(weapons)} weapons, {len(abilities)} "
+        f"abilities across {len(factions)} faction(s) -> {DATA_PATH}"
     )
 
 

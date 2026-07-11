@@ -62,6 +62,22 @@ def test_parse_extracts_weapons_and_links_them():
     assert unit["weapons"] == ["Bolt rifle", "Close combat weapon"]
 
 
+def test_parse_extracts_abilities_scoped_to_the_section():
+    data = parse_datasheets(FIXTURE, "Space Marines")
+    abilities = {a["name"]: a for a in data["abilities"]}
+
+    # real datasheet ability kept (name + description)
+    assert "Test Ability" in abilities
+    assert abilities["Test Ability"]["description"].startswith("Does a test thing")
+    # a bare faction reference (no description) is skipped
+    assert "Oath of Moment" not in abilities
+    # unit composition ("1 Test Marine", under the next section header) is not an ability
+    assert "1 Test Marine" not in abilities
+
+    unit = next(u for u in data["units"] if u["unit_name"] == "Test Marine Squad")
+    assert unit["abilities"] == ["Test Ability"]
+
+
 def test_parse_extracts_points_and_keywords():
     unit = next(
         u for u in parse_datasheets(FIXTURE, "Space Marines")["units"]

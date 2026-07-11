@@ -80,15 +80,14 @@ admin-curated.
 - [x] Quality pass: whole-roadmap review + Improvements (should-fix / robustness / consistency / coverage) — see SPEC.md "Improvements"
 
 ### To build 🔨 (backlog)
-- [~] **Catalog scraper (Wahapedia)** — *v1 built.* `scripts/scrape_wahapedia.py` +
-  `make scrape` scrape a faction's **collated datasheets page** (e.g.
-  `space-marines/datasheets.html`) into `datasheets.json`, then `make seed` loads it
-  (**scrape → JSON → seed**) — verified 276 SM units, 11 chapters→subfactions, seeds
-  cleanly (incl. **weapons** — 431 on the SM page, deduped + linked — plus
-  **minimum-size points** and **unit keywords**). Cached/polite fetch + a parser test
-  against a synthetic fixture. **TODO:** abilities (the `.dsAbility` blocks are
-  overloaded and need scoping). *(Full plan: SPEC.md → "Scraping the catalog
-  (Wahapedia)".)*
+- [x] **Catalog scraper (Wahapedia)** — `scripts/scrape_wahapedia.py` + `make scrape`
+  scrape a faction's **collated datasheets page** (e.g. `space-marines/datasheets.html`)
+  into `datasheets.json`, then `make seed` loads it (**scrape → JSON → seed**). Scrapes
+  the **full datasheet**: stats, chapter→subfaction, weapons (431, deduped + linked),
+  minimum-size points, keywords, and abilities (194) — verified 276 SM units, seeds
+  cleanly. Cached/polite fetch + synthetic-fixture parser tests. Polish left:
+  multi-profile datasheets, per-size points. *(Full plan: SPEC.md → "Scraping the
+  catalog (Wahapedia)".)*
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
   scope; the backend is **frontend-ready** (seed, CORS, typed errors, catalog reads
   with a total count all in place). See SPEC.md "Frontend integration".
