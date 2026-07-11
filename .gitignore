@@ -220,3 +220,5 @@ __marimo__/
 
 # OSX
 .DS_Store
+# scraper cache (fetched Wahapedia HTML — not committed)
+scripts/data/cache/

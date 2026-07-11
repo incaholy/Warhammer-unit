@@ -4,3 +4,7 @@
 
 # (pytest / pytest-cov currently live in requirements.txt; move them here if you
 #  want to keep them out of production installs.)
+
+# web scraping (catalog scraper) — see SPEC "Scraping the catalog (Wahapedia)"
+beautifulsoup4==4.15.0
+lxml==6.1.1

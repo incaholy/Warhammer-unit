@@ -1,0 +1,49 @@
+"""The Wahapedia parser (scripts.scrape_wahapedia.parse_datasheets).
+
+Runs against a synthetic HTML fixture that reproduces Wahapedia's datasheet DOM —
+no network, no scraped content. The fetch layer is not tested here (it hits the
+live site and is exercised manually).
+"""
+
+from pathlib import Path
+
+from scripts.scrape_wahapedia import _stat_int, parse_datasheets
+
+FIXTURE = (Path(__file__).parent / "fixtures" / "wahapedia_datasheets.html").read_text()
+
+
+def test_stat_int_strips_symbols():
+    assert _stat_int('6"') == 6
+    assert _stat_int("2+") == 2
+    assert _stat_int("4") == 4
+    assert _stat_int("-") is None
+    assert _stat_int("") is None
+
+
+def test_parse_extracts_units_stats_and_subfaction():
+    data = parse_datasheets(FIXTURE, "Space Marines")
+
+    assert data["factions"] == [{"name": "Space Marines", "subfactions": ["Salamanders"]}]
+    assert len(data["units"]) == 2
+
+    by_name = {u["unit_name"]: u for u in data["units"]}
+
+    generic = by_name["Test Marine Squad"]
+    assert generic["faction"] == "Space Marines"
+    assert "subfaction" not in generic  # SM theme -> faction-wide
+    assert (generic["movement"], generic["toughness"], generic["armor_save"]) == (6, 4, 3)
+    assert (generic["wounds"], generic["leadership"], generic["objective_control"]) == (2, 6, 2)
+    assert generic["points"] == 0  # placeholder in v1
+
+    chapter = by_name["Test Salamander Captain"]
+    assert chapter["subfaction"] == "Salamanders"  # CHSA theme -> Salamanders
+    assert (chapter["toughness"], chapter["wounds"]) == (4, 5)
+
+
+def test_parse_chapter_codes_map_to_real_subfactions():
+    # every code the scraper knows must be a real Space Marines subfaction
+    from app.core.db.models import FACTION_SUBFACTIONS, FactionName
+    from scripts.scrape_wahapedia import CHAPTER_CODES
+
+    allowed = set(FACTION_SUBFACTIONS[FactionName.SPACE_MARINES])
+    assert set(CHAPTER_CODES.values()) <= allowed

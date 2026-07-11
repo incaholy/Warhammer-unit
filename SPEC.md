@@ -655,15 +655,28 @@ edits. The JSON schema is documented in `scripts/data/README.md`.
 
 ## Scraping the catalog (Wahapedia)
 
-**Planned — not yet built.** Datasheet content will be **scraped from Wahapedia**
-instead of hand-entered. The primary source is a faction's **collated datasheets
-page** — e.g. `https://wahapedia.ru/wh40k10ed/factions/space-marines/datasheets.html`
-— which lists *every* datasheet for a faction on one page (so one fetch covers a
-whole faction). The scraper emits the *same* `scripts/data/datasheets.json` the
-seed already consumes, so seeding stays a decoupled two-stage pipeline:
-**scrape → `datasheets.json` → `make seed` → DB**. Keeping the scrape separate from
-the seed means the output is reviewable/diffable, re-seedable offline, and there's
-**no live scraping at deploy**.
+**v1 built.** Datasheet content is **scraped from Wahapedia**
+(`scripts/scrape_wahapedia.py`, `make scrape`) instead of hand-entered. The primary
+source is a faction's **collated datasheets page** — e.g.
+`https://wahapedia.ru/wh40k10ed/factions/space-marines/datasheets.html` — which
+lists *every* datasheet for a faction on one page (one fetch covers a whole
+faction). The scraper emits the *same* `scripts/data/datasheets.json` the seed
+consumes, so seeding is a decoupled two-stage pipeline:
+**`make scrape` → `datasheets.json` → `make seed` → DB**. Keeping the scrape
+separate means the output is reviewable, re-seedable offline, and there's **no live
+scraping at deploy**.
+
+**Status.** v1 extracts, per datasheet: **name, the six-stat line (M/T/Sv/W/Ld/OC),
+and chapter → subfaction** (verified: parses 276 Space Marine units across 11
+chapters, and the output seeds cleanly + idempotently). Confirmed the page is
+server-rendered (BeautifulSoup + lxml; no headless browser). Deliberate limits /
+**TODO (Stage 2)**: **points are a placeholder `0`** (Wahapedia injects unit points
+via JavaScript — not in the page HTML — so they need a separate source or admin
+backfill); **weapons, abilities, and keywords are not parsed yet**; only the first
+stat profile of a multi-profile datasheet is read; same-named units under one
+faction collapse on the seed's natural key (~9/276 on the SM page). The scraped
+`datasheets.json` and the `scripts/data/cache/` HTML are **not committed** (GW IP —
+personal/dev use); run `make scrape` locally to (re)generate.
 
 **Ground rules (do these first).** Wahapedia is a fan reference built on Games
 Workshop's IP. Before scraping: read its `robots.txt` and terms; scrape **politely**
@@ -703,9 +716,10 @@ the site. Treat the result as personal/dev use, not redistribution.
   already reject it.
 
 **Decisions to make.**
-- **Points** — Wahapedia lists points per unit size (5 models = X, 10 = Y), but
-  `Unit.points` is a single value. Pick a convention (e.g. the base/minimum size)
-  and record it; storing per-size points would be a later model change.
+- **Points** *(decided)* — the target is **minimum-size** points, but Wahapedia
+  serves unit points via JavaScript (not in the page HTML), so v1 stores a
+  **placeholder `0`** and defers real points to a separate source or admin backfill.
+  Storing per-size points would be a later model change.
 - **Fail loud** — validate the scraped JSON against the seed schema before writing,
   so a Wahapedia layout change errors instead of seeding garbage.
 
@@ -974,10 +988,11 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `update_ability`/`delete_ability` + `PATCH`/`DELETE /weapons/{id}` and
     `/abilities/{id}` (all-optional `Weapon_Update`/`Ability_Update`; links cascade,
     so no delete guard). See "API layer → Catalog administration."
-24. **(M/L) Catalog scraper (Wahapedia)** — `scripts/scrape_wahapedia.py` fetches a
-    faction's collated `datasheets.html`, parses every datasheet, and writes
-    `datasheets.json` for `make seed` (scrape → JSON → seed). Politeness/caching + an
-    HTML-fixture parser test. See "Scraping the catalog (Wahapedia)."
+24. **(M/L) Catalog scraper (Wahapedia)** — *v1 built:* `scripts/scrape_wahapedia.py`
+    + `make scrape` scrape a faction's collated `datasheets.html` → units with
+    stats + chapter→subfaction → `datasheets.json` (cached/polite fetch, synthetic-
+    fixture parser test). **TODO:** weapons/abilities/keywords, real points (v1 uses
+    placeholder 0). See "Scraping the catalog (Wahapedia)."
 25. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 
