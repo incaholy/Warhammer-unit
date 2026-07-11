@@ -84,9 +84,10 @@ admin-curated.
   `make scrape` scrape a faction's **collated datasheets page** (e.g.
   `space-marines/datasheets.html`) into `datasheets.json`, then `make seed` loads it
   (**scrape → JSON → seed**) — verified 276 SM units, 11 chapters→subfactions, seeds
-  cleanly. Cached/polite fetch + a parser test against a synthetic fixture. **TODO:**
-  weapons/abilities/keywords, and real points (v1 uses placeholder `0` — Wahapedia
-  serves points via JS). *(Full plan: SPEC.md → "Scraping the catalog (Wahapedia)".)*
+  cleanly (incl. **weapons** — 431 on the SM page, deduped + linked). Cached/polite
+  fetch + a parser test against a synthetic fixture. **TODO:** abilities/keywords,
+  and real points (v1 uses placeholder `0` — Wahapedia serves points via JS).
+  *(Full plan: SPEC.md → "Scraping the catalog (Wahapedia)".)*
 - [ ] **Frontend** — the "Muster" UI (Vite/React) hitting this API. Out of backend
   scope; the backend is **frontend-ready** (seed, CORS, typed errors, catalog reads
   with a total count all in place). See SPEC.md "Frontend integration".

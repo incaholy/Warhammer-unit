@@ -40,6 +40,28 @@ def test_parse_extracts_units_stats_and_subfaction():
     assert (chapter["toughness"], chapter["wounds"]) == (4, 5)
 
 
+def test_parse_extracts_weapons_and_links_them():
+    data = parse_datasheets(FIXTURE, "Space Marines")
+    weapons = {w["name"]: w for w in data["weapons"]}
+
+    # ranged: keywords split from the name, AP stored as magnitude, range parsed
+    bolt = weapons["Bolt rifle"]
+    assert bolt["category"] == "range"
+    assert bolt["range_inches"] == 24
+    assert (bolt["attacks"], bolt["weapon_skill"], bolt["strength"]) == ("2", 3, 4)
+    assert bolt["armor_piercing"] == 1  # from "-1"
+    assert bolt["keywords"] == ["assault", "heavy"]
+
+    # melee: no range
+    ccw = weapons["Close combat weapon"]
+    assert ccw["category"] == "melee"
+    assert ccw["range_inches"] is None
+
+    # the unit links both by name
+    unit = next(u for u in data["units"] if u["unit_name"] == "Test Marine Squad")
+    assert unit["weapons"] == ["Bolt rifle", "Close combat weapon"]
+
+
 def test_parse_chapter_codes_map_to_real_subfactions():
     # every code the scraper knows must be a real Space Marines subfaction
     from app.core.db.models import FACTION_SUBFACTIONS, FactionName

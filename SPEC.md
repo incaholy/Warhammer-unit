@@ -669,12 +669,14 @@ scraping at deploy**.
 **Status.** v1 extracts, per datasheet: **name, the six-stat line (M/T/Sv/W/Ld/OC),
 and chapter → subfaction** (verified: parses 276 Space Marine units across 11
 chapters, and the output seeds cleanly + idempotently). Confirmed the page is
-server-rendered (BeautifulSoup + lxml; no headless browser). Deliberate limits /
-**TODO (Stage 2)**: **points are a placeholder `0`** (Wahapedia injects unit points
+server-rendered (BeautifulSoup + lxml; no headless browser). It also parses **weapons** (ranged + melee, per-profile rows; inline `.kwb2`
+keywords split from the name; AP stored as magnitude; shared weapons deduped and
+linked by name) — 431 weapons on the SM page, seeding cleanly. Deliberate limits /
+**TODO (Stage 2b)**: **points are a placeholder `0`** (Wahapedia injects unit points
 via JavaScript — not in the page HTML — so they need a separate source or admin
-backfill); **weapons, abilities, and keywords are not parsed yet**; only the first
-stat profile of a multi-profile datasheet is read; same-named units under one
-faction collapse on the seed's natural key (~9/276 on the SM page). The scraped
+backfill); **abilities and keywords are not parsed yet**; only the first stat
+profile of a multi-profile datasheet is read; same-named units under one faction
+collapse on the seed's natural key (~9/276 on the SM page). The scraped
 `datasheets.json` and the `scripts/data/cache/` HTML are **not committed** (GW IP —
 personal/dev use); run `make scrape` locally to (re)generate.
 
@@ -990,9 +992,9 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     so no delete guard). See "API layer → Catalog administration."
 24. **(M/L) Catalog scraper (Wahapedia)** — *v1 built:* `scripts/scrape_wahapedia.py`
     + `make scrape` scrape a faction's collated `datasheets.html` → units with
-    stats + chapter→subfaction → `datasheets.json` (cached/polite fetch, synthetic-
-    fixture parser test). **TODO:** weapons/abilities/keywords, real points (v1 uses
-    placeholder 0). See "Scraping the catalog (Wahapedia)."
+    stats + chapter→subfaction + **weapons** → `datasheets.json` (cached/polite
+    fetch, synthetic-fixture parser test). **TODO:** abilities/keywords, real points
+    (v1 uses placeholder 0). See "Scraping the catalog (Wahapedia)."
 25. **(L) Frontend** — the "Muster" Vite/React UI. Out of backend scope; the
     items above are its prerequisites. See "Frontend integration."
 

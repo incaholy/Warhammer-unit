@@ -78,6 +78,57 @@ def _theme_code(block) -> Optional[str]:
     return None
 
 
+def _weapon_name_and_keywords(cell) -> tuple[str, list[str]]:
+    """Split a weapon name cell into (name, keywords). Keywords render as inline
+    `.kwb2` spans (e.g. 'Bolt pistol [pistol]'); the name is the rest of the text."""
+    keywords = [
+        re.sub(r"\s+", " ", s.get_text(" ", strip=True)) for s in cell.select(".kwb2")
+    ]
+    tmp = BeautifulSoup(str(cell), "lxml")  # a copy, so we can strip the keyword spans
+    for s in tmp.select(".kwb2"):
+        s.decompose()
+    name = re.sub(r"\s+", " ", tmp.get_text(" ", strip=True)).strip(" –-")
+    return name, keywords
+
+
+def parse_weapons(block) -> tuple[list[dict], list[str]]:
+    """A datasheet's weapons -> (weapon dicts, the unit's weapon names). Walks the
+    weapon table rows tracking category from the RANGED/MELEE section headers."""
+    weapons, names, category = [], [], None
+    for tr in block.select("tr"):
+        if tr.select_one(".dsHeader"):
+            head = tr.get_text(" ", strip=True).upper()
+            if "RANGED WEAPONS" in head:
+                category = "range"
+            elif "MELEE WEAPONS" in head:
+                category = "melee"
+            continue
+        namecell = tr.select_one(".wTable2_short")
+        if namecell is None or category is None:
+            continue
+        cells = tr.find_all("td")
+        stat = cells[cells.index(namecell) + 1 : cells.index(namecell) + 7]
+        if len(stat) < 6:
+            continue
+        name, kw = _weapon_name_and_keywords(namecell)
+        if not name:
+            continue
+        text = [c.get_text(strip=True) for c in stat]  # [range, A, WS/BS, S, AP, D]
+        weapons.append({
+            "name": name,
+            "category": category,
+            "attacks": text[1] or "1",
+            "weapon_skill": _stat_int(text[2]) or 0,
+            "strength": _stat_int(text[3]) or 0,
+            "armor_piercing": abs(_stat_int(text[4]) or 0),  # model stores AP magnitude
+            "damage": text[5] or "1",
+            "range_inches": None if category == "melee" else _stat_int(text[0]),
+            "keywords": kw,
+        })
+        names.append(name)
+    return weapons, names
+
+
 def parse_datasheets(html: str, faction: str) -> dict:
     """Pure parse: a faction's datasheets HTML -> the seed JSON structure.
 
@@ -87,6 +138,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
     units: list[dict] = []
     subfactions: set[str] = set()
+    weapons: dict[str, dict] = {}  # by name — weapons are shared across units
 
     for block in soup.select("div.datasheet"):
         name_el = block.select_one(".dsH2Header > div")
@@ -115,6 +167,10 @@ def parse_datasheets(html: str, faction: str) -> dict:
         if subfaction:
             subfactions.add(subfaction)
 
+        block_weapons, weapon_names = parse_weapons(block)
+        for w in block_weapons:
+            weapons.setdefault(w["name"], w)  # first definition wins (shared weapons)
+
         unit = {
             "unit_name": name,
             "faction": faction,
@@ -127,7 +183,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
             "points": 0,  # PLACEHOLDER: Wahapedia injects points via JS; backfill later
             "invulnerable_save": None,
             "keywords": [],
-            "weapons": [],
+            "weapons": list(dict.fromkeys(weapon_names)),  # dedupe, keep order
             "abilities": [],
         }
         if subfaction:
@@ -136,7 +192,7 @@ def parse_datasheets(html: str, faction: str) -> dict:
 
     return {
         "factions": [{"name": faction, "subfactions": sorted(subfactions)}],
-        "weapons": [],
+        "weapons": list(weapons.values()),
         "abilities": [],
         "units": units,
     }
@@ -148,15 +204,26 @@ def scrape_faction(slug: str) -> dict:
 
 def main() -> None:
     factions, units = [], []
+    weapons: dict[str, dict] = {}  # dedupe shared weapons across factions
     for slug in FACTIONS:
         data = scrape_faction(slug)
         factions += data["factions"]
         units += data["units"]
-    out = {"factions": factions, "weapons": [], "abilities": [], "units": units}
+        for w in data["weapons"]:
+            weapons.setdefault(w["name"], w)
+    out = {
+        "factions": factions,
+        "weapons": list(weapons.values()),
+        "abilities": [],
+        "units": units,
+    }
     DATA_PATH.write_text(
         json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    print(f"scraped {len(units)} units across {len(factions)} faction(s) -> {DATA_PATH}")
+    print(
+        f"scraped {len(units)} units, {len(weapons)} weapons "
+        f"across {len(factions)} faction(s) -> {DATA_PATH}"
+    )
 
 
 if __name__ == "__main__":
