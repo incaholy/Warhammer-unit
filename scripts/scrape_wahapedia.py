@@ -36,7 +36,32 @@ USER_AGENT = "warhammer-unit learning project (personal/dev use)"
 # one of OUR subfactions (e.g. the whole Tyranids page is Xenos / Tyranids). Add a
 # line here to scrape another faction; the subfaction must be in FACTION_SUBFACTIONS.
 FACTIONS: dict[str, tuple[str, Optional[str]]] = {
+    # Space Marines: the one mixed page — subfaction comes from the chapter color code.
     "space-marines": ("Space Marines", None),
+    # Imperium
+    "adepta-sororitas": ("Imperium", "Adepta Sororitas"),
+    "adeptus-custodes": ("Imperium", "Adeptus Custodes"),
+    "adeptus-mechanicus": ("Imperium", "Adeptus Mechanicus"),
+    "astra-militarum": ("Imperium", "Astra Militarum"),
+    "grey-knights": ("Imperium", "Grey Knights"),
+    "imperial-agents": ("Imperium", "Imperial Agents"),
+    "imperial-knights": ("Imperium", "Imperial Knights"),
+    # Chaos
+    "chaos-daemons": ("Chaos", "Chaos Daemons"),
+    "chaos-knights": ("Chaos", "Chaos Knights"),
+    "chaos-space-marines": ("Chaos", "Chaos Space Marines"),
+    "death-guard": ("Chaos", "Death Guard"),
+    "emperor-s-children": ("Chaos", "Emperor's Children"),
+    "thousand-sons": ("Chaos", "Thousand Sons"),
+    "world-eaters": ("Chaos", "World Eaters"),
+    # Xenos
+    "aeldari": ("Xenos", "Aeldari"),
+    "drukhari": ("Xenos", "Drukhari"),
+    "genestealer-cults": ("Xenos", "Genestealer Cults"),
+    "leagues-of-votann": ("Xenos", "Leagues of Votann"),
+    "necrons": ("Xenos", "Necrons"),
+    "orks": ("Xenos", "Orks"),
+    "t-au-empire": ("Xenos", "T'au Empire"),
     "tyranids": ("Xenos", "Tyranids"),
 }
 

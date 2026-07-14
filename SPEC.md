@@ -678,10 +678,14 @@ HTML; enhancement/stratagem prices are excluded by requiring an "N models" row),
 and **abilities** (name + description, scoped to the ABILITIES section — the
 overloaded `.dsAbility` blocks for composition/points and bare faction/core
 references are excluded; 194 on the SM page). So the **full datasheet** is scraped,
-and all of it seeds cleanly. **Remaining limits**: only the first stat profile of a
-multi-profile datasheet is read, and same-named units under one faction collapse on
-the seed's natural key (~9/276 on the SM page). The scraped
-`datasheets.json` and the `scripts/data/cache/` HTML are **not committed** (GW IP —
+and all of it seeds cleanly. **All 23 Wahapedia factions are configured** → our 4
+factions + 33 subfactions (≈1558 datasheets scraped). **Remaining limits**: only the
+first stat profile of a multi-profile datasheet is read, and same-named units under
+one faction collapse on the seed's natural key — now ≈227/1558, because generic
+units (Chaos Spawn, Cultists, …) recur across a faction's subfactions and our seed
+keys units on `(faction, unit_name)`; keying on `(faction, subfaction, unit_name)`
+would keep them (a seed follow-up). The scraped `datasheets.json` and the
+`scripts/data/cache/` HTML are **not committed** (GW IP —
 personal/dev use); run `make scrape` locally to (re)generate.
 
 **Ground rules (do these first).** Wahapedia is a fan reference built on Games
