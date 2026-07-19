@@ -58,12 +58,15 @@ class InventoryService:
         self.session.delete(entry)
         self.session.commit()
 
-    def list_inventory(self, user_id: UUID) -> list[UserUnit]:
-        return list(
-            self.session.exec(
-                select(UserUnit).where(UserUnit.owner_user_id == user_id)
-            ).all()
-        )
+    def list_inventory(
+        self, user_id: UUID, q: Optional[str] = None
+    ) -> list[UserUnit]:
+        statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
+        if q:
+            statement = statement.join(Unit, UserUnit.unit_id == Unit.id).where(
+                Unit.unit_name.ilike(f"%{q}%")
+            )
+        return list(self.session.exec(statement).all())
 
     # ------------------------------ helpers ------------------------------
 

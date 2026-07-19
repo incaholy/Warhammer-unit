@@ -5,6 +5,7 @@ Identity comes from the JWT (`get_current_user`), not a path param. The nested
 belongs to the current user — so a stranger's `army_id` reveals nothing.
 """
 
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -33,6 +34,7 @@ class Army_Read(SQLModel):
     subfaction_id: Optional[UUID]
     description: Optional[str]
     points_limit: Optional[int]
+    created_at: datetime
     points_total: int = 0  # computed; set by the route
     units: list[ArmyUnit_Read] = []
 

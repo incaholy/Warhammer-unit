@@ -21,6 +21,7 @@ class User_Read(SQLModel):
     id: UUID
     username: str
     email: str
+    is_admin: bool
 
 
 class AdminUpdate(SQLModel):

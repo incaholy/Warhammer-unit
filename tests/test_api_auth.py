@@ -15,7 +15,7 @@ def test_register(client):
     assert body["username"] == "max"
     assert body["email"] == "max@test.io"
     assert "password_hash" not in body  # never exposed
-    assert "is_admin" not in body  # User_Read doesn't include it
+    assert body["is_admin"] is False  # exposed on User_Read; new users aren't admins
 
 
 def test_register_duplicate_returns_409(client):

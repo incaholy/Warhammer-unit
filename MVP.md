@@ -102,6 +102,38 @@ admin-curated.
 - [x] ~~SPEC service table omitted `AuthService`~~ — **fixed** (added to the table).
 - [ ] `passlib` 1.7.4 emits a `crypt` `DeprecationWarning` (removed in Python 3.13) — harmless now; revisit on a passlib upgrade.
 
+## Backend next steps (post-MVP backlog)
+
+Backend is MVP-complete; these are forward-looking next steps ordered by
+value/dependency. Full detail in [SPEC.md](SPEC.md) → "Backend next steps".
+None started yet.
+
+### Tier 0 — Frontend unblockers 🔨 (small; no DB migration — columns already exist)
+- [x] **FE1**: expose `created_at` on `Army_Read` (`app/api/army.py`) — unblocks the frontend Army "Created" date; also added to frontend `types.ts`. (S)
+- [x] **FE2**: add `q` search filter to `GET /me/inventory` (mirror `GET /units` ilike+count) — server-side inventory search. (S)
+- [x] **FE3**: add `is_admin` to the `/me` response — unblocks admin-UI gating (safe: self-only, auth still server-enforced). (S)
+
+### Tier 1 — Pipeline honesty & robustness ⚙️
+- [ ] **H1**: make the seed UPSERT (update stats/points/keywords on existing rows) — today it's create-only, contradicting SPEC's "patches stats in place"; update `test_seed`. (M)
+- [ ] **C**: change the unit seed key to `(faction, subfaction, unit_name)` — stops the ~227-unit collapse (1558→~1331). Fold into H1. (S)
+- [ ] **H2**: catch `IntegrityError` on concurrent `add_unit` → `ConflictError`/merge, + catch-all 409 handler in `main.py` (today races leak a raw 500). (M)
+
+### Tier 2 — Scaling ⚙️ (before real traffic)
+- [ ] **H3+M1**: eager-load weapons/abilities (`selectinload`) on list endpoints + batch `ArmyService`'s per-entry `session.get` — kills the N+1 (`GET /units?limit=200` ≈ 400 queries). (M)
+- [ ] **M5**: wire the installed `sentry-sdk` + basic logging + sanitized catch-all 500 handler (top ops gap). (S/M)
+
+### Tier 3 — Small hardening wins ⚙️
+- [ ] **M3**: `Register_Create.email` → `EmailStr` (`email-validator` already installed). (S)
+- [ ] **M4**: replace `passlib` with direct `bcrypt` (unblock Python 3.13, drop the `crypt` `DeprecationWarning`). (S/M)
+- [ ] **L2**: scraper "fail loud" — validate assembled JSON against the seed schema before writing. (S/M)
+- [ ] **L7**: last-admin-lockout guard in `set_admin`. (S)
+- [ ] **L3**: deep readiness probe (`/health/ready` runs `SELECT 1`). (S)
+
+### Tier 4 — Deferred / deploy-time / cleanup
+- [ ] **Deploy-time** (not code): real `SECRET_KEY`; `ALLOWED_ORIGINS` → frontend origin; run `make docker-test` + verify Dockerfile hardening when Docker is up.
+- [ ] **Deferred hardening**: rate-limit `/auth/*` (L1); `pydantic-settings` `Settings` class (L4); shorter JWT + refresh/revocation (L5); migration-on-start as one-shot job for multi-replica (L6).
+- [ ] **Stale-doc cleanup**: remove CLAUDE.md "Known issues" (all 6 fixed); this file's "202 tests" → 209; reconcile stale SPEC prose; CLAUDE.md stat name "save" → "armor_save".
+
 ## Out of scope (not MVP)
 - Datasheet **versioning** ("stats as of when I added it").
 - **Wargear/loadout** modelling and points that scale with model count.

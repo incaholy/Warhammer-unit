@@ -4,9 +4,10 @@ Identity comes from the JWT (`get_current_user`), not a path param, so a user
 can only ever touch their own inventory.
 """
 
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.unit import Unit_Read
@@ -40,10 +41,11 @@ def get_inventory_service(
 
 @router.get("", response_model=list[UserUnit_Read])
 def list_inventory(
+    q: Optional[str] = Query(default=None),
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> list[UserUnit_Read]:
-    return service.list_inventory(current_user.id)
+    return service.list_inventory(current_user.id, q)
 
 
 @router.post("", response_model=UserUnit_Read, status_code=status.HTTP_201_CREATED)

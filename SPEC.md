@@ -1086,3 +1086,94 @@ parsing in the Makefile.)
   their own `TestClient` via a `_authed_client` helper (depending on `client` only
   for the session-override lifecycle), so a single test can use both. Added a
   regression test asserting they're independent.
+
+## Backend next steps (post-MVP backlog)
+
+The backend is **MVP-complete and conformant** (verified by a multi-agent audit).
+The items below are forward-looking next steps, ordered by value and dependency,
+distilled from a 3-agent forward-looking review (roadmap/backlog,
+frontend-driven needs, and technical-debt/hardening). Nothing here is a
+correctness hole in the shipped MVP — those are tracked under "Improvements"
+above; these are the things to build *next*. Effort tags are **S/M/L**.
+
+### Tier 0 — Frontend unblockers
+
+Three tiny, additive serializer/query changes that immediately unblock the
+frontend. **None needs a database migration** — all three underlying columns
+already exist on the tables; the work is exposing them.
+
+| ID | Change | Where | Effort |
+|---|---|---|---|
+| FE1 | Add `created_at` (optionally `updated_at`) to `Army_Read` so the frontend can show the army's "Created" date | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also add `created_at` to the frontend `types.ts` | S |
+| FE2 | Add a `q` filter to `GET /me/inventory` so inventory search is server-side, not client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count already in `GET /units` (`service_unit._apply_unit_filters`) | S |
+| FE3 | Add `is_admin` to the `/me` response to unblock admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | S |
+
+### Tier 1 — Make the scrape→seed pipeline honest & robust
+
+The seed currently contradicts its own SPEC promise (it skips existing rows
+rather than patching them) and same-named units collapse. These fix that, and
+harden the concurrent "add unit" path.
+
+| ID | Change | Where | Effort |
+|---|---|---|---|
+| H1 | **Seed upsert** — update mutable fields on existing rows (stat line, `points`, `keywords`, `invulnerable_save`) instead of skipping them, so re-seeding truly "patches stats in place" as SPEC claims. Add an update branch per entity and an "updated" count bucket | `scripts/seed_datasheets.py` (create-only today); update `tests/test_seed.py` accordingly | M |
+| C | *(fold into H1)* Change the unit seed natural key from `(faction, unit_name)` to `(faction, subfaction, unit_name)`, stopping the ~227-unit collapse (same-named generic units — Chaos Spawn, Cultists — merging across subfactions; ~1558 scraped → ~1331 seeded) | `scripts/seed_datasheets.py` | S |
+| H2 | Catch `IntegrityError` on concurrent `add_unit` and convert to `ConflictError`/merge; add a catch-all `IntegrityError` → 409 handler. Today two simultaneous "add unit" requests leak a raw 500 | `service_army.py` + `service_inventory.py`; handler in `app/main.py` | M |
+
+### Tier 2 — Scaling (before real traffic)
+
+N+1 query patterns and missing observability will bite once there's load. Do
+these before opening the API to real traffic.
+
+| ID | Change | Where | Effort |
+|---|---|---|---|
+| H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
+| M5 | Wire the already-installed `sentry-sdk` (no-op when `SENTRY_DSN` unset), add basic structured logging, and a sanitized catch-all `Exception` → 500 handler so internals never leak | `app/main.py` | S/M |
+
+### Tier 3 — Small hardening wins
+
+Independent, low-risk improvements, each landable on its own.
+
+| ID | Change | Where | Effort |
+|---|---|---|---|
+| M3 | Change `Register_Create.email` from `str` to `EmailStr` (`email-validator` already installed) | `app/api/auth.py` | S |
+| M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
+| L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
+| L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
+| L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
+
+### Tier 4 — Deferred / deploy-time / cleanup
+
+Not code changes (or intentionally deferred), grouped by kind.
+
+- **Deploy-time (not code)** — set a real `SECRET_KEY`; point `ALLOWED_ORIGINS`
+  at the frontend origin; run `make docker-test` and verify the Dockerfile
+  hardening once the Docker daemon is available.
+- **Deferred hardening** — rate-limit `/auth/*` (slowapi, IP-keyed 5/min, 429)
+  before public deploy (L1); consolidate config into a `pydantic-settings`
+  `Settings` class (L4); shorten JWT lifetime + add refresh/revocation (L5);
+  move migration-on-start to a one-shot job for multi-replica deploys (L6).
+- **Out of scope (unchanged)** — datasheet versioning; wargear/loadout +
+  model-count points scaling; multi-profile datasheet parsing; per-size points;
+  Validation Tier 3 (per-datasheet count limits) & Tier 4 (detachments /
+  force-org).
+- **Stale-doc cleanup** — remove `CLAUDE.md`'s "Known issues" section (all 6
+  already fixed); fix `MVP.md`'s "202 tests" → 209; reconcile stale SPEC prose
+  (the "API tests to come" note, the "Wahapedia scraper planned" note, the
+  present-tense "delete_unit 500s" line, and the "Planned additions
+  (frontend-readiness)" header whose items are all done); correct `CLAUDE.md`'s
+  stat-name shorthand "save" → "armor_save".
+
+### Test-coverage gaps
+
+New behavior above wants matching tests: the concurrency/upsert race
+(H2); seed update-in-place (H1); query-count/N+1 regression guards (H3/M1);
+invalid-email rejection (M3); scraper assembly + fail-loud (L2); last-admin
+lockout (L7); and expired-token handling.
+
+### Production-readiness
+
+The top ops gap is **logging/observability** (M5) — nothing surfaces errors
+today. Behind it: a deep healthcheck (L3), a single typed `Settings` (L4), and
+JWT lifetime/revocation (L5). Address these before treating a deploy as
+production-grade.

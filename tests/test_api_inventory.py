@@ -68,3 +68,18 @@ def test_add_unit_zero_amount_returns_422(auth_client, make_unit):
         "/me/inventory", json={"unit_id": str(unit.id), "amount": 0}
     )
     assert resp.status_code == 422  # schema ge=1
+
+
+def test_list_inventory_search_filters_by_name(auth_client, make_unit):
+    intercessor = make_unit(unit_name="Intercessor Squad")
+    terminator = make_unit(unit_name="Terminator Squad")
+    for unit in (intercessor, terminator):
+        auth_client.post("/me/inventory", json={"unit_id": str(unit.id), "amount": 1})
+
+    # case-insensitive substring match on unit_name
+    resp = auth_client.get("/me/inventory", params={"q": "termin"})
+    assert resp.status_code == 200
+    assert [row["unit"]["unit_name"] for row in resp.json()] == ["Terminator Squad"]
+
+    # no q -> the whole inventory
+    assert len(auth_client.get("/me/inventory").json()) == 2
