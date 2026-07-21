@@ -18,5 +18,8 @@ USER appuser
 EXPOSE 8000
 
 # Entrypoint runs `alembic upgrade head`, then execs the command below.
+# Bind to $PORT when the platform provides one (Render, Fly, Cloud Run, …),
+# falling back to 8000 for local Compose. `sh -c` (JSON/exec form) is what
+# expands ${PORT} at runtime; the generic entrypoint still `exec "$@"`s it.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
