@@ -61,10 +61,18 @@ idle spin-down (first request after a nap is slow) — fine for a demo.
 |---|---|
 | `DATABASE_URL` | the Neon **pooled** string from Step 1 |
 | `SECRET_KEY` | a random value — use Render's **Generate**, or `openssl rand -hex 32` |
+| `APP_ENV` | `production` — safety net (see below) |
 | `ALLOWED_ORIGINS` | the frontend URL — **leave blank for now**, fill in at Step 5 |
 
-- `APP_ENV` is **not** needed — unset ⇒ production (the app fail-closes without a
-  real `SECRET_KEY`).
+- **Why set `APP_ENV=production`?** `SECRET_KEY` is the real protection — always
+  set it. But `APP_ENV` defaults to `dev` in the app, and in dev a *missing*
+  `SECRET_KEY` silently falls back to a public default key
+  (`dev-secret-change-me`) that would let anyone forge admin tokens. Setting
+  `APP_ENV=production` makes the app **refuse to boot** if `SECRET_KEY` is ever
+  unset — fail loud instead of silently insecure. (Local `docker-compose`
+  already defaults `APP_ENV=production`; Render uses the Dockerfile directly, so
+  set it here.)
+- `ACCESS_TOKEN_EXPIRE_MINUTES` is optional (defaults to `2880` = 2 days).
 - **Port**: nothing to set. The image binds to Render's `$PORT` automatically
   (`CMD` → `--port ${PORT:-8000}`).
 
@@ -109,7 +117,17 @@ Loads ~1331 units into Neon. `make scrape` needs `beautifulsoup4`/`lxml`
 
 | Key | Value |
 |---|---|
-| `VITE_API_BASE_URL` | the API URL from Step 2, e.g. `https://<api>.onrender.com` |
+| `VITE_API_BASE_URL` | the API URL from Step 2, e.g. `https://<api>.onrender.com` (exact, `https://`, **no trailing slash**) |
+
+> ⚠️ **This one bites everyone.** Vite reads `VITE_API_BASE_URL` **only at build
+> time**, not at runtime. If it's unset (or you set it *after* the build), the
+> app falls back to calling its **own** origin — e.g. a signup POSTs to
+> `https://<web>.onrender.com/auth/register`, the SPA rewrite answers with
+> `index.html` (HTTP `200`), the browser can't parse HTML as JSON, and the UI
+> shows a generic "Something went wrong". **Always set this before building, and
+> after changing it use Manual Deploy → "Clear build cache & deploy" so a fresh
+> bundle picks it up.** Confirm in the browser Network tab that the request URL
+> points at the **API** host, not the web host.
 
 **Redirect/Rewrite rule** (client-side routing — without it, refreshing on
 `/armies/123` 404s):
@@ -151,3 +169,24 @@ Then open the frontend URL, register an account, and build an army.
   only in the host's env-var settings.
 - **Custom domain**: optional — the `*.onrender.com` subdomain works out of the
   box with HTTPS.
+
+---
+
+## Troubleshooting
+
+**"Something went wrong" on register/login.** The frontend only shows a specific
+message when the API returns one; the generic text means the request never
+reached the API as a readable response. Open the browser **Network tab**, retry,
+and inspect the `register`/`login` request:
+
+| What you see | Cause | Fix |
+|---|---|---|
+| Request URL is the **web** host (`…-web.onrender.com/auth/register`), `Sec-Fetch-Site: same-origin`, status `200` | `VITE_API_BASE_URL` was unset at build → app calls itself; the `200` is the SPA `index.html`, not JSON | Set `VITE_API_BASE_URL` (Step 4) and **rebuild** (Clear build cache & deploy) |
+| Console: `blocked by CORS policy` / `No 'Access-Control-Allow-Origin'` | `ALLOWED_ORIGINS` missing or not an exact match on the API | Set `ALLOWED_ORIGINS` to the exact web origin (Step 5), redeploy the **API** |
+| Request to `http://…` or `mixed content` blocked | `VITE_API_BASE_URL` used `http` from an `https` page | Use the `https://` API URL, rebuild |
+| Status `502`/`503`, or a failed/timed-out request | API is down or cold-starting | Check the API's Render **Logs**; retry after wake |
+| A real `400`/`409`/`500` **with a JSON body** | API was reached — a normal app response | Read the `detail`; a `500` usually means DB (`DATABASE_URL`/Neon) or unseeded tables |
+
+**Env-var changes don't take effect.** Render applies env vars on the **next
+deploy**. For the frontend, changing `VITE_API_BASE_URL` needs a **rebuild** (it's
+compiled in); for the API, a redeploy is enough (it's read at runtime).
