@@ -3,6 +3,11 @@
 How to put the app online for free so anyone can use it. Three pieces get
 separate homes:
 
+> Looking for the production-shaped version (Cloud Run, staged rollouts,
+> backward-compatible migrations, observability)? See
+> [`DEPLOY-GCP.md`](DEPLOY-GCP.md). This guide is the fast path and stays the
+> right choice for a demo.
+
 | Piece | What it is | Host |
 |---|---|---|
 | **Database** | Postgres | **Neon** (free, persistent) |
