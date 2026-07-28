@@ -35,19 +35,3 @@ pytest                               # run tests (once tests/ exists)
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `save`, `wounds`, `leadership`,
   `objective_control`).
-
-## Known issues (fix before building on top)
-
-- `service_unit.py`: `create_unit` calls `self.session.commit(new_unit)` —
-  `commit()` takes no arguments.
-- `service_unit.py`: `list_units` builds `statment` but filters/offset/limit
-  assign to `statement` (typo means filters are silently dropped, and the
-  filtered path crashes with NameError).
-- `service_unit.py`: `delete_unit` has `self.session.commit` without `()` —
-  the delete is never committed.
-- `service_unit.py`: `get_unit` returns the string "unit does not exist"
-  instead of raising `LookupError`.
-- `service_unit.py`: `update_unit` error messages use `"{field}"` without the
-  `f` prefix.
-- `app/api/unit.py`: router exists but there is no `app/main.py` mounting it,
-  so the API can't be started yet.
