@@ -184,9 +184,10 @@ Deletes cascade down the ownership hierarchy and protect the catalog. Deleting a
 foreign keys (`units`/`armies` → factions/subfactions, and the `unit_id` on
 `army_units`/`user_unit`) use the default RESTRICT, so you can't delete a unit or
 faction that's still referenced. Removing a `UserUnit` touches no army — a list
-can keep referencing a unit the user just sold. (Deleting a referenced row will be
+can keep referencing a unit the user just sold. (Deleting a referenced row is
 guarded at the service layer to raise `ConflictError` → 409 rather than a raw
-`IntegrityError` → 500 — planned; see "API layer → Catalog administration.")
+`IntegrityError` → 500; any `IntegrityError` that still slips through is caught
+by the API-layer backstop as a generic 409.)
 
 Unit stat line maps to the datasheet: `movement` (M), `toughness` (T),
 `armor_save` (Sv), `wounds` (W), `invulnerable_save` (nullable Inv),
@@ -320,7 +321,9 @@ exposes CRUD methods.
 
 Service conventions:
 - "Not found" raises `LookupError` (don't return strings or `None` ambiguously).
-- Bad input raises `ValueError` / `TypeError` with a descriptive message.
+- Bad input raises `ValueError` via the typed `*ValidationError`, with a
+  descriptive message. Don't raise a bare `TypeError` for bad input — the API
+  layer treats an unexpected `TypeError` as a bug (→ 500), not a client error.
 - Every write method ends with `commit()` + `refresh()` and returns the model.
 - Services should take a `session` argument (`ArmyService(session)`)
   rather than calling `get_session()` in `__init__`, so a multi-table operation
@@ -443,23 +446,31 @@ Read schemas nest the hierarchy:
   unit: Unit_Read?}]}` — the `validate` report.
 
 Error mapping at the API layer (see "Custom service errors" for the typed
-hierarchy; the plain builtins remain as fallbacks):
+hierarchy). Only messages the service author wrote (the typed `ServiceError`s)
+reach the client; any *unexpected* exception is logged server-side and returned
+as a generic body with no internals — never `str(exc)` of an arbitrary builtin:
 
 | Service exception | HTTP status |
 |---|---|
 | `NotFoundError` (⊂ `LookupError`) | 404 |
 | `ConflictError` (⊂ `ValueError`) — duplicate | 409 |
 | `*ValidationError` (⊂ `ValueError`) — carries `field` | 400 |
-| bare `LookupError` (fallback) | 404 |
-| bare `ValueError` / `TypeError` (fallback) | 400 |
 | Pydantic validation failure | 422 (FastAPI automatic) |
+| `IntegrityError` (DB-constraint backstop) | 409 — logged, generic body |
+| any other unhandled exception | 500 — logged with traceback, generic body |
+
+There are deliberately **no** catch-all `ValueError`/`TypeError`/`LookupError`
+handlers: those builtins are raised throughout the stdlib and third-party libs,
+so returning their raw message would leak internals, and a `TypeError` (almost
+always a bug) would be mislabelled a client `400` instead of a server `500`.
 
 ### App entry point (`app/main.py`)
 
 `app/main.py` builds the `FastAPI()` instance, mounts every router
-(`app.include_router(...)`), registers the `ServiceError` → HTTP handler (plus
-the builtin fallbacks), and exposes a `GET /health` liveness check. Run locally
-with `uvicorn app.main:app --reload` (or `make run`).
+(`app.include_router(...)`), registers the `ServiceError` → HTTP handler, an
+`IntegrityError` → 409 backstop, and a catch-all handler that logs unexpected
+exceptions and returns a generic 500, and exposes a `GET /health` liveness
+check. Run locally with `uvicorn app.main:app --reload` (or `make run`).
 
 ### Planned additions (frontend-readiness)
 
