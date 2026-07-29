@@ -25,11 +25,20 @@ def get_engine() -> Engine:
 
 
 def get_session() -> Iterator[Session]:
-    """Yield a Session and close it afterwards.
+    """Yield a Session, rolling it back on error and closing it afterwards.
 
-    This is the FastAPI dependency shape: `Depends(get_session)` closes/rolls
-    back the session after each request. Scripts that want a session directly
+    This is the FastAPI dependency shape (`Depends(get_session)`). If the
+    request handler raises, the session is rolled back so a half-finished unit
+    of work is never left pending — anything not already `commit()`-ed is
+    discarded. On success the service's own `commit()` has already persisted the
+    work. The session is closed either way. Scripts that want a session directly
     can use `Session(get_engine())`.
     """
-    with Session(get_engine()) as session:
+    session = Session(get_engine())
+    try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
