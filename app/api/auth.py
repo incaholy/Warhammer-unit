@@ -21,7 +21,9 @@ class Register_Create(SQLModel):
     # Not full email-format validation for now — just guard against empty/too-short
     # values (a real address is at least like "a@b.c"). Rejected with a 422.
     email: str = Field(min_length=5)
-    password: str
+    # min 8 for a floor on strength; max 72 because bcrypt silently truncates
+    # anything longer, so reject it loudly instead. Both surface as a 422.
+    password: str = Field(min_length=8, max_length=72)
 
 
 class Token(SQLModel):
