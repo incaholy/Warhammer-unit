@@ -6,7 +6,7 @@ OAuth2 password form (`username` may be a username or email) and returns a JWT.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlmodel import Session, SQLModel
+from sqlmodel import Field, Session, SQLModel
 
 from app.api.user import User_Read
 from app.core.db.connection import get_session
@@ -18,7 +18,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class Register_Create(SQLModel):
     username: str
-    email: str
+    # Not full email-format validation for now — just guard against empty/too-short
+    # values (a real address is at least like "a@b.c"). Rejected with a 422.
+    email: str = Field(min_length=5)
     password: str
 
 
