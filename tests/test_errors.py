@@ -15,8 +15,10 @@ from app.core.services.service_unit import UnitService
 
 def test_backward_compatible_subclassing():
     # NotFoundError still reads as a LookupError, and the *ValidationError /
-    # ConflictError family still read as ValueError, so the fallback handlers in
-    # main.py keep working during the migration.
+    # ConflictError family still read as ValueError. The HTTP mapping now runs
+    # entirely through the ServiceError handler (no bare-builtin fallbacks), but
+    # the subclassing is kept so service-level tests can `pytest.raises(ValueError
+    # / LookupError)` and so ServiceError still precedes them in the MRO.
     assert issubclass(NotFoundError, LookupError)
     assert issubclass(ConflictError, ValueError)
     assert issubclass(ValidationError, ValueError)
