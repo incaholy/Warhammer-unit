@@ -46,6 +46,9 @@ class ValidationReport:
 class ArmyService:
     # Fields a PATCH may set on an army.
     _UPDATABLE = {"name", "description", "faction_id", "subfaction_id", "points_limit"}
+    # Of those, the ones backed by NOT NULL columns — an explicit null must be
+    # rejected, not written. The rest may be cleared with an explicit null.
+    _NOT_NULLABLE = {"name", "faction_id"}
 
     def __init__(self, session: Session):
         self.session = session
@@ -105,6 +108,13 @@ class ArmyService:
         unknown = set(fields) - self._UPDATABLE
         if unknown:
             raise ArmyValidationError("fields", f"cannot update {sorted(unknown)}")
+        # A PATCH that explicitly sends null for a NOT NULL column survives
+        # `exclude_unset`, slips past the existence guards below (they only act on
+        # non-null values), and would hit a DB IntegrityError. Reject it as a
+        # clean 400 up front.
+        for field in sorted(fields):
+            if field in self._NOT_NULLABLE and fields[field] is None:
+                raise ArmyValidationError(field, "cannot be null")
         if fields.get("faction_id") is not None and (
             self.session.get(Faction, fields["faction_id"]) is None
         ):
