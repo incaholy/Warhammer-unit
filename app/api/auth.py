@@ -17,7 +17,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class Register_Create(SQLModel):
-    username: str
+    username: str = Field(min_length=3)  # non-empty, not trivially short
     # Not full email-format validation for now — just guard against empty/too-short
     # values (a real address is at least like "a@b.c"). Rejected with a 422.
     email: str = Field(min_length=5)

@@ -20,6 +20,14 @@ def test_register(client):
     assert body["is_admin"] is False  # exposed on User_Read; new users aren't admins
 
 
+def test_register_empty_username_returns_422(client):
+    assert _register(client, username="").status_code == 422
+
+
+def test_register_short_username_returns_422(client):
+    assert _register(client, username="ab").status_code == 422  # below min_length
+
+
 def test_register_empty_email_returns_422(client):
     assert _register(client, email="").status_code == 422
 
