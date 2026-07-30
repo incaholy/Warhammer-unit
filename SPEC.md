@@ -1175,7 +1175,6 @@ Independent, low-risk improvements, each landable on its own.
 |---|---|---|---|
 | M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
-| L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
 | D1 | **Docs (code review):** give `README.md` a real front door — what the project is, how to run it — linking `SPEC.md`, `MVP.md`, `DEPLOY.md`. Currently 2 lines | `README.md` | S |
 
@@ -1213,8 +1212,7 @@ Not code changes (or intentionally deferred), grouped by kind.
 
 New behavior above wants matching tests: the concurrency/upsert race
 (H2); seed update-in-place (H1); query-count/N+1 regression guards (H3/M1);
-invalid-email rejection (M3); scraper assembly + fail-loud (L2); last-admin
-lockout (L7); and expired-token handling.
+scraper assembly + fail-loud (L2); and expired-token handling.
 
 ### Production-readiness
 
