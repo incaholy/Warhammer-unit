@@ -802,9 +802,8 @@ to the caller, and catalog writes require an admin. The pieces:
 - **Admin promotion via API** *(Built — roadmap 22)* — the *first* admin is
   bootstrapped out of band (above); an existing admin promotes/demotes others via
   `UserService.set_admin(user_id, is_admin)` (`NotFoundError` if missing) behind an
-  admin-only `PATCH /users/{id}` `{is_admin}`. Returns `UserAdmin_Read` (like
-  `User_Read` but surfacing `is_admin`, since `User_Read` deliberately hides it).
-  Last-admin-lockout protection was left out for now.
+  admin-only `PATCH /users/{id}` `{is_admin}`. Returns `User_Read` (which
+  includes `is_admin`). Last-admin-lockout protection was left out for now.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
   keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
@@ -1006,7 +1005,7 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `ConflictError` 409) + `DELETE /subfactions/{id}` → 204. See "API layer →
     Catalog administration."
 22. ✓ **Admin promotion via API** — `UserService.set_admin` + admin-only
-    `PATCH /users/{id}` `{is_admin}` → `UserAdmin_Read` (surfaces `is_admin`). See
+    `PATCH /users/{id}` `{is_admin}` → `User_Read` (includes `is_admin`). See
     "Authentication & authorization → Planned hardening."
 23. ✓ **Editable weapons + abilities** — `update_weapon`/`delete_weapon`,
     `update_ability`/`delete_ability` + `PATCH`/`DELETE /weapons/{id}` and
@@ -1164,6 +1163,8 @@ Independent, low-risk improvements, each landable on its own.
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
 | L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
+| D1 | **Docs (code review):** give `README.md` a real front door — what the project is, how to run it — linking `SPEC.md`, `MVP.md`, `DEPLOY.md`. Currently 2 lines | `README.md` | S |
+| N2 | **Nit (code review):** `_UNAUTHORIZED` is a shared module-level `HTTPException` instance raised repeatedly, so each `raise` mutates the one object's `__traceback__`. Build a fresh exception per raise (or a small factory) | `app/core/security.py` | S |
 
 ### Tier 4 — Deferred / deploy-time / cleanup
 
@@ -1176,6 +1177,11 @@ Not code changes (or intentionally deferred), grouped by kind.
   before public deploy (L1); consolidate config into a `pydantic-settings`
   `Settings` class (L4); shorten JWT lifetime + add refresh/revocation (L5);
   move migration-on-start to a one-shot job for multi-replica deploys (L6).
+  **JWT-in-`localStorage` (code review)** — the token lives in `localStorage`
+  (`src/api/client.ts`, frontend), a deliberate SPA tradeoff: any XSS on the
+  page can read it. The alternative (httpOnly cookie) removes that but adds CSRF
+  scope and loses convenience. Documented decision — revisit alongside L5 if the
+  threat model changes.
 - **Out of scope (unchanged)** — datasheet versioning; wargear/loadout +
   model-count points scaling; multi-profile datasheet parsing; per-size points;
   Validation Tier 3 (per-datasheet count limits) & Tier 4 (detachments /
