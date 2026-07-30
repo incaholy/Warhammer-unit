@@ -1139,7 +1139,18 @@ these before opening the API to real traffic.
 | ID | Change | Where | Effort |
 |---|---|---|---|
 | H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
+| Q1 | **Extend the N+1 fix beyond `/units`** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so *every* list that serializes units lazy-loads them per row: `GET /units` (`1+2N`), `GET /me/inventory` (each entry's `unit` + its weapons/abilities), and `GET /me/armies` — which is worst: it serializes `Army_Read.units` (lazy) **and** re-queries the same units in `points_total`. Options: `selectinload` the chains; compute `points_total` with a single `SUM(amount*points)` aggregate instead of a per-entry loop; and/or split `Army_Read` into a **summary** schema (list — no `units`) vs a **detail** schema (`GET /{id}` — units eager-loaded), the classic list-vs-detail split. Coordinated FE change (the web app reads `army.units`) | `app/api/unit.py`, `app/api/inventory.py`, `app/api/army.py`, `service_army.points_total` | M |
 | M5 | Wire the already-installed `sentry-sdk` (no-op when `SENTRY_DSN` unset), add basic structured logging, and a sanitized catch-all `Exception` → 500 handler so internals never leak | `app/main.py` | S/M |
+
+> **Revisit: relationship-loading strategy.** The loading strategy across the
+> `*_Read` schemas needs a deliberate pass — everything defaults to **lazy**
+> today, which is what creates the N+1s above. Decide *per relationship* which
+> strategy each endpoint should use — **lazy** (fine for single-object detail),
+> eager **`selectinload`** (collections / many-to-many) or **`joinedload`**
+> (many-to-one), and **`noload`/`raiseload`** to forbid a relationship from
+> loading (raiseload is useful in tests to catch accidental lazy loads). Also
+> choose *where* to set it: per-query `.options(...)` (flexible, preferred) vs a
+> model-level `Relationship(sa_relationship_kwargs={"lazy": ...})` default.
 
 ### Tier 3 — Small hardening wins
 
