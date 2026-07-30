@@ -1173,7 +1173,6 @@ Independent, low-risk improvements, each landable on its own.
 
 | ID | Change | Where | Effort |
 |---|---|---|---|
-| M3 | Upgrade `Register_Create.email` from the current length-only check (`min_length`, already on the review branch) to `EmailStr` for **format/syntax** validation (`email-validator` already installed). Format only — Pydantic disables deliverability, so a malformed address is rejected (422) but a syntactically-valid *nonexistent* domain still passes (that's the separate deferred check below) | `app/api/auth.py` | S |
 | M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
 | L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
@@ -1193,7 +1192,7 @@ Not code changes (or intentionally deferred), grouped by kind.
   move migration-on-start to a one-shot job for multi-replica deploys (L6).
   (JWT-in-`localStorage` is now a documented **accepted decision** — see
   "Authentication & authorization → Token storage".)
-- **Email deliverability check** *(after M3)* — turn on the "can this domain
+- **Email deliverability check** *(builds on the EmailStr format check, now in place)* — turn on the "can this domain
   actually receive mail?" check: a custom validator calling
   `email_validator.validate_email(value, check_deliverability=True)` (Pydantic's
   `EmailStr` disables this by default), so registration does a live DNS/MX

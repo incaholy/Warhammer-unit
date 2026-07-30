@@ -32,8 +32,11 @@ def test_register_empty_email_returns_422(client):
     assert _register(client, email="").status_code == 422
 
 
-def test_register_short_email_returns_422(client):
-    assert _register(client, email="a@b").status_code == 422  # below min_length
+def test_register_malformed_email_returns_422(client):
+    # EmailStr rejects invalid formats (no @, missing TLD, etc.). It does NOT
+    # check deliverability, so a valid-but-nonexistent domain would still pass.
+    assert _register(client, email="not-an-email").status_code == 422
+    assert _register(client, email="a@b").status_code == 422
 
 
 def test_register_short_password_returns_422(client):
