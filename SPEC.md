@@ -767,6 +767,21 @@ to the caller, and catalog writes require an admin. The pieces:
 `security.py`): subject = the user's id, algorithm **HS256**, signed with a
 `SECRET_KEY` env var and expiring after `ACCESS_TOKEN_EXPIRE_MINUTES`.
 
+**Token storage (accepted decision).** The frontend stores the JWT in the
+browser's `localStorage` (`src/api/client.ts`) and sends it as a `Bearer`
+header. Tradeoff: `localStorage` is readable by JavaScript, so any XSS on the
+page could exfiltrate the token; the alternative — an `httpOnly` cookie — is not
+JS-readable but adds CSRF exposure and complexity. **We accept `localStorage`
+for now** because it's the standard SPA pattern, auth is a `Bearer` header (no
+cookies → no CSRF surface), this is a small/demo app with limited blast radius,
+and tokens expire (`ACCESS_TOKEN_EXPIRE_MINUTES`). Defense-in-depth that keeps
+it acceptable: a modest token lifetime, standard XSS hygiene (React escapes by
+default; avoid `dangerouslySetInnerHTML`; a CSP header would help), and no
+sensitive data beyond the account. **Revisit** — move to an `httpOnly` cookie
+with CSRF protection (and add refresh/revocation, roadmap L5) if the app starts
+handling sensitive data, grows a real user base, or adds features that widen the
+XSS surface.
+
 **Dependencies:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
 
 **Routing.**
@@ -1176,11 +1191,8 @@ Not code changes (or intentionally deferred), grouped by kind.
   before public deploy (L1); consolidate config into a `pydantic-settings`
   `Settings` class (L4); shorten JWT lifetime + add refresh/revocation (L5);
   move migration-on-start to a one-shot job for multi-replica deploys (L6).
-  **JWT-in-`localStorage` (code review)** — the token lives in `localStorage`
-  (`src/api/client.ts`, frontend), a deliberate SPA tradeoff: any XSS on the
-  page can read it. The alternative (httpOnly cookie) removes that but adds CSRF
-  scope and loses convenience. Documented decision — revisit alongside L5 if the
-  threat model changes.
+  (JWT-in-`localStorage` is now a documented **accepted decision** — see
+  "Authentication & authorization → Token storage".)
 - **Out of scope (unchanged)** — datasheet versioning; wargear/loadout +
   model-count points scaling; multi-profile datasheet parsing; per-size points;
   Validation Tier 3 (per-datasheet count limits) & Tier 4 (detachments /
