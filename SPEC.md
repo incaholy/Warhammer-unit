@@ -1164,7 +1164,6 @@ Independent, low-risk improvements, each landable on its own.
 | L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
 | D1 | **Docs (code review):** give `README.md` a real front door — what the project is, how to run it — linking `SPEC.md`, `MVP.md`, `DEPLOY.md`. Currently 2 lines | `README.md` | S |
-| N2 | **Nit (code review):** `_UNAUTHORIZED` is a shared module-level `HTTPException` instance raised repeatedly, so each `raise` mutates the one object's `__traceback__`. Build a fresh exception per raise (or a small factory) | `app/core/security.py` | S |
 
 ### Tier 4 — Deferred / deploy-time / cleanup
 
