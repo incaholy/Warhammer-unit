@@ -222,3 +222,6 @@ __marimo__/
 .DS_Store
 # scraper cache (fetched Wahapedia HTML — not committed)
 scripts/data/cache/
+
+# generated OpenAPI spec — regenerate from the app; served live at /openapi.json
+openapi.json
