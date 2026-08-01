@@ -34,7 +34,7 @@ APP_PORT ?= 8000
 # ---- Docker ----
 COMPOSE ?= docker compose
 
-.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test create-admin seed scrape docker-build docker-up docker-down docker-test
+.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test openapi create-admin seed scrape docker-build docker-up docker-down docker-test
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -85,6 +85,10 @@ run: ## Run the FastAPI app locally with auto-reload.
 
 test: ## Run the test suite.
 	@$(PYTEST) tests/ -v
+
+openapi: ## Regenerate openapi.json from the app (no DB needed).
+	@$(PYTHON) -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json', 'w'), indent=2)"
+	@echo "wrote openapi.json"
 
 create-admin: check-db-url ## Promote a user to admin: make create-admin USERNAME=<name>.
 	@if [ -z "$(USERNAME)" ]; then echo "usage: make create-admin USERNAME=<name>"; exit 1; fi
