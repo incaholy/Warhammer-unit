@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, func
 from sqlmodel import Session, select
 
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
@@ -208,12 +208,15 @@ class ArmyService:
 
     def points_total(self, army_id: UUID) -> int:
         self.get_army(army_id)  # LookupError if missing
-        total = 0
-        for entry in self.session.exec(
-            select(ArmyUnit).where(ArmyUnit.army_id == army_id)
-        ).all():
-            total += entry.amount * self._unit_or_404(entry.unit_id).points
-        return total
+        # One SUM aggregate instead of a per-entry session.get loop: the DB joins
+        # army_units to units and sums amount * points in a single query, sending
+        # back just the total (NULL -> 0 for an empty army).
+        total = self.session.exec(
+            select(func.sum(ArmyUnit.amount * Unit.points))
+            .join(Unit, ArmyUnit.unit_id == Unit.id)
+            .where(ArmyUnit.army_id == army_id)
+        ).one()
+        return total or 0
 
     def validate(self, army_id: UUID) -> ValidationReport:
         army = self.get_army(army_id)
