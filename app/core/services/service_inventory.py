@@ -7,6 +7,7 @@ bad amounts, per SPEC.md conventions.
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import Unit, User, UserUnit
@@ -66,6 +67,12 @@ class InventoryService:
             statement = statement.join(Unit, UserUnit.unit_id == Unit.id).where(
                 Unit.unit_name.ilike(f"%{q}%")
             )
+        # Eager-load each entry's unit and that unit's weapons/abilities so
+        # serialization doesn't lazy-load them per row (the N+1).
+        statement = statement.options(
+            selectinload(UserUnit.unit).selectinload(Unit.weapons),
+            selectinload(UserUnit.unit).selectinload(Unit.abilities),
+        )
         return list(self.session.exec(statement).all())
 
     # ------------------------------ helpers ------------------------------

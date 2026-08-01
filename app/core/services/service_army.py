@@ -9,6 +9,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete, func
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
@@ -91,9 +92,21 @@ class ArmyService:
         return army
 
     def list_armies(self, user_id: UUID) -> list[Army]:
-        return list(
-            self.session.exec(select(Army).where(Army.owner_user_id == user_id)).all()
+        # Eager-load the units subtree (units -> unit -> weapons/abilities) so
+        # serializing each Army_Read doesn't lazy-load it per army (the N+1).
+        statement = (
+            select(Army)
+            .where(Army.owner_user_id == user_id)
+            .options(
+                selectinload(Army.units)
+                .selectinload(ArmyUnit.unit)
+                .selectinload(Unit.weapons),
+                selectinload(Army.units)
+                .selectinload(ArmyUnit.unit)
+                .selectinload(Unit.abilities),
+            )
         )
+        return list(self.session.exec(statement).all())
 
     def delete_army(self, army_id: UUID) -> None:
         army = self.get_army(army_id)

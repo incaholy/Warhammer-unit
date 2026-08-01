@@ -8,6 +8,7 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import (
@@ -122,7 +123,16 @@ class UnitService:
         statement = self._apply_unit_filters(
             select(Unit), faction_id, subfaction_id, q
         )
-        statement = statement.order_by(Unit.unit_name).offset(offset).limit(limit)
+        # Eager-load weapons/abilities so serializing the page doesn't lazy-load
+        # them per unit (the N+1). selectinload batches each with one WHERE-IN.
+        statement = (
+            statement.options(
+                selectinload(Unit.weapons), selectinload(Unit.abilities)
+            )
+            .order_by(Unit.unit_name)
+            .offset(offset)
+            .limit(limit)
+        )
         return list(self.session.exec(statement).all())
 
     def count_units(
