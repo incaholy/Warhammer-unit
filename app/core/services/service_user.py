@@ -43,8 +43,20 @@ class UserService:
         return user
 
     def set_admin(self, user_id: UUID, is_admin: bool) -> User:
-        """Grant or revoke admin on a user; `NotFoundError` if they don't exist."""
+        """Grant or revoke admin on a user; `NotFoundError` if they don't exist.
+
+        Refuses to demote the last remaining admin (`ConflictError`) so an admin
+        can't lock everyone out of the admin-only routes.
+        """
         user = self.get_user(user_id)
+        # Only a demotion of a current admin can reduce the admin count; block it
+        # when that admin is the last one standing.
+        if user.is_admin and not is_admin:
+            admins = self.session.exec(
+                select(User).where(User.is_admin.is_(True))
+            ).all()
+            if len(admins) <= 1:
+                raise ConflictError("cannot demote the last admin")
         user.is_admin = is_admin
         self.session.add(user)
         self.session.commit()

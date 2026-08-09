@@ -82,11 +82,14 @@ def decode_token(token: str) -> str:
 
 # ---------------------------- dependencies -----------------------------
 
-_UNAUTHORIZED = HTTPException(
-    status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="could not validate credentials",
-    headers={"WWW-Authenticate": "Bearer"},
-)
+def _unauthorized() -> HTTPException:
+    # Built fresh per raise (not a shared module-level instance): each raise gets
+    # its own traceback, with no cross-request mutable state on one global object.
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_current_user(
@@ -96,10 +99,10 @@ def get_current_user(
     try:
         user_id = UUID(decode_token(token))
     except ValueError:
-        raise _UNAUTHORIZED
+        raise _unauthorized()
     user = session.get(User, user_id)
     if user is None:
-        raise _UNAUTHORIZED
+        raise _unauthorized()
     return user
 
 

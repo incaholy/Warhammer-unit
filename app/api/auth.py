@@ -6,7 +6,8 @@ OAuth2 password form (`username` may be a username or email) and returns a JWT.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlmodel import Session, SQLModel
+from pydantic import EmailStr
+from sqlmodel import Field, Session, SQLModel
 
 from app.api.user import User_Read
 from app.core.db.connection import get_session
@@ -17,9 +18,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class Register_Create(SQLModel):
-    username: str
-    email: str
-    password: str
+    username: str = Field(min_length=3)  # non-empty, not trivially short
+    # Format/syntax validation via EmailStr (malformed addresses → 422). This
+    # does NOT check deliverability — a valid-but-nonexistent domain still
+    # passes; that DNS/MX check is a deferred roadmap item.
+    email: EmailStr
+    # min 8 for a floor on strength; max 72 because bcrypt silently truncates
+    # anything longer, so reject it loudly instead. Both surface as a 422.
+    password: str = Field(min_length=8, max_length=72)
 
 
 class Token(SQLModel):

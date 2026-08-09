@@ -54,6 +54,30 @@ def test_update_army(auth_client, make_faction):
     assert resp.json()["name"] == "Renamed"
 
 
+def test_update_army_explicit_null_on_required_field_returns_400(auth_client, make_faction):
+    # A PATCH with an explicit null on a NOT NULL column must be a clean 400
+    # (ArmyValidationError), never a 500 or an IntegrityError-backstop 409.
+    f = make_faction()
+    army = _make_army(auth_client, f)
+
+    resp = auth_client.patch(f"/me/armies/{army['id']}", json={"faction_id": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "faction_id"
+
+    resp = auth_client.patch(f"/me/armies/{army['id']}", json={"name": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "name"
+
+
+def test_update_army_explicit_null_on_nullable_field_clears_it(auth_client, make_faction):
+    # A nullable column may still be cleared with an explicit null.
+    f = make_faction()
+    army = _make_army(auth_client, f, points_limit=1000)
+    resp = auth_client.patch(f"/me/armies/{army['id']}", json={"points_limit": None})
+    assert resp.status_code == 200
+    assert resp.json()["points_limit"] is None
+
+
 def test_delete_army(auth_client, make_faction):
     f = make_faction()
     army = _make_army(auth_client, f)

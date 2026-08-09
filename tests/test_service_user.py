@@ -55,3 +55,22 @@ def test_set_admin_missing_raises_not_found(session):
     svc = UserService(session)
     with pytest.raises(NotFoundError):
         svc.set_admin(uuid.uuid4(), True)
+
+
+def test_set_admin_cannot_demote_last_admin(session):
+    from app.core.services.errors import ConflictError
+
+    svc = UserService(session)
+    admin = svc.create_user("solo", "solo@test.io", "h")
+    svc.set_admin(admin.id, True)  # the only admin
+    with pytest.raises(ConflictError):
+        svc.set_admin(admin.id, False)
+
+
+def test_set_admin_can_demote_when_another_admin_exists(session):
+    svc = UserService(session)
+    a = svc.create_user("a", "a@test.io", "h")
+    b = svc.create_user("b", "b@test.io", "h")
+    svc.set_admin(a.id, True)
+    svc.set_admin(b.id, True)  # two admins now
+    assert svc.set_admin(a.id, False).is_admin is False  # demoting one is allowed

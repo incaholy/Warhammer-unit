@@ -28,14 +28,6 @@ class AdminUpdate(SQLModel):
     is_admin: bool
 
 
-class UserAdmin_Read(SQLModel):
-    # Admin-only view — unlike User_Read, it surfaces the admin flag.
-    id: UUID
-    username: str
-    email: str
-    is_admin: bool
-
-
 def get_user_service(session: Session = Depends(get_session)) -> UserService:
     return UserService(session)
 
@@ -47,14 +39,14 @@ def get_me(current_user: User = Depends(get_current_user)) -> User_Read:
 
 @router.patch(
     "/users/{user_id}",
-    response_model=UserAdmin_Read,
+    response_model=User_Read,
     dependencies=[Depends(get_current_admin)],
 )
 def set_user_admin(
     user_id: UUID,
     payload: AdminUpdate,
     service: UserService = Depends(get_user_service),
-) -> UserAdmin_Read:
+) -> User_Read:
     """Grant/revoke admin on a user (admin only). The first admin is still
     bootstrapped out of band via `make create-admin`."""
     return service.set_admin(user_id, payload.is_admin)

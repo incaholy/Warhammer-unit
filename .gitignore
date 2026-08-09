@@ -222,3 +222,5 @@ __marimo__/
 .DS_Store
 # scraper cache (fetched Wahapedia HTML — not committed)
 scripts/data/cache/
+
+

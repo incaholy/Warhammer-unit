@@ -767,6 +767,21 @@ to the caller, and catalog writes require an admin. The pieces:
 `security.py`): subject = the user's id, algorithm **HS256**, signed with a
 `SECRET_KEY` env var and expiring after `ACCESS_TOKEN_EXPIRE_MINUTES`.
 
+**Token storage (accepted decision).** The frontend stores the JWT in the
+browser's `localStorage` (`src/api/client.ts`) and sends it as a `Bearer`
+header. Tradeoff: `localStorage` is readable by JavaScript, so any XSS on the
+page could exfiltrate the token; the alternative — an `httpOnly` cookie — is not
+JS-readable but adds CSRF exposure and complexity. **We accept `localStorage`
+for now** because it's the standard SPA pattern, auth is a `Bearer` header (no
+cookies → no CSRF surface), this is a small/demo app with limited blast radius,
+and tokens expire (`ACCESS_TOKEN_EXPIRE_MINUTES`). Defense-in-depth that keeps
+it acceptable: a modest token lifetime, standard XSS hygiene (React escapes by
+default; avoid `dangerouslySetInnerHTML`; a CSP header would help), and no
+sensitive data beyond the account. **Revisit** — move to an `httpOnly` cookie
+with CSRF protection (and add refresh/revocation, roadmap L5) if the app starts
+handling sensitive data, grows a real user base, or adds features that widen the
+XSS surface.
+
 **Dependencies:** `passlib`, `bcrypt`, `python-jose`, `cryptography`.
 
 **Routing.**
@@ -802,9 +817,8 @@ to the caller, and catalog writes require an admin. The pieces:
 - **Admin promotion via API** *(Built — roadmap 22)* — the *first* admin is
   bootstrapped out of band (above); an existing admin promotes/demotes others via
   `UserService.set_admin(user_id, is_admin)` (`NotFoundError` if missing) behind an
-  admin-only `PATCH /users/{id}` `{is_admin}`. Returns `UserAdmin_Read` (like
-  `User_Read` but surfacing `is_admin`, since `User_Read` deliberately hides it).
-  Last-admin-lockout protection was left out for now.
+  admin-only `PATCH /users/{id}` `{is_admin}`. Returns `User_Read` (which
+  includes `is_admin`). Last-admin-lockout protection was left out for now.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
   keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
@@ -1006,7 +1020,7 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `ConflictError` 409) + `DELETE /subfactions/{id}` → 204. See "API layer →
     Catalog administration."
 22. ✓ **Admin promotion via API** — `UserService.set_admin` + admin-only
-    `PATCH /users/{id}` `{is_admin}` → `UserAdmin_Read` (surfaces `is_admin`). See
+    `PATCH /users/{id}` `{is_admin}` → `User_Read` (includes `is_admin`). See
     "Authentication & authorization → Planned hardening."
 23. ✓ **Editable weapons + abilities** — `update_weapon`/`delete_weapon`,
     `update_ability`/`delete_ability` + `PATCH`/`DELETE /weapons/{id}` and
@@ -1118,6 +1132,7 @@ already exist on the tables; the work is exposing them.
 | FE1 | Add `created_at` (optionally `updated_at`) to `Army_Read` so the frontend can show the army's "Created" date | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also add `created_at` to the frontend `types.ts` | S |
 | FE2 | Add a `q` filter to `GET /me/inventory` so inventory search is server-side, not client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count already in `GET /units` (`service_unit._apply_unit_filters`) | S |
 | FE3 | Add `is_admin` to the `/me` response to unblock admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | S |
+| BUG1 | **Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` comes from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser can't read the header → `total` defaults to `0` → pager is hidden → stuck on the first 25. Works locally because the Vite proxy makes it same-origin. **Fix:** add `expose_headers=["X-Total-Count"]` to `CORSMiddleware`; if the symptom persists, confirm the header round-trips and that `units.ts`/`client.ts` parse it | `app/main.py` (CORS `expose_headers`); verify `src/api/units.ts`/`client.ts` in the web repo | S |
 
 ### Tier 1 — Make the scrape→seed pipeline honest & robust
 
@@ -1130,6 +1145,15 @@ harden the concurrent "add unit" path.
 | H1 | **Seed upsert** — update mutable fields on existing rows (stat line, `points`, `keywords`, `invulnerable_save`) instead of skipping them, so re-seeding truly "patches stats in place" as SPEC claims. Add an update branch per entity and an "updated" count bucket | `scripts/seed_datasheets.py` (create-only today); update `tests/test_seed.py` accordingly | M |
 | C | *(fold into H1)* Change the unit seed natural key from `(faction, unit_name)` to `(faction, subfaction, unit_name)`, stopping the ~227-unit collapse (same-named generic units — Chaos Spawn, Cultists — merging across subfactions; ~1558 scraped → ~1331 seeded) | `scripts/seed_datasheets.py` | S |
 | H2 | Catch `IntegrityError` on concurrent `add_unit` and convert to `ConflictError`/merge; add a catch-all `IntegrityError` → 409 handler. Today two simultaneous "add unit" requests leak a raw 500 | `service_army.py` + `service_inventory.py`; handler in `app/main.py` | M |
+| H4 | **Fix keyword extraction & normalize** (found in the 2026-08 scrape review). `parse_keywords` over-captures: the real scrape yields **1217 distinct unit keywords, ~906 of them leaked unit/model names** (`Abaddon The Despoiler`, `Annihilation Barge`) — only ~155 are real keywords. Weapon keywords also carry **case-variant duplicates** (`blast`/`BLAST`/`Blast`, even a typo `ANTI-INFANTRy 4+`): 110 raw → **77 canonical**. Restrict `parse_keywords` to the true `KEYWORDS:` line and **case-fold/normalize** both unit and weapon keywords at scrape time. **Prerequisite for any keyword filter or index (DM1)** — a keyword filter is *wrong today regardless of column type* because case variants and leaked names both break it | `scrape_wahapedia.py` (`parse_keywords`; the `.kwb2` capture in `parse_weapons`) | M |
+
+> **Scraper data-completeness gaps (2026-08 review), to fix alongside H4/L2:**
+> (1) `invulnerable_save` is **never captured** — the parser hardcodes `None`
+> (`scrape_wahapedia.py` line ~307), so no unit ever gets an invuln save even
+> though the column exists. (2) **7 units parse to `points = 0`** (e.g. Crusader
+> Squad, Burna Boyz) — the `.PriceTag` lookup misses their price layout. Both are
+> parser gaps, not model problems (the schema allows `NULL` invuln and `points >=
+> 0`); track them so re-seeding doesn't silently ship incomplete stats.
 
 ### Tier 2 — Scaling (before real traffic)
 
@@ -1139,7 +1163,18 @@ these before opening the API to real traffic.
 | ID | Change | Where | Effort |
 |---|---|---|---|
 | H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
+| Q1 | **Extend the N+1 fix beyond `/units`** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so *every* list that serializes units lazy-loads them per row: `GET /units` (`1+2N`), `GET /me/inventory` (each entry's `unit` + its weapons/abilities), and `GET /me/armies` — which is worst: it serializes `Army_Read.units` (lazy) **and** re-queries the same units in `points_total`. Options: `selectinload` the chains; compute `points_total` with a single `SUM(amount*points)` aggregate instead of a per-entry loop; and/or split `Army_Read` into a **summary** schema (list — no `units`) vs a **detail** schema (`GET /{id}` — units eager-loaded), the classic list-vs-detail split. Coordinated FE change (the web app reads `army.units`) | `app/api/unit.py`, `app/api/inventory.py`, `app/api/army.py`, `service_army.points_total` | M |
 | M5 | Wire the already-installed `sentry-sdk` (no-op when `SENTRY_DSN` unset), add basic structured logging, and a sanitized catch-all `Exception` → 500 handler so internals never leak | `app/main.py` | S/M |
+
+> **Revisit: relationship-loading strategy.** The loading strategy across the
+> `*_Read` schemas needs a deliberate pass — everything defaults to **lazy**
+> today, which is what creates the N+1s above. Decide *per relationship* which
+> strategy each endpoint should use — **lazy** (fine for single-object detail),
+> eager **`selectinload`** (collections / many-to-many) or **`joinedload`**
+> (many-to-one), and **`noload`/`raiseload`** to forbid a relationship from
+> loading (raiseload is useful in tests to catch accidental lazy loads). Also
+> choose *where* to set it: per-query `.options(...)` (flexible, preferred) vs a
+> model-level `Relationship(sa_relationship_kwargs={"lazy": ...})` default.
 
 ### Tier 3 — Small hardening wins
 
@@ -1147,11 +1182,10 @@ Independent, low-risk improvements, each landable on its own.
 
 | ID | Change | Where | Effort |
 |---|---|---|---|
-| M3 | Change `Register_Create.email` from `str` to `EmailStr` (`email-validator` already installed) | `app/api/auth.py` | S |
 | M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
-| L7 | Last-admin-lockout guard — count admins before a demote | `UserService.set_admin` | S |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
+| D1 | **Docs (code review):** give `README.md` a real front door — what the project is, how to run it — linking `SPEC.md`, `MVP.md`, `DEPLOY.md`. Currently 2 lines | `README.md` | S |
 
 ### Tier 4 — Deferred / deploy-time / cleanup
 
@@ -1164,10 +1198,40 @@ Not code changes (or intentionally deferred), grouped by kind.
   before public deploy (L1); consolidate config into a `pydantic-settings`
   `Settings` class (L4); shorten JWT lifetime + add refresh/revocation (L5);
   move migration-on-start to a one-shot job for multi-replica deploys (L6).
+  (JWT-in-`localStorage` is now a documented **accepted decision** — see
+  "Authentication & authorization → Token storage".)
+- **Email deliverability check** *(builds on the EmailStr format check, now in place)* — turn on the "can this domain
+  actually receive mail?" check: a custom validator calling
+  `email_validator.validate_email(value, check_deliverability=True)` (Pydantic's
+  `EmailStr` disables this by default), so registration does a live DNS/MX
+  lookup on the domain. Deferred on purpose — it adds a network call + latency
+  to signup and can reject legitimate users when DNS is flaky.
+- **Army mustering / list legality** *(source: Wahapedia core rules, "Muster Your
+  Army" — <https://wahapedia.ru/wh40k10ed/the-rules/core-rules/#Muster-Your-Army>;
+  **link, don't embed** the copyrighted text — implement the mechanics only)* —
+  the six mustering steps map onto `validate()`'s tiers:
+  - **Tier 1** (`over_points`) ✅ done — step 1 battle size sets the cap.
+    *Near-term add:* **battle-size presets** for `Army.points_limit` (Incursion
+    1000 / Strike Force 2000 / Onslaught 3000). No model change — `points_limit`
+    already exists; this is a UI/API convenience (an enum or preset buttons).
+  - **Tier 2** (`wrong_faction`/`wrong_subfaction`) ✅ done — step 3's "one army
+    faction keyword", approximated by the `faction_id`/`subfaction_id` FKs.
+  - **Tier 3 — datasheet count limits, the "rule of three/six"** *(near-term;
+    blocked on H4)*: ≤3 units of the same datasheet name, or ≤6 if the unit is
+    `BATTLELINE` or `DEDICATED TRANSPORT`. Maps cleanly to `ArmyUnit.amount` (one
+    row per datasheet via `UNIQUE(army_id, unit_id)`), so the check is `amount ≤ 3`
+    / `≤ 6`. Needs the `BATTLELINE` / `DEDICATED TRANSPORT` **normal** keywords →
+    depends on H4 keyword cleanup. Also steps 5–6's **≥1 CHARACTER eligible as
+    WARLORD** (needs the `CHARACTER` keyword, plus a `warlord` pointer on `Army`
+    for step 6). All three keywords are in the scrape (`Character`, `Battleline`,
+    `Dedicated Transport`) but unreliable until H4.
+  - **Tier 4 — detachments / enhancements / force-org** ❌ still out of scope
+    (step 4, and step 5's Enhancements). This is where **faction-keyword *sets***
+    finally earn their place (allies, Agents of the Imperium, soup armies). The
+    keyword-driven model for all of this is now the documented **north star** —
+    see "Target architecture — keyword-driven mustering" below.
 - **Out of scope (unchanged)** — datasheet versioning; wargear/loadout +
-  model-count points scaling; multi-profile datasheet parsing; per-size points;
-  Validation Tier 3 (per-datasheet count limits) & Tier 4 (detachments /
-  force-org).
+  model-count points scaling; multi-profile datasheet parsing; per-size points.
 - **Stale-doc cleanup** — remove `CLAUDE.md`'s "Known issues" section (all 6
   already fixed); fix `MVP.md`'s "202 tests" → 209; reconcile stale SPEC prose
   (the "API tests to come" note, the "Wahapedia scraper planned" note, the
@@ -1175,12 +1239,139 @@ Not code changes (or intentionally deferred), grouped by kind.
   (frontend-readiness)" header whose items are all done); correct `CLAUDE.md`'s
   stat-name shorthand "save" → "armor_save".
 
+### Tier 5 — Data-model schema (migration-cost; decide before real data)
+
+Found in a 2026-08 data-model review. None is a correctness bug in the current
+(effectively empty) catalog, and each is a *deliberate deferral* — but all three
+get **markedly more expensive once there is real data**, because the fix stops
+being a one-line model change and becomes a table rewrite or a data-cleanup
+backfill. Captured here so they're *considered*, not silently inherited. The
+structural decisions already made (faction validity in code, catalog FKs =
+RESTRICT, `amount >= 0`) were reviewed and are intentional — see "DB layer".
+
+| ID | Change | Why cheap now / costly later | Effort |
+|---|---|---|---|
+| DM1 | **`keywords` → `JSONB`** on `Unit` and `Weapon` (currently `sa_type=JSON`, which is Postgres `json` = raw text). `jsonb` stores parsed binary and is the only one that supports a **GIN index + `@>` containment**, i.e. an indexable "find units with keyword X" query | Now: one-line `sa_type` change + trivial migration on an empty table. Later: `ALTER TYPE json → jsonb` **rewrites the whole table** and any dependent indexes | S |
+| DM2 | **Case-insensitive uniqueness** on `User.username` / `User.email` (today `unique=True` = a case-*sensitive* index, so `Foo@x.com` ≠ `foo@x.com` and `Max` can register when `max` exists). Use `citext` columns or a `UNIQUE (lower(...))` functional index | Now: swap the index, no data to conflict. Later: you may already have colliding rows, so you must **de-duplicate real accounts** before the constraint will even apply — a data migration, not a schema one. Email case-folding is also a correctness expectation | S/M |
+| DM3 | **DB-level natural key on catalog rows** so duplicates are *impossible*, not just avoided by the seed script. `Unit.unit_name` is indexed but **not unique**; `Ability.name` / `Weapon.name` have no uniqueness at all. This is the schema-enforcement half of the seed-key work in **item C / H1** (which fixes the *script*); a DB constraint guarantees it even under races or a buggy re-seed | Now: add the constraint on a clean table. Later: adding it requires finding + merging duplicate rows and re-pointing every M2M link (`unit_abilities`/`unit_weapons`) — a nasty backfill | S–M |
+
+> **DM3 — the 2026-08 scrape decided the Unit key, with two gotchas.** Measured
+> over the 1558 real units: `(faction, unit_name)` collapses **227** units;
+> `(faction, subfaction, unit_name)` collapses just **1** (Karanak, a
+> multi-profile split) — so **`UNIQUE(faction_id, subfaction_id, unit_name)` is
+> the key** (matches item C; *not* global — "Captain" recurs across chapters).
+> Two traps the data exposed: **(a)** 141 units have `subfaction = NULL`, and SQL
+> treats `NULL ≠ NULL`, so a plain composite UNIQUE **won't enforce** on those —
+> use Postgres 15+ `UNIQUE (...) NULLS NOT DISTINCT` (or a `coalesce` expression
+> index). **(b)** Karanak proves a name key is 99.9% but not 100%; only a stable
+> external `source_id` (the scraper must capture it) is a guaranteed key. For
+> **Weapon / Ability** the output file can't reveal collisions — the scraper
+> already dedupes by name first-wins, so any clash (two different "Bolt pistol"
+> profiles) is lost *upstream*; decide `UNIQUE(name)` vs `source_id` by inspecting
+> the scraper's pre-dedup stream. Resolve all this alongside item C.
+
+> **Keyword modeling fork (relates to DM1 + H4).** Keywords are a small, bounded,
+> controlled vocabulary (~77 weapon, ~60–80 real unit keywords once names are
+> stripped — see the 2026-08 keyword review), the *same shape* as abilities and
+> weapons, which are already modeled as shared rows + a many-to-many link. Decide
+> deliberately: keep keywords as a **`JSONB` array** per row (simple; needs H4
+> normalization + a GIN index to make "units with keyword X" work), or promote
+> them to a **`keywords` table + `unit_keywords`/`weapon_keywords` M2M**
+> (guaranteed clean vocabulary, trivial join filters, but a bigger schema
+> change). Either way, keyword *filtering is only reliable after H4* — today case
+> variants and leaked names make it wrong regardless of column type.
+
+### Target architecture — keyword-driven mustering (design now, build later)
+
+Decided 2026-08 as the **north star** for army mustering. **Not being built now** —
+the current `faction_id`/`subfaction_id` model stands and keeps working. This
+section exists so near-term decisions point *toward* this target instead of
+painting us into a corner. Source of the mechanic: Wahapedia core rules "Muster
+Your Army" (linked under Tier 4 above; **link, don't embed**).
+
+**The idea.** Real 40k eligibility is **keyword-set membership** — a unit is
+legal in an army if its set of FACTION KEYWORDS contains the one the army chose
+(muster step 3) — plus explicit **allowances** that let other keywords in (Agents
+of the Imperium, soup, allied Knights). Our current single `faction_id` +
+`subfaction_id` is a *simplification* of that and will fight us at allies/soup.
+
+**Why this is cleaner: it splits two jobs the FKs currently conflate.**
+
+- **Organization / browsing** ("show me Xenos → Tyranids") — stays with
+  faction/subfaction (kept as a display taxonomy, ideally *derived* from keywords
+  so there's no second source of truth to drift).
+- **Eligibility / legality** (which units are legal in which army) — moves to
+  faction keywords.
+
+**Target model:**
+
+| Piece | Shape | Job |
+|---|---|---|
+| `FactionKeyword` | catalog table of canonical keywords (`Adeptus Astartes`, `Blood Angels`, `Tyranids`, `Imperium`, `Khorne`…) | controlled vocabulary |
+| `UnitFactionKeyword` | **M2M** unit ↔ keyword | a unit's keyword *set* |
+| `Army.faction_keyword_id` | the one keyword chosen at muster step 3 | the army's identity |
+| *(base rule)* | unit eligible if its set contains the army's keyword | step 5b |
+| `AllyRule` | data: "army keyword X also permits keyword Y, up to N units/points, condition Z" | Agents / soup / allied Knights |
+
+**Phased build path (never run ahead of the data):**
+
+1. **Capture faction keywords** — scraper-only (`parse_keywords` sibling that
+   reads the `FACTION KEYWORDS:` line into a `faction_keywords` field). No model
+   change; lets us *see and validate* the real sets first.
+2. **Model the vocabulary + M2M**, backfill from the scrape; make
+   faction/subfaction derived (or explicitly the display layer).
+3. **Switch `validate()` Tier 2** from FK equality to keyword-set membership.
+4. **Add `AllyRule`** last — the cross-keyword allowances.
+
+Run the keyword model **alongside** the FKs; retire the FKs' *eligibility* role
+only once keyword eligibility is proven. Keep the FKs for browsing.
+
+**What this means for near-term decisions (the whole point of deciding now):**
+
+- **Faction-keyword capture is promoted** from "just in case" to the **first
+  enabling step** — do it soon so the real sets are visible and can shape the
+  model. (Scraper-only, cheap, no model risk.)
+- **The DM1 "keyword modeling fork" resolves toward a table** for *faction*
+  keywords (eligibility needs joins, not JSON scans); normal keywords may follow
+  for consistency but aren't forced.
+- **Do not remove `faction_id`/`subfaction_id`** — they retain the eligibility
+  role until keywords replace it, and remain the browsing taxonomy after.
+- **Strengthens the DM3 `source_id` option** — a stable external id per catalog
+  row is more attractive once units carry richer, keyword-based identity.
+- **Risk to accept:** `AllyRule` is edition-specific and changes with GW
+  dataslates — building it commits us to tracking those. This is the line between
+  an army-list *builder* and a *legality engine*; crossing it should be deliberate.
+
+### Tier 6 — Keyword-driven mustering (phased build toward the north star)
+
+The concrete work items for the target architecture above, in strict order — each
+phase is gated on the previous, and the whole thing is gated on trustworthy
+keyword data. **Deferred (design-now / build-later)**; listed so the sequence and
+dependencies are explicit. Keep the `faction_id`/`subfaction_id` FKs working
+throughout; retire their *eligibility* role only after KM3 is proven.
+
+| ID | Change | Depends on | Effort |
+|---|---|---|---|
+| KM1 | **Capture faction keywords (scraper-only)** — add a `parse_faction_keywords` sibling to `parse_keywords` that reads the `FACTION KEYWORDS:` line into a new `faction_keywords` field per unit in `datasheets.json`. **No model change** — this just makes the real keyword *sets* visible so KM2 can be designed against real data. Normalize case here too (same discipline as H4) | — (do first; pairs with H4) | S |
+| KM2 | **Model the keyword vocabulary + M2M** — add `FactionKeyword` (catalog table, canonical values) and `UnitFactionKeyword` (unit ↔ keyword M2M); migration + seed backfill from KM1's data. Make `faction`/`subfaction` a **derived/display** taxonomy (or keep as-is but stop treating it as the eligibility source). Resolves the DM1 keyword-fork toward a table for faction keywords | KM1 | L |
+| KM3 | **Switch `validate()` Tier 2 to keyword-set eligibility** — replace the `unit.faction_id == army.faction_id` equality with "unit's keyword set contains `Army.faction_keyword_id`". Add `Army.faction_keyword_id`. Run **alongside** the FK check first (compare results), then make keywords authoritative | KM2 | M |
+| KM4 | **`AllyRule` + cross-keyword allowances** — a data table encoding "army keyword X permits keyword Y, up to N units/points, under condition Z" (Agents of the Imperium, soup, allied Knights). This is the builder→legality-engine line and a GW-dataslate maintenance commitment — enter deliberately | KM3 | L |
+
+> These supersede the loose "revisit faction keywords with Tier 4" note: KM1–KM4
+> *are* that work, sequenced. The separate **mustering-validation** items
+> (battle-size presets; the rule of three/six + warlord requirement, blocked on
+> H4) live under Tier 4's "Army mustering / list legality" bullet and are
+> independent of KM — they run on the current model.
+
 ### Test-coverage gaps
 
 New behavior above wants matching tests: the concurrency/upsert race
 (H2); seed update-in-place (H1); query-count/N+1 regression guards (H3/M1);
-invalid-email rejection (M3); scraper assembly + fail-loud (L2); last-admin
-lockout (L7); and expired-token handling.
+scraper assembly + fail-loud (L2); keyword extraction/normalization against a
+saved HTML fixture — asserts no unit-name leakage and case-folded output (H4);
+faction-keyword capture from the fixture (KM1) and keyword-set eligibility in
+`validate()`, including the FK-vs-keyword parity check during KM3; and
+expired-token handling.
 
 ### Production-readiness
 
