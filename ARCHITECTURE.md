@@ -151,20 +151,55 @@ unmet. One of nine list endpoints paginates at all; that one reports its total i
 header rather than the body; and no server-side aggregate exists, which is what pushed the counting
 into the client in the first place. See [ROADMAP R4](ROADMAP.md#r4-make-pagination-a-convention).
 
-### 2.4 Every response carries a correlation ID
+### 2.4 Failures are traceable end to end
 
-A generated request ID is attached to each request, returned in an `X-Request-ID` header, and included
-in error bodies and every log line for that request.
+Three pieces, useful only together:
 
-Without one, a 500 gives the user a generic message and gives you a traceback in a log aggregator,
-with nothing joining them. This is cheap to add and only ever gets harder once logs live in Cloud Run
-and reports arrive from elsewhere.
+- A generated **request ID** attached to each request, returned in an `X-Request-ID` header, and
+  included in error bodies.
+- **Structured logs** (machine-parseable, one event per line) carrying that ID on every line.
+- **Error reporting** that captures unhandled exceptions with the same ID attached.
 
-Concepts: ASGI middleware, `request.state`, structured logging with a correlation ID.
+Without the ID, a 500 gives the user a generic message and gives you a traceback in a log aggregator
+with nothing joining them. Without structured logs, the ID sits in text you cannot query. Without
+error reporting, you learn about failures only when someone tells you. Any one of the three on its
+own is most of the work for a fraction of the value, which is the argument for treating them as one
+piece of work rather than three tickets.
 
-**Status: Not yet.** See [ROADMAP R7](ROADMAP.md#r7-add-a-request-correlation-id).
+Concepts: ASGI middleware, `request.state`, structured logging, log correlation.
 
-### 2.5 Response envelope
+**Status: Not yet.** One third is in place: `app/main.py:78-83` catches unhandled exceptions, logs the
+traceback, and returns a generic body so internals never leak. There is no request ID, no logging
+configuration of any kind, and `sentry-sdk` is pinned in `requirements.txt:41` but never imported or
+initialized, so it ships in the image and does nothing. This is `SPEC.md`'s M5 item; see
+[ROADMAP R7](ROADMAP.md#r7-land-observability-request-id-structured-logs-error-reporting).
+
+### 2.5 Resource and verb semantics
+
+- **Collections are plural nouns.** Things that are not resources (a static enum, a computed report)
+  do not live inside a resource's id namespace, because they collide with it.
+- **Verbs mean what HTTP says they mean.** `GET` is safe, `PUT` and `DELETE` are idempotent, `POST`
+  is not. The practical consequence: **a mutation a client might retry must not accumulate.** State a
+  target quantity ("set this to 3"), do not send a delta ("add 1"), unless the endpoint takes an
+  idempotency key. A network timeout is indistinguishable from a slow success, so any client that
+  retries an accumulating `POST` corrupts the data, and no amount of care on the server prevents it.
+- **Sibling resources of the same kind expose the same verb set.** If weapons support
+  create/list/update/delete, so do abilities and subfactions. An uneven set reads as arbitrary to a
+  client author and forces them to consult the code.
+- **Membership resources are addressed by their natural key**, not by a surrogate id. For a row that
+  exists to say "this user owns N of this unit," the identity is `(owner, unit)`. This is already done
+  correctly: `ArmyUnit` and `UserUnit` each carry an `id` column, and the API deliberately never
+  exposes it, addressing entries as `/me/inventory/{unit_id}` instead. Exposing the surrogate would
+  give clients two ways to name one thing.
+
+**Status: Partial.** The verb semantics, plural nouns, status codes, and the natural-key decision are
+right across the board, and the link endpoints are idempotent in practice
+(`UnitService.link_weapon` no-ops when the link exists). Three exceptions: the two quantity endpoints
+accumulate on `POST`, `GET /factions/taxonomy` is a static enum inside the faction id namespace, and
+CRUD coverage is uneven across the catalog resources. See
+[ROADMAP R12](ROADMAP.md#r12-make-quantity-mutations-retry-safe-and-even-out-resource-semantics).
+
+### 2.6 Response envelope
 
 **Status: Undecided.** The reference wraps every response in `{data, errors, meta}` so that
 pagination metadata, multiple errors, and the trace ID have a defined home. It is a real improvement

@@ -21,14 +21,15 @@ worth reading for the reasoning, not as a live bug list.
 | 1 | [R1](#r1-turn-on-typescript-strict-and-add-a-python-linter) | TypeScript `strict`, ruff, lint in CI | §7, §8 | Trivial |
 | 2 | [R2](#r2-unify-the-error-shape-and-add-a-code-enum) | Unify the error shape, add a code enum | §2.2 | Focused |
 | 3 | [R3](#r3-move-the-transaction-boundary-into-get_session) | Move the transaction boundary | §3 | Focused, mostly deletion |
-| 4 | [R10](#r10-write-a-readme) | Write a README | §6 | Trivial |
-| 5 | [R11](#r11-enforce-the-layering-rule) | Enforce the layering rule | §1 | Small |
-| 6 | [R4](#r4-make-pagination-a-convention) | Pagination everywhere, server-side aggregates | §2.3 | Moderate, spans both repos |
-| 7 | [R5](#r5-add-the-apiv1-prefix) | `/api/v1` prefix | §2.1 | Trivial, bundle with deploy work |
-| 8 | [R6](#r6-add-a-postgres-parity-tier-driven-by-migrations) | Postgres parity tier driven by migrations | §4, §5 | Moderate |
-| 9 | [R7](#r7-add-a-request-correlation-id) | Request correlation ID | §2.4 | Small |
-| 10 | [R8](#r8-split-the-docs-and-generate-the-frontend-types) | Split the docs, generate frontend types | §6, §7 | Moderate, incremental |
-| 11 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.5 | Decision first |
+| 4 | [R12](#r12-make-quantity-mutations-retry-safe-and-even-out-resource-semantics) | Make quantity mutations retry-safe | §2.5 | Focused |
+| 5 | [R10](#r10-write-a-readme) | Write a README | §6 | Trivial |
+| 6 | [R11](#r11-enforce-the-layering-rule) | Enforce the layering rule | §1 | Small |
+| 7 | [R4](#r4-make-pagination-a-convention) | Pagination everywhere, server-side aggregates | §2.3 | Moderate, spans both repos |
+| 8 | [R5](#r5-add-the-apiv1-prefix) | `/api/v1` prefix | §2.1 | Trivial, bundle with deploy work |
+| 9 | [R6](#r6-add-a-postgres-parity-tier-driven-by-migrations) | Postgres parity tier driven by migrations | §4, §5 | Moderate |
+| 10 | [R7](#r7-land-observability-request-id-structured-logs-error-reporting) | Observability: request ID, structured logs, error reporting | §2.4 | Small |
+| 11 | [R8](#r8-split-the-docs-and-generate-the-frontend-types) | Split the docs, generate frontend types | §6, §7 | Moderate, incremental |
+| 12 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.6 | Decision first |
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
 of each together, or the gap becomes a mismatch you introduced on purpose.
@@ -282,18 +283,37 @@ fail on a non-empty diff, which directly asserts that models and migrations agre
 
 ---
 
-## R7. Add a request correlation ID
+## R7. Land observability: request ID, structured logs, error reporting
 
-**Satisfies:** §2.4.
+**Satisfies:** §2.4. This is `SPEC.md`'s **M5** item (`SPEC.md:1167`), which is one third done.
 
-**What is missing.** `app/main.py:80` logs a full traceback and returns
-`{"detail": "internal server error"}`. Nothing joins the user's report to that log line.
+**What is missing.** M5 scopes three pieces. Current state of each:
 
-**Shape of the work.** A small HTTP middleware that generates an ID (or echoes an inbound
+| Piece | State |
+|---|---|
+| Sanitized catch-all `Exception` → 500 so internals never leak | **Done** (`app/main.py:78-83`), shipped as part of the `CODE-REVIEW.md` finding 2 fix |
+| Wire `sentry-sdk`, no-op when `SENTRY_DSN` is unset | **Not started.** No occurrence of `sentry` or `SENTRY_DSN` in `app/`, `scripts/`, or `.env.example` |
+| Basic structured logging | **Not started.** No `dictConfig`, `basicConfig`, or `structlog` anywhere; only `logging.getLogger("app")` in `main.py`, used at three call sites |
+
+`sentry-sdk==2.51.0` is pinned in `requirements.txt:41`, so it is installed into the production image
+and does nothing: image weight and dependency surface for zero signal. Either wire it or drop the
+pin. An unused dependency that looks like a feature is worse than an absent one, because it reads as
+covered.
+
+**Why the three go together.** `app/main.py:80` logs a full traceback and returns
+`{"detail": "internal server error"}`. Nothing joins the user's report to that log line. Adding
+structured logging alone gives you queryable lines you still cannot correlate to a request. Adding
+Sentry alone gives you an exception without the surrounding request context. The request ID is the
+key that makes the other two worth having, so do them as one change.
+
+**Shape of the work.** An HTTP middleware that generates an ID (or echoes an inbound
 `X-Request-ID`), stashes it on `request.state`, returns it as a response header, and includes it in
-error bodies and log records. This does not require the envelope from R9.
+error bodies. Configure logging once at startup to emit machine-parseable records with that ID on
+every line. Initialize Sentry guarded on `SENTRY_DSN` being set, so local and test runs are
+unaffected, and attach the same ID as a tag. None of this requires the envelope from R9.
 
-**Concepts:** ASGI middleware; `request.state`; structured logging with a correlation ID.
+**Concepts:** ASGI middleware; `request.state`; `logging.config.dictConfig` and structured or JSON log
+formatting; log correlation; Sentry's FastAPI integration and its no-op behavior without a DSN.
 
 ---
 
@@ -328,7 +348,7 @@ file specifically. Small, but it is exactly what the docs-change-with-code rule 
 
 ## R9. Decide on the response envelope
 
-**Satisfies:** §2.5. **The deliverable here is a written decision, not necessarily code.**
+**Satisfies:** §2.6. **The deliverable here is a written decision, not necessarily code.**
 
 The reference wraps every response in `{data, errors, meta}`, with `meta.trace_id` echoed in an
 `X-Request-ID` header and `meta.pagination` on its one paginated list endpoint.
@@ -386,3 +406,87 @@ Either way the check belongs in the same CI lint step added in R1.
 
 **Concepts:** import-linter layered contracts; why an architecture rule that only exists in a
 document is indistinguishable from no rule.
+
+---
+
+## R12. Make quantity mutations retry-safe, and even out resource semantics
+
+**Satisfies:** §2.5.
+
+The routing is in good shape overall: plural collection nouns, correct verb and status-code
+semantics, nesting that reflects real hierarchy, `/me/*` scoping that keeps user ids out of paths,
+and membership rows addressed by their natural key rather than an exposed surrogate. Four things
+break the pattern, and the first is the only one that can corrupt data.
+
+### The load-bearing one: `POST` that accumulates is not retry-safe
+
+Both quantity endpoints increment rather than set:
+
+- `POST /me/inventory` → `service_inventory.py:35`, `entry.amount += amount`
+- `POST /me/armies/{army_id}/units` → `service_army.py:164`, `entry.amount += amount`
+
+Both are honest about it (each is commented "upsert: increment") and both correctly return 201 on
+insert and 200 on update, which is the right HTTP for an upsert. The problem is not the status codes,
+it is the accumulation.
+
+**A network timeout is indistinguishable from a slow success.** A client that times out and retries
+has no way to know whether the first request landed, so a retried "add 1" becomes "add 2". No
+server-side care prevents this, because the server never learns the two requests were meant to be
+one. The failure is silent: the user simply owns more models than they added.
+
+You already have the safe shape one route away: `PATCH /me/inventory/{unit_id}` and
+`PATCH /me/armies/{id}/units/{unit_id}` both set an **absolute** amount, which is idempotent and can
+be retried freely. So the API offers two ways to change a quantity, one safe and one not, and the
+unsafe one is the one a client reaches for first when adding.
+
+**The decision to make:** does the incrementing endpoint need to exist at all? A client that knows the
+current amount can always `PATCH` the target value, and the read it needs is one it usually already
+has. If it does need to exist (concurrent edits from two devices, where "add one" is genuinely the
+intent and last-write-wins would lose an update), then it needs an **idempotency key**: the client
+generates a unique key per logical operation, sends it as a header, and the server records processed
+keys and returns the original result for a repeat. That is the standard mechanism and it is worth
+reading about even if you decide against it here.
+
+**Concepts:** idempotency in HTTP (RFC 9110, section 9.2.2); idempotency keys as implemented by
+payment APIs;
+why `PUT` is idempotent and `POST` is not; lost-update versus double-apply as the two failure modes
+you are choosing between.
+
+### `GET /factions/taxonomy` is a non-resource in a resource's id namespace
+
+`app/api/faction.py:85` serves a static map built from the `FACTION_SUBFACTIONS` constant, not from
+the database. It sits at `/factions/taxonomy`, and there is no `GET /factions/{faction_id}` yet.
+
+When one is added, `taxonomy` and `{faction_id}` occupy the same path slot. It resolves today only
+because declaration order decides, and a `UUID`-typed path parameter would reject the literal string
+with a 422. That is a collision waiting on a feature, and it is invisible until then.
+
+Static reference data is not a resource under `/factions`. Options worth weighing: a separate path
+outside the id namespace, folding it into the `GET /factions` response since it describes the same
+thing, or shipping it as part of a bootstrap or configuration endpoint.
+
+### CRUD coverage is uneven across sibling catalog resources
+
+| Resource | Create | List | Update | Delete |
+|---|---|---|---|---|
+| Weapons | yes | yes | yes | yes |
+| Abilities | yes | yes | yes | yes |
+| Subfactions | yes | **no** | **no** | yes |
+| Factions | yes | yes | **no** | **no** |
+
+Nothing is wrong route by route. The unevenness is the problem: a client author cannot predict which
+verbs exist and has to read the source. Subfactions are the sharpest case, since you can create one
+and then have no way to enumerate what exists.
+
+Decide the set deliberately. "These are admin-managed reference data, so create and delete only" is a
+perfectly good answer, as long as it is applied to all four and written down in
+`docs/api/conventions.md` (R8).
+
+### Subfactions do not nest, but weapons do
+
+`POST /subfactions` is top-level with `faction_id` in the body, while `POST /units/{unit_id}/weapons`
+nests under its parent. Both styles are defensible; having both in one API is the inconsistency, and
+subfaction is the one that reads oddly, since a subfaction cannot exist without its faction.
+
+Lowest priority of the four. Worth folding into whichever pass touches the catalog routes next, not
+worth its own change.
