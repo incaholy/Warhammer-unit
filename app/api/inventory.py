@@ -4,7 +4,6 @@ Identity comes from the JWT (`get_current_user`), not a path param, so a user
 can only ever touch their own inventory.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -41,7 +40,7 @@ def get_inventory_service(
 
 @router.get("", response_model=list[UserUnit_Read])
 def list_inventory(
-    q: Optional[str] = Query(default=None),
+    q: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> list[UserUnit_Read]:

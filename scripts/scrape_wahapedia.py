@@ -20,7 +20,6 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -35,7 +34,7 @@ USER_AGENT = "warhammer-unit learning project (personal/dev use)"
 # Space Marines works that way. Every *other* Wahapedia faction page maps to a single
 # one of OUR subfactions (e.g. the whole Tyranids page is Xenos / Tyranids). Add a
 # line here to scrape another faction; the subfaction must be in FACTION_SUBFACTIONS.
-FACTIONS: dict[str, tuple[str, Optional[str]]] = {
+FACTIONS: dict[str, tuple[str, str | None]] = {
     # Space Marines: the one mixed page — subfaction comes from the chapter color code.
     "space-marines": ("Space Marines", None),
     # Imperium
@@ -97,13 +96,13 @@ def fetch(url: str, *, cache_dir: Path = CACHE_DIR, delay: float = 3.0) -> str:
     return resp.text
 
 
-def _stat_int(text: str) -> Optional[int]:
+def _stat_int(text: str) -> int | None:
     """First integer in a stat string: `6"` -> 6, `2+` -> 2, `-` -> None."""
     m = re.search(r"-?\d+", text or "")
     return int(m.group()) if m else None
 
 
-def _theme_code(block) -> Optional[str]:
+def _theme_code(block) -> str | None:
     """The datasheet's chapter/faction color code (e.g. `CHSA`, or `SM` for generic)."""
     for tag in block.find_all(class_=True):
         for cls in tag.get("class"):
@@ -133,7 +132,7 @@ def parse_points(block) -> int:
     we store the smallest size's cost. (The `dsPointy` box is JS-filled and empty in
     the HTML — these `.PriceTag` values are the static source.)
     """
-    best: Optional[tuple[int, int]] = None  # (model_count, points)
+    best: tuple[int, int] | None = None  # (model_count, points)
     for tag in block.select(".PriceTag"):
         row = tag.find_parent("tr")
         if row is None:
@@ -163,7 +162,7 @@ def parse_keywords(block) -> list[str]:
     return []
 
 
-def _parse_one_ability(el) -> Optional[dict]:
+def _parse_one_ability(el) -> dict | None:
     """A `.dsAbility` block -> {name, description}, or None if it's not a real
     ability (unit composition, a points table, or a bare faction/core reference)."""
     if el.select_one(".dsUl") or el.select_one(".PriceTag") or el.find("table"):
@@ -241,7 +240,7 @@ def parse_weapons(block) -> tuple[list[dict], list[str]]:
     return weapons, names
 
 
-def parse_datasheets(html: str, faction: str, subfaction: Optional[str] = None) -> dict:
+def parse_datasheets(html: str, faction: str, subfaction: str | None = None) -> dict:
     """Pure parse: a faction's datasheets HTML -> the seed JSON structure (factions,
     weapons, abilities, units), each unit with stats, points, keywords, and its linked
     weapons/abilities.
@@ -267,7 +266,7 @@ def parse_datasheets(html: str, faction: str, subfaction: Optional[str] = None) 
         # stat line from the first profile only (multi-profile units are Stage 2)
         profiles = block.select(".dsProfileWrap")
         wraps = (profiles[0] if profiles else block).select(".dsCharWrap")
-        stats: dict[str, Optional[int]] = {}
+        stats: dict[str, int | None] = {}
         for cw in wraps:
             label_el = cw.select_one(".dsCharName")
             value_el = cw.select_one(".dsCharValue")

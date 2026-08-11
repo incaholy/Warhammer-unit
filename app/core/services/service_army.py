@@ -5,10 +5,10 @@ input, per SPEC.md conventions.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import delete as sa_delete, func
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
@@ -33,14 +33,14 @@ class ValidationIssue:
 
     kind: str  # "over_points" | "wrong_faction" | "wrong_subfaction"
     detail: str
-    unit: Optional[Unit] = None  # the offending unit, when applicable
+    unit: Unit | None = None  # the offending unit, when applicable
 
 
 @dataclass
 class ValidationReport:
     ok: bool
     points_total: int
-    points_limit: Optional[int]
+    points_limit: int | None
     issues: list[ValidationIssue]
 
 
@@ -61,9 +61,9 @@ class ArmyService:
         user_id: UUID,
         name: str,
         faction_id: UUID,
-        subfaction_id: Optional[UUID] = None,
-        description: Optional[str] = None,
-        points_limit: Optional[int] = None,
+        subfaction_id: UUID | None = None,
+        description: str | None = None,
+        points_limit: int | None = None,
     ) -> Army:
         if self.session.get(User, user_id) is None:
             raise NotFoundError(f"user {user_id} not found")
@@ -291,7 +291,7 @@ class ArmyService:
             raise NotFoundError(f"unit {unit_id} not found")
         return unit
 
-    def _find_entry(self, army_id: UUID, unit_id: UUID) -> Optional[ArmyUnit]:
+    def _find_entry(self, army_id: UUID, unit_id: UUID) -> ArmyUnit | None:
         return self.session.exec(
             select(ArmyUnit).where(
                 ArmyUnit.army_id == army_id, ArmyUnit.unit_id == unit_id

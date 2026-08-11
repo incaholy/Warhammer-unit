@@ -5,7 +5,6 @@ duplicate-username/email check lives in one place). Login looks a user up by
 username *or* email and verifies the password.
 """
 
-from typing import Optional
 
 from sqlmodel import Session, select
 
@@ -22,7 +21,7 @@ class AuthService:
     def register(self, username: str, email: str, password: str) -> User:
         return self._users.create_user(username, email, hash_password(password))
 
-    def authenticate(self, identifier: str, password: str) -> Optional[User]:
+    def authenticate(self, identifier: str, password: str) -> User | None:
         """Return the user for a matching username/email + password, else None."""
         user = self.session.exec(
             select(User).where(

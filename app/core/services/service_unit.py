@@ -4,7 +4,6 @@ Session-injected. Raises `NotFoundError` for not-found, `ConflictError` for
 duplicates, and `UnitValidationError` for bad input, per SPEC.md conventions.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import func
@@ -57,9 +56,9 @@ class UnitService:
         leadership: int,
         objective_control: int,
         points: int,
-        invulnerable_save: Optional[int] = None,
-        subfaction_id: Optional[UUID] = None,
-        keywords: Optional[list[str]] = None,
+        invulnerable_save: int | None = None,
+        subfaction_id: UUID | None = None,
+        keywords: list[str] | None = None,
     ) -> Unit:
         if self.session.get(Faction, faction_id) is None:
             raise NotFoundError(f"faction {faction_id} not found")
@@ -94,9 +93,9 @@ class UnitService:
     def _apply_unit_filters(
         self,
         statement,
-        faction_id: Optional[UUID],
-        subfaction_id: Optional[UUID],
-        q: Optional[str],
+        faction_id: UUID | None,
+        subfaction_id: UUID | None,
+        q: str | None,
     ):
         """Apply the shared `list_units`/`count_units` filters to a statement.
 
@@ -113,9 +112,9 @@ class UnitService:
 
     def list_units(
         self,
-        faction_id: Optional[UUID] = None,
-        subfaction_id: Optional[UUID] = None,
-        q: Optional[str] = None,
+        faction_id: UUID | None = None,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Unit]:
@@ -137,9 +136,9 @@ class UnitService:
 
     def count_units(
         self,
-        faction_id: Optional[UUID] = None,
-        subfaction_id: Optional[UUID] = None,
-        q: Optional[str] = None,
+        faction_id: UUID | None = None,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
     ) -> int:
         """Total units matching the same filters as `list_units` (ignores paging)."""
         statement = self._apply_unit_filters(
@@ -198,8 +197,8 @@ class UnitService:
         strength: int,
         armor_piercing: int,
         damage: str,
-        range_inches: Optional[int] = None,
-        keywords: Optional[list[str]] = None,
+        range_inches: int | None = None,
+        keywords: list[str] | None = None,
     ) -> Weapon:
         if category not in ("range", "melee"):
             raise UnitValidationError("category", "must be 'range' or 'melee'")

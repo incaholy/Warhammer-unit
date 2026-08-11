@@ -6,7 +6,6 @@ belongs to the current user — so a stranger's `army_id` reveals nothing.
 """
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -31,9 +30,9 @@ class Army_Read(SQLModel):
     id: UUID
     name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID]
-    description: Optional[str]
-    points_limit: Optional[int]
+    subfaction_id: UUID | None
+    description: str | None
+    points_limit: int | None
     created_at: datetime
     points_total: int = 0  # computed; set by the route
     units: list[ArmyUnit_Read] = []
@@ -42,17 +41,17 @@ class Army_Read(SQLModel):
 class Army_Create(SQLModel):
     name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID] = None
-    description: Optional[str] = None
-    points_limit: Optional[int] = None
+    subfaction_id: UUID | None = None
+    description: str | None = None
+    points_limit: int | None = None
 
 
 class Army_Update(SQLModel):
-    name: Optional[str] = None
-    faction_id: Optional[UUID] = None
-    subfaction_id: Optional[UUID] = None
-    description: Optional[str] = None
-    points_limit: Optional[int] = None
+    name: str | None = None
+    faction_id: UUID | None = None
+    subfaction_id: UUID | None = None
+    description: str | None = None
+    points_limit: int | None = None
 
 
 class ArmyUnitAdd(SQLModel):
@@ -74,13 +73,13 @@ class Shortfall_Read(SQLModel):
 class ValidationIssue_Read(SQLModel):
     kind: str
     detail: str
-    unit: Optional[Unit_Read] = None
+    unit: Unit_Read | None = None
 
 
 class Validation_Read(SQLModel):
     ok: bool
     points_total: int
-    points_limit: Optional[int]
+    points_limit: int | None
     issues: list[ValidationIssue_Read]
 
 

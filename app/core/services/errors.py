@@ -10,7 +10,6 @@ one resource-named `*ValidationError` per service, carrying the offending
 `field`. Split a rule into its own class only when its handling diverges.
 """
 
-from typing import Optional
 
 
 class ServiceError(Exception):
@@ -18,7 +17,7 @@ class ServiceError(Exception):
 
     status_code = 400
 
-    def __init__(self, message: str, *, field: Optional[str] = None):
+    def __init__(self, message: str, *, field: str | None = None):
         super().__init__(message)
         self.message = message
         self.field = field

@@ -4,7 +4,6 @@ Uses full paths (no shared prefix) because `/factions` and `/subfactions` are
 sibling resources. Catalog writes are admin/seed in principle.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -49,8 +48,8 @@ class Weapon_Create(SQLModel):
     strength: int
     armor_piercing: int
     damage: str
-    range_inches: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    range_inches: int | None = None
+    keywords: list[str] | None = None
 
 
 class Ability_Create(SQLModel):
@@ -59,20 +58,20 @@ class Ability_Create(SQLModel):
 
 
 class Weapon_Update(SQLModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
-    attacks: Optional[str] = None
-    weapon_skill: Optional[int] = None
-    strength: Optional[int] = None
-    armor_piercing: Optional[int] = None
-    damage: Optional[str] = None
-    range_inches: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    name: str | None = None
+    category: str | None = None
+    attacks: str | None = None
+    weapon_skill: int | None = None
+    strength: int | None = None
+    armor_piercing: int | None = None
+    damage: str | None = None
+    range_inches: int | None = None
+    keywords: list[str] | None = None
 
 
 class Ability_Update(SQLModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
 
 
 @router.get("/factions", response_model=list[Faction_Read])

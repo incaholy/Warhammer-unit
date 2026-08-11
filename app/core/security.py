@@ -8,8 +8,7 @@ Config comes from the environment (loaded from `.env`):
 """
 
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -27,7 +26,7 @@ load_dotenv()
 _DEV_SECRET = "dev-secret-change-me"
 
 
-def _resolve_secret_key(app_env: str, secret_key: Optional[str]) -> str:
+def _resolve_secret_key(app_env: str, secret_key: str | None) -> str:
     """The JWT signing key. A throwaway default is allowed only in dev; any other
     environment must set `SECRET_KEY`, so a prod deploy can't silently ship a
     publicly-known key (which would make admin tokens forgeable)."""
@@ -62,7 +61,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ------------------------------- tokens --------------------------------
 
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
+    expire = datetime.now(UTC) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
     )
     return jwt.encode({"sub": subject, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)

@@ -4,7 +4,6 @@ Catalog writes are admin/seed in principle; gating is deferred until auth
 (SPEC.md "Authentication & authorization").
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -22,7 +21,7 @@ class Weapon_Read(SQLModel):
     name: str
     category: str
     keywords: list[str]
-    range_inches: Optional[int]
+    range_inches: int | None
     attacks: str
     weapon_skill: int
     strength: int
@@ -40,12 +39,12 @@ class Unit_Read(SQLModel):
     id: UUID
     unit_name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID]
+    subfaction_id: UUID | None
     movement: int
     toughness: int
     armor_save: int
     wounds: int
-    invulnerable_save: Optional[int]
+    invulnerable_save: int | None
     leadership: int
     objective_control: int
     points: int
@@ -64,24 +63,24 @@ class Unit_Create(SQLModel):
     leadership: int
     objective_control: int
     points: int
-    invulnerable_save: Optional[int] = None
-    subfaction_id: Optional[UUID] = None
-    keywords: Optional[list[str]] = None
+    invulnerable_save: int | None = None
+    subfaction_id: UUID | None = None
+    keywords: list[str] | None = None
 
 
 class Unit_Update(SQLModel):
-    unit_name: Optional[str] = None
-    faction_id: Optional[UUID] = None
-    subfaction_id: Optional[UUID] = None
-    movement: Optional[int] = None
-    toughness: Optional[int] = None
-    armor_save: Optional[int] = None
-    wounds: Optional[int] = None
-    invulnerable_save: Optional[int] = None
-    leadership: Optional[int] = None
-    objective_control: Optional[int] = None
-    points: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    unit_name: str | None = None
+    faction_id: UUID | None = None
+    subfaction_id: UUID | None = None
+    movement: int | None = None
+    toughness: int | None = None
+    armor_save: int | None = None
+    wounds: int | None = None
+    invulnerable_save: int | None = None
+    leadership: int | None = None
+    objective_control: int | None = None
+    points: int | None = None
+    keywords: list[str] | None = None
 
 
 class WeaponLink(SQLModel):
@@ -111,9 +110,9 @@ def create_unit(
 @router.get("", response_model=list[Unit_Read])
 def list_units(
     response: Response,
-    faction_id: Optional[UUID] = None,
-    subfaction_id: Optional[UUID] = None,
-    q: Optional[str] = Query(default=None, description="case-insensitive name search"),
+    faction_id: UUID | None = None,
+    subfaction_id: UUID | None = None,
+    q: str | None = Query(default=None, description="case-insensitive name search"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     service: UnitService = Depends(get_unit_service),

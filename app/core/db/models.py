@@ -10,12 +10,10 @@ Two halves:
 The schema and its rationale are documented in SPEC.md ("DB layer").
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Optional
 from uuid import UUID, uuid4
 
-from sqlmodel import Field, Relationship, SQLModel
 from sqlalchemy import (
     JSON,
     CheckConstraint,
@@ -23,19 +21,20 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlmodel import Field, Relationship, SQLModel
 
 
 class TimestampMixin(SQLModel):
     """created_at / updated_at, shared by every non-association table."""
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": func.now()},
         nullable=False,
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         sa_type=DateTime(timezone=True),
         sa_column_kwargs={"server_default": func.now(), "onupdate": func.now()},
         nullable=False,
@@ -192,7 +191,7 @@ class Weapon(TimestampMixin, table=True):
     keywords: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
 
     # null range = melee (inferred from category)
-    range_inches: Optional[int] = Field(default=None)
+    range_inches: int | None = Field(default=None)
     attacks: str = Field(max_length=16)  # may be dice notation, e.g. "D6"
     weapon_skill: int  # BS for ranged, WS for melee
     strength: int
@@ -224,7 +223,7 @@ class Unit(TimestampMixin, table=True):
 
     # faction is intrinsic; subfaction is an optional restriction (null = any)
     faction_id: UUID = Field(foreign_key="factions.id", index=True)
-    subfaction_id: Optional[UUID] = Field(
+    subfaction_id: UUID | None = Field(
         default=None, foreign_key="subfactions.id", index=True
     )
 
@@ -232,7 +231,7 @@ class Unit(TimestampMixin, table=True):
     toughness: int
     armor_save: int
     wounds: int
-    invulnerable_save: Optional[int] = Field(default=None)
+    invulnerable_save: int | None = Field(default=None)
     leadership: int
     objective_control: int
     points: int
@@ -240,7 +239,7 @@ class Unit(TimestampMixin, table=True):
     keywords: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
 
     faction: Faction = Relationship()
-    subfaction: Optional[Subfaction] = Relationship()
+    subfaction: Subfaction | None = Relationship()
     abilities: list[Ability] = Relationship(
         back_populates="units", link_model=UnitAbility
     )
@@ -279,18 +278,18 @@ class Army(TimestampMixin, table=True):
         foreign_key="users.id", ondelete="CASCADE", index=True
     )
     name: str = Field(max_length=128)
-    description: Optional[str] = Field(default=None)
-    points_limit: Optional[int] = Field(default=None)
+    description: str | None = Field(default=None)
+    points_limit: int | None = Field(default=None)
 
     faction_id: UUID = Field(foreign_key="factions.id", index=True)
-    subfaction_id: Optional[UUID] = Field(
+    subfaction_id: UUID | None = Field(
         default=None, foreign_key="subfactions.id", index=True
     )
 
     owner: User = Relationship(back_populates="armies")
     units: list["ArmyUnit"] = Relationship(back_populates="army")
     faction: Faction = Relationship()
-    subfaction: Optional[Subfaction] = Relationship()
+    subfaction: Subfaction | None = Relationship()
 
 
 class UserUnit(TimestampMixin, table=True):

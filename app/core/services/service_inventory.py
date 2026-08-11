@@ -4,7 +4,6 @@ Session-injected. `NotFoundError` for not-found, `InventoryValidationError` for
 bad amounts, per SPEC.md conventions.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import selectinload
@@ -60,7 +59,7 @@ class InventoryService:
         self.session.commit()
 
     def list_inventory(
-        self, user_id: UUID, q: Optional[str] = None
+        self, user_id: UUID, q: str | None = None
     ) -> list[UserUnit]:
         statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
         if q:
@@ -85,7 +84,7 @@ class InventoryService:
         if self.session.get(Unit, unit_id) is None:
             raise NotFoundError(f"unit {unit_id} not found")
 
-    def _find_entry(self, user_id: UUID, unit_id: UUID) -> Optional[UserUnit]:
+    def _find_entry(self, user_id: UUID, unit_id: UUID) -> UserUnit | None:
         return self.session.exec(
             select(UserUnit).where(
                 UserUnit.owner_user_id == user_id, UserUnit.unit_id == unit_id
