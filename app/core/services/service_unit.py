@@ -32,13 +32,29 @@ from app.core.services.errors import (
 class UnitService:
     # Fields a PATCH may set on a unit.
     _UPDATABLE = {
-        "unit_name", "faction_id", "subfaction_id", "movement", "toughness",
-        "armor_save", "wounds", "invulnerable_save", "leadership",
-        "objective_control", "points", "keywords",
+        "unit_name",
+        "faction_id",
+        "subfaction_id",
+        "movement",
+        "toughness",
+        "armor_save",
+        "wounds",
+        "invulnerable_save",
+        "leadership",
+        "objective_control",
+        "points",
+        "keywords",
     }
     _WEAPON_UPDATABLE = {
-        "name", "category", "attacks", "weapon_skill", "strength",
-        "armor_piercing", "damage", "range_inches", "keywords",
+        "name",
+        "category",
+        "attacks",
+        "weapon_skill",
+        "strength",
+        "armor_piercing",
+        "damage",
+        "range_inches",
+        "keywords",
     }
     _ABILITY_UPDATABLE = {"name", "description"}
 
@@ -119,15 +135,11 @@ class UnitService:
         offset: int = 0,
     ) -> list[Unit]:
         """A page of catalog units, filtered and ordered by name (stable paging)."""
-        statement = self._apply_unit_filters(
-            select(Unit), faction_id, subfaction_id, q
-        )
+        statement = self._apply_unit_filters(select(Unit), faction_id, subfaction_id, q)
         # Eager-load weapons/abilities so serializing the page doesn't lazy-load
         # them per unit (the N+1). selectinload batches each with one WHERE-IN.
         statement = (
-            statement.options(
-                selectinload(Unit.weapons), selectinload(Unit.abilities)
-            )
+            statement.options(selectinload(Unit.weapons), selectinload(Unit.abilities))
             .order_by(Unit.unit_name)
             .offset(offset)
             .limit(limit)
@@ -141,9 +153,7 @@ class UnitService:
         q: str | None = None,
     ) -> int:
         """Total units matching the same filters as `list_units` (ignores paging)."""
-        statement = self._apply_unit_filters(
-            select(func.count(Unit.id)), faction_id, subfaction_id, q
-        )
+        statement = self._apply_unit_filters(select(func.count(Unit.id)), faction_id, subfaction_id, q)
         return self.session.exec(statement).one()
 
     def update_unit(self, unit_id: UUID, **fields) -> Unit:
@@ -151,9 +161,7 @@ class UnitService:
         unknown = set(fields) - self._UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
-        if fields.get("faction_id") is not None and (
-            self.session.get(Faction, fields["faction_id"]) is None
-        ):
+        if fields.get("faction_id") is not None and (self.session.get(Faction, fields["faction_id"]) is None):
             raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
             self.session.get(Subfaction, fields["subfaction_id"]) is None
@@ -173,17 +181,13 @@ class UnitService:
         # that's in any army or inventory would raise a raw IntegrityError (500).
         # Guard it into a clean ConflictError (409) instead.
         if self._unit_is_referenced(unit_id):
-            raise ConflictError(
-                f"unit {unit_id} is in use by an army or inventory"
-            )
+            raise ConflictError(f"unit {unit_id} is in use by an army or inventory")
         self.session.delete(unit)
         self.session.commit()
 
     def _unit_is_referenced(self, unit_id: UUID) -> bool:
         for model in (ArmyUnit, UserUnit):
-            hit = self.session.exec(
-                select(model).where(model.unit_id == unit_id).limit(1)
-            ).first()
+            hit = self.session.exec(select(model).where(model.unit_id == unit_id).limit(1)).first()
             if hit is not None:
                 return True
         return False
@@ -355,18 +359,13 @@ class UnitService:
         if name not in allowed:
             raise UnitValidationError(
                 "name",
-                f"{name!r} is not a subfaction of {faction.name} "
-                f"(allowed: {', '.join(allowed) or 'none'})",
+                f"{name!r} is not a subfaction of {faction.name} (allowed: {', '.join(allowed) or 'none'})",
             )
         clash = self.session.exec(
-            select(Subfaction).where(
-                Subfaction.faction_id == faction_id, Subfaction.name == name
-            )
+            select(Subfaction).where(Subfaction.faction_id == faction_id, Subfaction.name == name)
         ).first()
         if clash is not None:
-            raise ConflictError(
-                f"subfaction {name!r} already exists for that faction"
-            )
+            raise ConflictError(f"subfaction {name!r} already exists for that faction")
         sub = Subfaction(faction_id=faction_id, name=name)
         self.session.add(sub)
         self.session.commit()
@@ -380,9 +379,7 @@ class UnitService:
         # units.subfaction_id / armies.subfaction_id reference it via RESTRICT FKs,
         # so guard the delete into a ConflictError (409) rather than a 500.
         if self._subfaction_is_referenced(subfaction_id):
-            raise ConflictError(
-                f"subfaction {subfaction_id} is in use by a unit or army"
-            )
+            raise ConflictError(f"subfaction {subfaction_id} is in use by a unit or army")
         self.session.delete(sub)
         self.session.commit()
 

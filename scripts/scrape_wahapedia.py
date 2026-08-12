@@ -68,16 +68,28 @@ FACTIONS: dict[str, tuple[str, str | None]] = {
 # models.FACTION_SUBFACTIONS). "SM" = faction-wide -> no subfaction. Only used for
 # the Space Marines page (the one with a `None` fixed subfaction above).
 CHAPTER_CODES = {
-    "CHBA": "Blood Angels", "CHDA": "Dark Angels", "CHDW": "Deathwatch",
-    "CHIF": "Imperial Fists", "CHIH": "Iron Hands", "CHRG": "Raven Guard",
-    "CHSA": "Salamanders", "CHSW": "Space Wolves", "CHWS": "White Scars",
-    "CHUL": "Ultramarines", "CHBR": "Blood Ravens", "CHBT": "Black Templars",
+    "CHBA": "Blood Angels",
+    "CHDA": "Dark Angels",
+    "CHDW": "Deathwatch",
+    "CHIF": "Imperial Fists",
+    "CHIH": "Iron Hands",
+    "CHRG": "Raven Guard",
+    "CHSA": "Salamanders",
+    "CHSW": "Space Wolves",
+    "CHWS": "White Scars",
+    "CHUL": "Ultramarines",
+    "CHBR": "Blood Ravens",
+    "CHBT": "Black Templars",
 }
 
 # Wahapedia stat label -> our unit field
 STAT_FIELDS = {
-    "M": "movement", "T": "toughness", "Sv": "armor_save", "W": "wounds",
-    "Ld": "leadership", "OC": "objective_control",
+    "M": "movement",
+    "T": "toughness",
+    "Sv": "armor_save",
+    "W": "wounds",
+    "Ld": "leadership",
+    "OC": "objective_control",
 }
 
 
@@ -88,9 +100,7 @@ def fetch(url: str, *, cache_dir: Path = CACHE_DIR, delay: float = 3.0) -> str:
     if cached.exists():
         return cached.read_text(encoding="utf-8")
     time.sleep(delay)  # be gentle — one request every few seconds
-    resp = httpx.get(
-        url, headers={"User-Agent": USER_AGENT}, timeout=30.0, follow_redirects=True
-    )
+    resp = httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=30.0, follow_redirects=True)
     resp.raise_for_status()
     cached.write_text(resp.text, encoding="utf-8")
     return resp.text
@@ -115,9 +125,7 @@ def _theme_code(block) -> str | None:
 def _weapon_name_and_keywords(cell) -> tuple[str, list[str]]:
     """Split a weapon name cell into (name, keywords). Keywords render as inline
     `.kwb2` spans (e.g. 'Bolt pistol [pistol]'); the name is the rest of the text."""
-    keywords = [
-        re.sub(r"\s+", " ", s.get_text(" ", strip=True)) for s in cell.select(".kwb2")
-    ]
+    keywords = [re.sub(r"\s+", " ", s.get_text(" ", strip=True)) for s in cell.select(".kwb2")]
     tmp = BeautifulSoup(str(cell), "lxml")  # a copy, so we can strip the keyword spans
     for s in tmp.select(".kwb2"):
         s.decompose()
@@ -225,17 +233,19 @@ def parse_weapons(block) -> tuple[list[dict], list[str]]:
         if not name:
             continue
         text = [c.get_text(strip=True) for c in stat]  # [range, A, WS/BS, S, AP, D]
-        weapons.append({
-            "name": name,
-            "category": category,
-            "attacks": text[1] or "1",
-            "weapon_skill": _stat_int(text[2]) or 0,
-            "strength": _stat_int(text[3]) or 0,
-            "armor_piercing": abs(_stat_int(text[4]) or 0),  # model stores AP magnitude
-            "damage": text[5] or "1",
-            "range_inches": None if category == "melee" else _stat_int(text[0]),
-            "keywords": kw,
-        })
+        weapons.append(
+            {
+                "name": name,
+                "category": category,
+                "attacks": text[1] or "1",
+                "weapon_skill": _stat_int(text[2]) or 0,
+                "strength": _stat_int(text[3]) or 0,
+                "armor_piercing": abs(_stat_int(text[4]) or 0),  # model stores AP magnitude
+                "damage": text[5] or "1",
+                "range_inches": None if category == "melee" else _stat_int(text[0]),
+                "keywords": kw,
+            }
+        )
         names.append(name)
     return weapons, names
 
@@ -340,17 +350,12 @@ def main() -> None:
         for a in data["abilities"]:
             abilities.setdefault(a["name"], a)
     out = {
-        "factions": [
-            {"name": name, "subfactions": sorted(subs)}
-            for name, subs in faction_subs.items()
-        ],
+        "factions": [{"name": name, "subfactions": sorted(subs)} for name, subs in faction_subs.items()],
         "weapons": list(weapons.values()),
         "abilities": list(abilities.values()),
         "units": units,
     }
-    DATA_PATH.write_text(
-        json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    DATA_PATH.write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(
         f"scraped {len(units)} units, {len(weapons)} weapons, {len(abilities)} "
         f"abilities across {len(faction_subs)} faction(s) -> {DATA_PATH}"

@@ -64,9 +64,7 @@ def seed(session: Session, data: dict) -> dict:
         faction_ids[f["name"]] = faction.id
         for sub_name in f.get("subfactions", []):
             sub = session.exec(
-                select(Subfaction).where(
-                    Subfaction.faction_id == faction.id, Subfaction.name == sub_name
-                )
+                select(Subfaction).where(Subfaction.faction_id == faction.id, Subfaction.name == sub_name)
             ).first()
             if sub is None:
                 sub = svc.create_subfaction(faction.id, sub_name)
@@ -98,14 +96,12 @@ def seed(session: Session, data: dict) -> dict:
     for u in data.get("units", []):
         try:
             name = u["unit_name"]
-            faction_id = _ref(
-                faction_ids, u["faction"], f"unit {name!r} references unknown faction"
-            )
+            faction_id = _ref(faction_ids, u["faction"], f"unit {name!r} references unknown faction")
             sub = u.get("subfaction")
             subfaction_id = (
-                _ref(subfaction_ids, (u["faction"], sub),
-                     f"unit {name!r} references unknown subfaction")
-                if sub else None
+                _ref(subfaction_ids, (u["faction"], sub), f"unit {name!r} references unknown subfaction")
+                if sub
+                else None
             )
             unit = session.exec(
                 select(Unit).where(Unit.faction_id == faction_id, Unit.unit_name == name)
@@ -127,9 +123,7 @@ def seed(session: Session, data: dict) -> dict:
                 )
                 counts["units"] += 1
         except KeyError as exc:
-            raise SeedError(
-                f"unit {u.get('unit_name', '?')!r} is missing required field {exc}"
-            ) from None
+            raise SeedError(f"unit {u.get('unit_name', '?')!r} is missing required field {exc}") from None
         for wname in u.get("weapons", []):
             svc.link_weapon(unit.id, _ref(weapon_ids, wname, f"unit {name!r} links unknown weapon"))
         for aname in u.get("abilities", []):

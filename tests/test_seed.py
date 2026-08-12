@@ -11,19 +11,33 @@ SAMPLE = {
     "factions": [{"name": "Xenos", "subfactions": ["Necrons"]}],
     "weapons": [
         {
-            "name": "Gauss flayer", "category": "range", "attacks": "1",
-            "weapon_skill": 4, "strength": 4, "armor_piercing": 0, "damage": "1",
-            "range_inches": 24, "keywords": ["Rapid Fire 1"],
+            "name": "Gauss flayer",
+            "category": "range",
+            "attacks": "1",
+            "weapon_skill": 4,
+            "strength": 4,
+            "armor_piercing": 0,
+            "damage": "1",
+            "range_inches": 24,
+            "keywords": ["Rapid Fire 1"],
         }
     ],
     "abilities": [{"name": "Reanimation Protocols", "description": "Return slain models."}],
     "units": [
         {
-            "unit_name": "Necron Warriors", "faction": "Xenos", "subfaction": "Necrons",
-            "movement": 5, "toughness": 4, "armor_save": 4, "wounds": 1,
-            "leadership": 6, "objective_control": 2, "points": 100,
+            "unit_name": "Necron Warriors",
+            "faction": "Xenos",
+            "subfaction": "Necrons",
+            "movement": 5,
+            "toughness": 4,
+            "armor_save": 4,
+            "wounds": 1,
+            "leadership": 6,
+            "objective_control": 2,
+            "points": 100,
             "keywords": ["Infantry"],
-            "weapons": ["Gauss flayer"], "abilities": ["Reanimation Protocols"],
+            "weapons": ["Gauss flayer"],
+            "abilities": ["Reanimation Protocols"],
         }
     ],
 }
@@ -31,9 +45,7 @@ SAMPLE = {
 
 def test_seed_creates_rows_and_links(session):
     counts = seed(session, SAMPLE)
-    assert counts == {
-        "factions": 1, "subfactions": 1, "weapons": 1, "abilities": 1, "units": 1
-    }
+    assert counts == {"factions": 1, "subfactions": 1, "weapons": 1, "abilities": 1, "units": 1}
     units = UnitService(session).list_units()
     assert len(units) == 1
     unit = units[0]
@@ -64,13 +76,24 @@ def test_seed_unknown_weapon_ref_raises_seed_error(session):
 
     data = {
         "factions": [{"name": "Xenos", "subfactions": ["Necrons"]}],
-        "weapons": [], "abilities": [],
-        "units": [{
-            "unit_name": "Ghost", "faction": "Xenos", "subfaction": "Necrons",
-            "movement": 5, "toughness": 4, "armor_save": 4, "wounds": 1,
-            "leadership": 6, "objective_control": 2, "points": 10,
-            "weapons": ["Nonexistent Gun"], "abilities": [],
-        }],
+        "weapons": [],
+        "abilities": [],
+        "units": [
+            {
+                "unit_name": "Ghost",
+                "faction": "Xenos",
+                "subfaction": "Necrons",
+                "movement": 5,
+                "toughness": 4,
+                "armor_save": 4,
+                "wounds": 1,
+                "leadership": 6,
+                "objective_control": 2,
+                "points": 10,
+                "weapons": ["Nonexistent Gun"],
+                "abilities": [],
+            }
+        ],
     }
     with pytest.raises(SeedError):
         seed(session, data)
@@ -83,7 +106,8 @@ def test_seed_missing_unit_field_raises_seed_error(session):
 
     data = {
         "factions": [{"name": "Xenos", "subfactions": []}],
-        "weapons": [], "abilities": [],
+        "weapons": [],
+        "abilities": [],
         "units": [{"unit_name": "Incomplete", "faction": "Xenos"}],  # missing stats
     }
     with pytest.raises(SeedError):

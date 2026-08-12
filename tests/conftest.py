@@ -88,6 +88,7 @@ def admin_client_fixture(client, make_user):
 # --------------------------- object factories ---------------------------
 # Each factory returns a committed, refreshed row. Pass overrides to customize.
 
+
 @pytest.fixture
 def make_faction(session):
     def _make(name=None):
@@ -104,9 +105,7 @@ def make_faction(session):
 def make_subfaction(session, make_faction):
     def _make(faction=None, name=None):
         faction = faction or make_faction()
-        sub = Subfaction(
-            faction_id=faction.id, name=name or f"Subfaction {next(_counter)}"
-        )
+        sub = Subfaction(faction_id=faction.id, name=name or f"Subfaction {next(_counter)}")
         session.add(sub)
         session.commit()
         session.refresh(sub)

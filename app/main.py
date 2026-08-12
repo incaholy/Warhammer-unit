@@ -45,6 +45,7 @@ if _origins:
 
 # --- service exception -> HTTP mapping (keeps routers thin) ---
 
+
 @app.exception_handler(ServiceError)
 def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
     # Typed service errors carry their own status + optional field. Chosen over
@@ -61,12 +62,8 @@ def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
 # never the raw driver message, which can expose column/constraint internals.
 @app.exception_handler(IntegrityError)
 def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
-    logger.warning(
-        "integrity error on %s %s", request.method, request.url.path, exc_info=exc
-    )
-    return JSONResponse(
-        status_code=409, content={"detail": "conflict with an existing resource"}
-    )
+    logger.warning("integrity error on %s %s", request.method, request.url.path, exc_info=exc)
+    return JSONResponse(status_code=409, content={"detail": "conflict with an existing resource"})
 
 
 # Catch-all for anything not handled above — an unexpected server fault. Log the
@@ -78,9 +75,7 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
 @app.exception_handler(Exception)
 def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=500, content={"detail": "internal server error"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
 
 @app.get("/health")

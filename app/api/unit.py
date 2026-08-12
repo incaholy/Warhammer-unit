@@ -101,9 +101,7 @@ def get_unit_service(session: Session = Depends(get_session)) -> UnitService:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_unit(
-    payload: Unit_Create, service: UnitService = Depends(get_unit_service)
-) -> Unit_Read:
+def create_unit(payload: Unit_Create, service: UnitService = Depends(get_unit_service)) -> Unit_Read:
     return service.create_unit(**payload.model_dump())
 
 
@@ -131,9 +129,7 @@ def list_units(
 
 
 @router.get("/{unit_id}", response_model=Unit_Read)
-def get_unit(
-    unit_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Unit_Read:
+def get_unit(unit_id: UUID, service: UnitService = Depends(get_unit_service)) -> Unit_Read:
     return service.get_unit(unit_id)
 
 
@@ -155,9 +151,7 @@ def update_unit(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_unit(
-    unit_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_unit(unit_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_unit(unit_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

@@ -90,13 +90,9 @@ def test_add_unit_twice_increments(auth_client, make_faction, make_unit):
     f = make_faction()
     unit = make_unit()
     army = _make_army(auth_client, f)
-    first = auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2}
-    )
+    first = auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2})
     assert first.status_code == 201
-    resp = auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3}
-    )
+    resp = auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3})
     assert resp.status_code == 200
     assert resp.json()["amount"] == 5
 
@@ -105,12 +101,8 @@ def test_set_amount_below_one_returns_400(auth_client, make_faction, make_unit):
     f = make_faction()
     unit = make_unit()
     army = _make_army(auth_client, f)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 1}
-    )
-    resp = auth_client.patch(
-        f"/me/armies/{army['id']}/units/{unit.id}", json={"amount": 0}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 1})
+    resp = auth_client.patch(f"/me/armies/{army['id']}/units/{unit.id}", json={"amount": 0})
     assert resp.status_code == 400
 
 
@@ -118,9 +110,7 @@ def test_remove_unit(auth_client, make_faction, make_unit):
     f = make_faction()
     unit = make_unit()
     army = _make_army(auth_client, f)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 1}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 1})
     resp = auth_client.delete(f"/me/armies/{army['id']}/units/{unit.id}")
     assert resp.status_code == 204
 
@@ -129,9 +119,7 @@ def test_shortfall(auth_client, session, make_faction, make_unit):
     f = make_faction()
     unit = make_unit()
     army = _make_army(auth_client, f)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3})
     session.add(UserUnit(owner_user_id=auth_client.user.id, unit_id=unit.id, amount=1))
     session.commit()
     resp = auth_client.get(f"/me/armies/{army['id']}/shortfall")
@@ -145,9 +133,7 @@ def test_army_read_includes_points(auth_client, make_faction, make_unit):
     f = make_faction()
     unit = make_unit(faction=f, points=100)
     army = _make_army(auth_client, f, points_limit=2000)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3})
     resp = auth_client.get(f"/me/armies/{army['id']}")
     body = resp.json()
     assert body["points_limit"] == 2000
@@ -156,9 +142,7 @@ def test_army_read_includes_points(auth_client, make_faction, make_unit):
 
 def test_create_army_with_points_limit(auth_client, make_faction):
     f = make_faction()
-    resp = auth_client.post(
-        "/me/armies", json={"name": "A", "faction_id": str(f.id), "points_limit": 1000}
-    )
+    resp = auth_client.post("/me/armies", json={"name": "A", "faction_id": str(f.id), "points_limit": 1000})
     assert resp.status_code == 201
     assert resp.json()["points_limit"] == 1000
 
@@ -166,9 +150,7 @@ def test_create_army_with_points_limit(auth_client, make_faction):
 def test_update_army_points_limit(auth_client, make_faction):
     f = make_faction()
     army = _make_army(auth_client, f)
-    resp = auth_client.patch(
-        f"/me/armies/{army['id']}", json={"points_limit": 1500}
-    )
+    resp = auth_client.patch(f"/me/armies/{army['id']}", json={"points_limit": 1500})
     assert resp.status_code == 200
     assert resp.json()["points_limit"] == 1500
 
@@ -177,9 +159,7 @@ def test_validate_endpoint_ok(auth_client, make_faction, make_unit):
     f = make_faction()
     unit = make_unit(faction=f, points=80)
     army = _make_army(auth_client, f, points_limit=2000)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2})
     resp = auth_client.get(f"/me/armies/{army['id']}/validate")
     assert resp.status_code == 200
     body = resp.json()
@@ -192,9 +172,7 @@ def test_validate_endpoint_reports_over_points(auth_client, make_faction, make_u
     f = make_faction()
     unit = make_unit(faction=f, points=80)
     army = _make_army(auth_client, f, points_limit=100)
-    auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2}
-    )
+    auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2})
     resp = auth_client.get(f"/me/armies/{army['id']}/validate")
     assert resp.json()["ok"] is False
     assert any(i["kind"] == "over_points" for i in resp.json()["issues"])
@@ -203,7 +181,5 @@ def test_validate_endpoint_reports_over_points(auth_client, make_faction, make_u
 def test_add_unit_zero_amount_returns_422(auth_client, make_faction, make_unit):
     army = _make_army(auth_client, make_faction())
     unit = make_unit()
-    resp = auth_client.post(
-        f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 0}
-    )
+    resp = auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 0})
     assert resp.status_code == 422  # schema ge=1

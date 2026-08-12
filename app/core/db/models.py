@@ -43,6 +43,7 @@ class TimestampMixin(SQLModel):
 
 # ============================ Catalog ============================
 
+
 class FactionName(StrEnum):
     """The canonical top-level Warhammer 40k factions (grand alliances).
 
@@ -125,9 +126,7 @@ class Subfaction(TimestampMixin, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # delete a faction -> its subfactions go with it
-    faction_id: UUID = Field(
-        foreign_key="factions.id", ondelete="CASCADE", index=True
-    )
+    faction_id: UUID = Field(foreign_key="factions.id", ondelete="CASCADE", index=True)
     name: str = Field(max_length=128)
 
     faction: Faction = Relationship(back_populates="subfactions")
@@ -138,12 +137,8 @@ class UnitAbility(SQLModel, table=True):
 
     __tablename__ = "unit_abilities"
 
-    unit_id: UUID = Field(
-        foreign_key="units.id", ondelete="CASCADE", primary_key=True
-    )
-    ability_id: UUID = Field(
-        foreign_key="abilities.id", ondelete="CASCADE", primary_key=True
-    )
+    unit_id: UUID = Field(foreign_key="units.id", ondelete="CASCADE", primary_key=True)
+    ability_id: UUID = Field(foreign_key="abilities.id", ondelete="CASCADE", primary_key=True)
 
 
 class UnitWeapon(SQLModel, table=True):
@@ -151,12 +146,8 @@ class UnitWeapon(SQLModel, table=True):
 
     __tablename__ = "unit_weapons"
 
-    unit_id: UUID = Field(
-        foreign_key="units.id", ondelete="CASCADE", primary_key=True
-    )
-    weapon_id: UUID = Field(
-        foreign_key="weapons.id", ondelete="CASCADE", primary_key=True
-    )
+    unit_id: UUID = Field(foreign_key="units.id", ondelete="CASCADE", primary_key=True)
+    weapon_id: UUID = Field(foreign_key="weapons.id", ondelete="CASCADE", primary_key=True)
 
 
 class Ability(TimestampMixin, table=True):
@@ -166,9 +157,7 @@ class Ability(TimestampMixin, table=True):
     name: str = Field(max_length=128)
     description: str
 
-    units: list["Unit"] = Relationship(
-        back_populates="abilities", link_model=UnitAbility
-    )
+    units: list["Unit"] = Relationship(back_populates="abilities", link_model=UnitAbility)
 
 
 class Weapon(TimestampMixin, table=True):
@@ -198,9 +187,7 @@ class Weapon(TimestampMixin, table=True):
     armor_piercing: int
     damage: str = Field(max_length=16)  # may be dice notation, e.g. "D3"
 
-    units: list["Unit"] = Relationship(
-        back_populates="weapons", link_model=UnitWeapon
-    )
+    units: list["Unit"] = Relationship(back_populates="weapons", link_model=UnitWeapon)
 
 
 class Unit(TimestampMixin, table=True):
@@ -223,9 +210,7 @@ class Unit(TimestampMixin, table=True):
 
     # faction is intrinsic; subfaction is an optional restriction (null = any)
     faction_id: UUID = Field(foreign_key="factions.id", index=True)
-    subfaction_id: UUID | None = Field(
-        default=None, foreign_key="subfactions.id", index=True
-    )
+    subfaction_id: UUID | None = Field(default=None, foreign_key="subfactions.id", index=True)
 
     movement: int
     toughness: int
@@ -240,15 +225,12 @@ class Unit(TimestampMixin, table=True):
 
     faction: Faction = Relationship()
     subfaction: Subfaction | None = Relationship()
-    abilities: list[Ability] = Relationship(
-        back_populates="units", link_model=UnitAbility
-    )
-    weapons: list[Weapon] = Relationship(
-        back_populates="units", link_model=UnitWeapon
-    )
+    abilities: list[Ability] = Relationship(back_populates="units", link_model=UnitAbility)
+    weapons: list[Weapon] = Relationship(back_populates="units", link_model=UnitWeapon)
 
 
 # ========================== Collection ==========================
+
 
 class User(TimestampMixin, table=True):
     __tablename__ = "users"
@@ -274,17 +256,13 @@ class Army(TimestampMixin, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # delete a user -> their armies go with them
-    owner_user_id: UUID = Field(
-        foreign_key="users.id", ondelete="CASCADE", index=True
-    )
+    owner_user_id: UUID = Field(foreign_key="users.id", ondelete="CASCADE", index=True)
     name: str = Field(max_length=128)
     description: str | None = Field(default=None)
     points_limit: int | None = Field(default=None)
 
     faction_id: UUID = Field(foreign_key="factions.id", index=True)
-    subfaction_id: UUID | None = Field(
-        default=None, foreign_key="subfactions.id", index=True
-    )
+    subfaction_id: UUID | None = Field(default=None, foreign_key="subfactions.id", index=True)
 
     owner: User = Relationship(back_populates="armies")
     units: list["ArmyUnit"] = Relationship(back_populates="army")
@@ -303,9 +281,7 @@ class UserUnit(TimestampMixin, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     # delete a user -> their inventory goes with them
-    owner_user_id: UUID = Field(
-        foreign_key="users.id", ondelete="CASCADE", index=True
-    )
+    owner_user_id: UUID = Field(foreign_key="users.id", ondelete="CASCADE", index=True)
     unit_id: UUID = Field(foreign_key="units.id", index=True)
     amount: int
 

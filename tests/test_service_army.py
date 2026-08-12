@@ -139,9 +139,7 @@ def test_add_unit_to_nonexistent_army_raises_lookup_error(session, make_unit):
         svc.add_unit(uuid.uuid4(), unit.id, amount=1)
 
 
-def test_army_may_include_a_unit_the_user_does_not_own(
-    session, make_user, make_faction, make_unit
-):
+def test_army_may_include_a_unit_the_user_does_not_own(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()
@@ -164,9 +162,7 @@ def test_delete_army_cascades_army_units(session, make_army, make_unit):
     assert remaining == 0
 
 
-def test_shortfall_empty_when_inventory_covers_the_list(
-    session, make_user, make_faction, make_unit
-):
+def test_shortfall_empty_when_inventory_covers_the_list(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()
@@ -180,6 +176,7 @@ def test_shortfall_empty_when_inventory_covers_the_list(
 
 
 # ------------------------------ roster (points + validate) ------------------------------
+
 
 def test_create_army_with_points_limit(session, make_user, make_faction):
     user = make_user()
@@ -245,9 +242,7 @@ def test_validate_wrong_faction(session, make_user, make_faction, make_unit):
     assert any(i.kind == "wrong_faction" for i in report.issues)
 
 
-def test_validate_wrong_subfaction(
-    session, make_user, make_faction, make_subfaction, make_unit
-):
+def test_validate_wrong_subfaction(session, make_user, make_faction, make_subfaction, make_unit):
     user = make_user()
     f = make_faction()
     sub_a = make_subfaction(faction=f)

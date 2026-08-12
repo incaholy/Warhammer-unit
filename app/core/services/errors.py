@@ -11,7 +11,6 @@ one resource-named `*ValidationError` per service, carrying the offending
 """
 
 
-
 class ServiceError(Exception):
     """Base for service-raised errors: an HTTP `status_code` + optional `field`."""
 

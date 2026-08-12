@@ -50,6 +50,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 # ------------------------------ passwords ------------------------------
 
+
 def hash_password(plain: str) -> str:
     return _pwd.hash(plain)
 
@@ -60,10 +61,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ------------------------------- tokens --------------------------------
 
+
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(UTC) + timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-    )
+    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({"sub": subject, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -80,6 +80,7 @@ def decode_token(token: str) -> str:
 
 
 # ---------------------------- dependencies -----------------------------
+
 
 def _unauthorized() -> HTTPException:
     # Built fresh per raise (not a shared module-level instance): each raise gets
@@ -107,7 +108,5 @@ def get_current_user(
 
 def get_current_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="admin only"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
     return user

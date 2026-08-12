@@ -97,9 +97,7 @@ def faction_taxonomy() -> dict[str, list[str]]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_faction(
-    payload: Faction_Create, service: UnitService = Depends(get_unit_service)
-) -> Faction_Read:
+def create_faction(payload: Faction_Create, service: UnitService = Depends(get_unit_service)) -> Faction_Read:
     return service.create_faction(payload.name)
 
 
@@ -121,9 +119,7 @@ def create_subfaction(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_subfaction(
-    subfaction_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_subfaction(subfaction_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_subfaction(subfaction_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -134,9 +130,7 @@ def delete_subfaction(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_weapon(
-    payload: Weapon_Create, service: UnitService = Depends(get_unit_service)
-) -> Weapon_Read:
+def create_weapon(payload: Weapon_Create, service: UnitService = Depends(get_unit_service)) -> Weapon_Read:
     return service.create_weapon(**payload.model_dump())
 
 
@@ -165,9 +159,7 @@ def update_weapon(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_weapon(
-    weapon_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_weapon(weapon_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_weapon(weapon_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -178,9 +170,7 @@ def delete_weapon(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_ability(
-    payload: Ability_Create, service: UnitService = Depends(get_unit_service)
-) -> Ability_Read:
+def create_ability(payload: Ability_Create, service: UnitService = Depends(get_unit_service)) -> Ability_Read:
     return service.create_ability(payload.name, payload.description)
 
 
@@ -209,8 +199,6 @@ def update_ability(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_ability(
-    ability_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_ability(ability_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_ability(ability_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

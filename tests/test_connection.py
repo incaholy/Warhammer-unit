@@ -26,9 +26,7 @@ def test_get_session_rolls_back_uncommitted_work_on_error(engine, monkeypatch):
 
     # A fresh session on the same DB sees nothing — the add was discarded.
     with Session(engine) as check:
-        found = check.exec(
-            select(Faction).where(Faction.name == "Rollback Test")
-        ).first()
+        found = check.exec(select(Faction).where(Faction.name == "Rollback Test")).first()
     assert found is None
 
 
@@ -46,7 +44,5 @@ def test_get_session_keeps_committed_work(engine, monkeypatch):
         gen.throw(RuntimeError("boom"))
 
     with Session(engine) as check:
-        found = check.exec(
-            select(Faction).where(Faction.name == "Committed")
-        ).first()
+        found = check.exec(select(Faction).where(Faction.name == "Committed")).first()
     assert found is not None

@@ -21,9 +21,7 @@ class UserService:
         # Check for a taken username/email up front so we can raise a clear
         # ConflictError instead of surfacing a DB IntegrityError.
         clash = self.session.exec(
-            select(User).where(
-                (User.username == username) | (User.email == email)
-            )
+            select(User).where((User.username == username) | (User.email == email))
         ).first()
         if clash is not None:
             if clash.username == username:
@@ -52,9 +50,7 @@ class UserService:
         # Only a demotion of a current admin can reduce the admin count; block it
         # when that admin is the last one standing.
         if user.is_admin and not is_admin:
-            admins = self.session.exec(
-                select(User).where(User.is_admin.is_(True))
-            ).all()
+            admins = self.session.exec(select(User).where(User.is_admin.is_(True))).all()
             if len(admins) <= 1:
                 raise ConflictError("cannot demote the last admin")
         user.is_admin = is_admin

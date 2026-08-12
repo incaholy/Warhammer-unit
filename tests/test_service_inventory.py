@@ -78,9 +78,7 @@ def test_add_unit_unknown_unit_raises_lookup_error(session, make_user):
         svc.add_unit(user.id, uuid.uuid4(), amount=1)
 
 
-def test_removing_inventory_entry_leaves_armies_untouched(
-    session, make_user, make_faction, make_unit
-):
+def test_removing_inventory_entry_leaves_armies_untouched(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()

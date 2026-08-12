@@ -108,6 +108,7 @@ def _army_read(service: ArmyService, army: Army) -> Army_Read:
 
 # ------------------------------ armies ------------------------------
 
+
 @router.post("", response_model=Army_Read, status_code=status.HTTP_201_CREATED)
 def create_army(
     payload: Army_Create,
@@ -178,9 +179,8 @@ def validate(
 
 # -------------------------- units in an army --------------------------
 
-@router.post(
-    "/{army_id}/units", response_model=ArmyUnit_Read, status_code=status.HTTP_201_CREATED
-)
+
+@router.post("/{army_id}/units", response_model=ArmyUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
     payload: ArmyUnitAdd,
     response: Response,
@@ -204,9 +204,7 @@ def set_amount(
     return service.set_amount(army.id, unit_id, payload.amount)
 
 
-@router.delete(
-    "/{army_id}/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/{army_id}/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_unit(
     unit_id: UUID,
     army: Army = Depends(get_owned_army),

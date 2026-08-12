@@ -17,9 +17,7 @@ class InventoryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def add_unit(
-        self, user_id: UUID, unit_id: UUID, amount: int = 1
-    ) -> tuple[UserUnit, bool]:
+    def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> tuple[UserUnit, bool]:
         """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
         without re-querying the inventory."""
         if amount < 1:
@@ -39,9 +37,7 @@ class InventoryService:
 
     def set_amount(self, user_id: UUID, unit_id: UUID, amount: int) -> UserUnit:
         if amount < 1:
-            raise InventoryValidationError(
-                "amount", "must be >= 1 (use remove_unit to remove)"
-            )
+            raise InventoryValidationError("amount", "must be >= 1 (use remove_unit to remove)")
         entry = self._find_entry(user_id, unit_id)
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
@@ -58,9 +54,7 @@ class InventoryService:
         self.session.delete(entry)
         self.session.commit()
 
-    def list_inventory(
-        self, user_id: UUID, q: str | None = None
-    ) -> list[UserUnit]:
+    def list_inventory(self, user_id: UUID, q: str | None = None) -> list[UserUnit]:
         statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
         if q:
             statement = statement.join(Unit, UserUnit.unit_id == Unit.id).where(
@@ -86,7 +80,5 @@ class InventoryService:
 
     def _find_entry(self, user_id: UUID, unit_id: UUID) -> UserUnit | None:
         return self.session.exec(
-            select(UserUnit).where(
-                UserUnit.owner_user_id == user_id, UserUnit.unit_id == unit_id
-            )
+            select(UserUnit).where(UserUnit.owner_user_id == user_id, UserUnit.unit_id == unit_id)
         ).first()

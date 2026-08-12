@@ -15,17 +15,29 @@ from app.core.services.service_unit import UnitService
 
 def _svc_weapon(svc, name="Bolt rifle"):
     return svc.create_weapon(
-        name=name, category="range", attacks="2", weapon_skill=3,
-        strength=4, armor_piercing=1, damage="1", range_inches=24,
+        name=name,
+        category="range",
+        attacks="2",
+        weapon_skill=3,
+        strength=4,
+        armor_piercing=1,
+        damage="1",
+        range_inches=24,
     )
+
 
 # --- catalog factions/subfactions live on UnitService ---
 
 
 def _stats():
     return dict(
-        movement=6, toughness=4, armor_save=3, wounds=2,
-        leadership=6, objective_control=2, points=80,
+        movement=6,
+        toughness=4,
+        armor_save=3,
+        wounds=2,
+        leadership=6,
+        objective_control=2,
+        points=80,
     )
 
 
@@ -40,9 +52,7 @@ def test_create_unit(session, make_faction):
 def test_create_unit_with_keywords(session, make_faction):
     f = make_faction()
     svc = UnitService(session)
-    unit = svc.create_unit(
-        faction_id=f.id, unit_name="Intercessor", keywords=["Infantry"], **_stats()
-    )
+    unit = svc.create_unit(faction_id=f.id, unit_name="Intercessor", keywords=["Infantry"], **_stats())
     assert unit.keywords == ["Infantry"]
 
 
@@ -73,8 +83,14 @@ def test_list_units(session, make_unit):
 
 def _weapon():
     return Weapon(
-        name="Bolt rifle", category="range", range_inches=24, attacks="2",
-        weapon_skill=3, strength=4, armor_piercing=1, damage="1",
+        name="Bolt rifle",
+        category="range",
+        range_inches=24,
+        attacks="2",
+        weapon_skill=3,
+        strength=4,
+        armor_piercing=1,
+        damage="1",
     )
 
 
@@ -151,8 +167,14 @@ def test_link_ability(session, make_unit):
 def test_create_weapon(session):
     svc = UnitService(session)
     weapon = svc.create_weapon(
-        name="Bolt rifle", category="range", attacks="2", weapon_skill=3,
-        strength=4, armor_piercing=1, damage="1", range_inches=24,
+        name="Bolt rifle",
+        category="range",
+        attacks="2",
+        weapon_skill=3,
+        strength=4,
+        armor_piercing=1,
+        damage="1",
+        range_inches=24,
     )
     assert weapon.id is not None
     assert weapon.category == "range"
@@ -163,8 +185,13 @@ def test_create_weapon_invalid_category_raises_value_error(session):
     svc = UnitService(session)
     with pytest.raises(ValueError):
         svc.create_weapon(
-            name="Bad", category="psychic", attacks="1", weapon_skill=3,
-            strength=4, armor_piercing=0, damage="1",
+            name="Bad",
+            category="psychic",
+            attacks="1",
+            weapon_skill=3,
+            strength=4,
+            armor_piercing=0,
+            damage="1",
         )
 
 
@@ -233,6 +260,7 @@ def test_create_subfaction_duplicate_raises_value_error(session):
 
 # ---- weapons: update / delete / list (service level) ----
 
+
 def test_list_weapons(session):
     svc = UnitService(session)
     _svc_weapon(svc)
@@ -280,6 +308,7 @@ def test_delete_weapon_missing_raises_not_found(session):
 
 # ---- abilities: update / delete / list (service level) ----
 
+
 def test_list_abilities(session):
     svc = UnitService(session)
     svc.create_ability("Oath", "reroll")
@@ -306,6 +335,7 @@ def test_delete_ability_missing_raises_not_found(session):
 
 
 # ---- link / unlink error + idempotency paths ----
+
 
 def test_link_weapon_unknown_unit_raises(session):
     svc = UnitService(session)
@@ -347,6 +377,7 @@ def test_unlink_weapon_not_linked_is_idempotent(session, make_unit):
 
 # ---- count_units (service level) ----
 
+
 def test_count_units(session, make_faction, make_unit):
     f = make_faction()
     make_unit(faction=f)
@@ -359,6 +390,7 @@ def test_count_units(session, make_faction, make_unit):
 
 
 # ---- delete_subfaction (service level) ----
+
 
 def test_delete_subfaction_service(session):
     svc = UnitService(session)
@@ -385,6 +417,7 @@ def test_delete_subfaction_in_use_raises_conflict(session, make_unit):
 
 
 # ---- delete cascades the link rows (no reference guard needed for weapons/abilities) ----
+
 
 def test_delete_weapon_cascades_unit_link(session, make_unit):
     unit = make_unit()

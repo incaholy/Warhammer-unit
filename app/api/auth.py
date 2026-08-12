@@ -37,12 +37,8 @@ def get_auth_service(session: Session = Depends(get_session)) -> AuthService:
     return AuthService(session)
 
 
-@router.post(
-    "/register", response_model=User_Read, status_code=status.HTTP_201_CREATED
-)
-def register(
-    payload: Register_Create, service: AuthService = Depends(get_auth_service)
-) -> User_Read:
+@router.post("/register", response_model=User_Read, status_code=status.HTTP_201_CREATED)
+def register(payload: Register_Create, service: AuthService = Depends(get_auth_service)) -> User_Read:
     return service.register(payload.username, payload.email, payload.password)
 
 
