@@ -256,7 +256,7 @@ def test_validate_wrong_subfaction(session, make_user, make_faction, make_subfac
 
 
 def test_add_unit_below_one_raises(session, make_army, make_unit):
-    from app.core.services.errors import ArmyValidationError
+    from app.core.services.service_army import ArmyValidationError
 
     army = make_army()
     unit = make_unit()

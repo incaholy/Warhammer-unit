@@ -95,7 +95,7 @@ def test_removing_inventory_entry_leaves_armies_untouched(session, make_user, ma
 
 
 def test_add_unit_below_one_raises(session, make_user, make_unit):
-    from app.core.services.errors import InventoryValidationError
+    from app.core.services.service_inventory import InventoryValidationError
 
     user = make_user()
     unit = make_unit()

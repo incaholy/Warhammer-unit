@@ -8,9 +8,8 @@ from app.core.db.models import Ability, Weapon
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
-    UnitValidationError,
 )
-from app.core.services.service_unit import UnitService
+from app.core.services.service_unit import UnitService, UnitValidationError
 
 
 def _svc_weapon(svc, name="Bolt rifle"):

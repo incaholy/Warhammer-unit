@@ -13,7 +13,20 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
-from app.core.services.errors import ArmyValidationError, NotFoundError
+from app.core.errors import ErrorCode
+from app.core.services.errors import NotFoundError
+
+
+class ArmyValidationError(ValueError):
+    """Bad army/roster input."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
 
 
 @dataclass

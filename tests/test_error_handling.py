@@ -36,7 +36,7 @@ def test_unexpected_error_returns_generic_500(safe_client, monkeypatch):
     resp = safe_client.get(f"/units/{uuid.uuid4()}")
 
     assert resp.status_code == 500
-    assert resp.json() == {"detail": "internal server error"}
+    assert resp.json() == {"detail": "internal server error", "code": "INTERNAL"}
     assert secret not in resp.text  # the raw exception message must not leak
 
 
@@ -53,5 +53,5 @@ def test_integrity_error_maps_to_generic_409(safe_client, monkeypatch):
     resp = safe_client.get(f"/units/{uuid.uuid4()}")
 
     assert resp.status_code == 409
-    assert resp.json() == {"detail": "conflict with an existing resource"}
+    assert resp.json() == {"detail": "conflict with an existing resource", "code": "CONFLICT"}
     assert "UNIQUE constraint" not in resp.text  # DB internals must not leak

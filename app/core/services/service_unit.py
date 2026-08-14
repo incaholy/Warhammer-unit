@@ -22,11 +22,23 @@ from app.core.db.models import (
     UserUnit,
     Weapon,
 )
+from app.core.errors import ErrorCode
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
-    UnitValidationError,
 )
+
+
+class UnitValidationError(ValueError):
+    """Bad catalog input (units, factions, subfactions, weapons)."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
 
 
 class UnitService:

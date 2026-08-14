@@ -63,7 +63,7 @@ def test_seed_is_idempotent(session):
 def test_seed_rejects_non_canonical_faction(session):
     import pytest
 
-    from app.core.services.errors import UnitValidationError
+    from app.core.services.service_unit import UnitValidationError
 
     with pytest.raises(UnitValidationError):
         seed(session, {"factions": [{"name": "Nekrons", "subfactions": []}]})

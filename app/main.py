@@ -19,11 +19,16 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.army import router as army_router
 from app.api.auth import router as auth_router
+from app.api.errors import CODE_STATUS
 from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
-from app.core.services.errors import ServiceError
+from app.core.errors import ErrorCode
+from app.core.services.errors import ConflictError, NotFoundError
+from app.core.services.service_army import ArmyValidationError
+from app.core.services.service_inventory import InventoryValidationError
+from app.core.services.service_unit import UnitValidationError
 
 app = FastAPI(title="Warhammer Unit Backend")
 
@@ -46,15 +51,29 @@ if _origins:
 # --- service exception -> HTTP mapping (keeps routers thin) ---
 
 
-@app.exception_handler(ServiceError)
-def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
-    # Typed service errors carry their own status + optional field. Chosen over
-    # the builtin handlers below because ServiceError precedes LookupError /
-    # ValueError in each subclass's MRO.
-    body = {"detail": exc.message}
+def _service_error(request: Request, exc: Exception) -> JSONResponse:
+    # Each service error carries a semantic `code` / `message` / optional `field`;
+    # the API layer maps code -> HTTP status (app/api/errors.py). Registered per
+    # concrete class below (there is no shared base) — never a blanket
+    # ValueError/LookupError handler, which would catch library exceptions and
+    # leak their messages.
+    body = {"detail": exc.message, "code": exc.code}
     if exc.field is not None:
         body["field"] = exc.field
-    return JSONResponse(status_code=exc.status_code, content=body)
+    return JSONResponse(status_code=CODE_STATUS[exc.code], content=body)
+
+
+# One handler, registered per concrete class (no shared base to catch through).
+# Add a service's *ValidationError here so it maps to 400 instead of a generic 500.
+_SERVICE_ERRORS = (
+    NotFoundError,
+    ConflictError,
+    UnitValidationError,
+    ArmyValidationError,
+    InventoryValidationError,
+)
+for _service_exc in _SERVICE_ERRORS:
+    app.add_exception_handler(_service_exc, _service_error)
 
 
 # Backstop for DB-constraint violations that slip past the service-layer guards
@@ -63,7 +82,10 @@ def _service_error(request: Request, exc: ServiceError) -> JSONResponse:
 @app.exception_handler(IntegrityError)
 def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
     logger.warning("integrity error on %s %s", request.method, request.url.path, exc_info=exc)
-    return JSONResponse(status_code=409, content={"detail": "conflict with an existing resource"})
+    return JSONResponse(
+        status_code=CODE_STATUS[ErrorCode.CONFLICT],
+        content={"detail": "conflict with an existing resource", "code": ErrorCode.CONFLICT},
+    )
 
 
 # Catch-all for anything not handled above — an unexpected server fault. Log the
@@ -75,7 +97,10 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
 @app.exception_handler(Exception)
 def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "internal server error"})
+    return JSONResponse(
+        status_code=CODE_STATUS[ErrorCode.INTERNAL],
+        content={"detail": "internal server error", "code": ErrorCode.INTERNAL},
+    )
 
 
 @app.get("/health")

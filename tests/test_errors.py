@@ -4,31 +4,29 @@ import uuid
 
 import pytest
 
+from app.core.errors import ErrorCode
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
-    UnitValidationError,
-    ValidationError,
 )
-from app.core.services.service_unit import UnitService
+from app.core.services.service_unit import UnitService, UnitValidationError
 
 
-def test_backward_compatible_subclassing():
-    # NotFoundError still reads as a LookupError, and the *ValidationError /
-    # ConflictError family still read as ValueError. The HTTP mapping now runs
-    # entirely through the ServiceError handler (no bare-builtin fallbacks), but
-    # the subclassing is kept so service-level tests can `pytest.raises(ValueError
-    # / LookupError)` and so ServiceError still precedes them in the MRO.
+def test_builtin_inheritance():
+    # There is no shared base: each error inherits the builtin it maps to, so
+    # service-level tests can `pytest.raises(ValueError / LookupError)`. The API
+    # layer registers a handler per concrete class (app/main.py) rather than
+    # catching a shared base or the builtins (which would swallow library errors).
     assert issubclass(NotFoundError, LookupError)
     assert issubclass(ConflictError, ValueError)
-    assert issubclass(ValidationError, ValueError)
+    assert issubclass(UnitValidationError, ValueError)
 
 
-def test_validation_error_carries_field_and_status():
+def test_validation_error_carries_field_and_code():
     err = UnitValidationError("category", "must be 'range' or 'melee'")
     assert err.field == "category"
     assert str(err) == "category: must be 'range' or 'melee'"
-    assert err.status_code == 400
+    assert err.code == ErrorCode.VALIDATION
 
 
 def test_service_raises_notfound(session):
