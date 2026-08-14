@@ -446,28 +446,33 @@ Read schemas nest the hierarchy:
   unit: Unit_Read?}]}` — the `validate` report.
 
 Error mapping at the API layer (see "Custom service errors" for the typed
-hierarchy). Only messages the service author wrote (the typed `ServiceError`s)
-reach the client; any *unexpected* exception is logged server-side and returned
-as a generic body with no internals — never `str(exc)` of an arbitrary builtin:
+hierarchy). Service errors come back in one shape — `{"detail", "code",
+"field"?}` — where `code` is a stable `ErrorCode`. Only messages the service
+author wrote reach the client; any *unexpected* exception is logged server-side
+and returned as a generic body with no internals — never `str(exc)` of an
+arbitrary builtin:
 
-| Service exception | HTTP status |
-|---|---|
-| `NotFoundError` (⊂ `LookupError`) | 404 |
-| `ConflictError` (⊂ `ValueError`) — duplicate | 409 |
-| `*ValidationError` (⊂ `ValueError`) — carries `field` | 400 |
-| Pydantic validation failure | 422 (FastAPI automatic) |
-| `IntegrityError` (DB-constraint backstop) | 409 — logged, generic body |
-| any other unhandled exception | 500 — logged with traceback, generic body |
+| Source exception | `code` | HTTP status |
+|---|---|---|
+| `NotFoundError` (⊂ `LookupError`) | `NOT_FOUND` | 404 |
+| `ConflictError` (⊂ `ValueError`) — duplicate | `CONFLICT` | 409 |
+| `*ValidationError` (⊂ `ValueError`) — carries `field` | `VALIDATION` | 400 |
+| `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
+| any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
+| Pydantic request validation | *(none yet)* | 422 — FastAPI default array, not yet normalized (R2) |
+| auth failure (`HTTPException`) | *(none yet)* | 401/403 — `{"detail"}`, not yet normalized (R2) |
 
-There are deliberately **no** catch-all `ValueError`/`TypeError`/`LookupError`
-handlers: those builtins are raised throughout the stdlib and third-party libs,
-so returning their raw message would leak internals, and a `TypeError` (almost
-always a bug) would be mislabelled a client `400` instead of a server `500`.
+Handlers are registered **per concrete service-error class** (there is no shared
+base to catch through), and there are deliberately **no** catch-all
+`ValueError`/`TypeError`/`LookupError` handlers: those builtins are raised
+throughout the stdlib and third-party libs, so returning their raw message would
+leak internals, and a `TypeError` (almost always a bug) would be mislabelled a
+client `400` instead of a server `500`.
 
 ### App entry point (`app/main.py`)
 
 `app/main.py` builds the `FastAPI()` instance, mounts every router
-(`app.include_router(...)`), registers the `ServiceError` → HTTP handler, an
+(`app.include_router(...)`), registers a handler per service-error class, an
 `IntegrityError` → 409 backstop, and a catch-all handler that logs unexpected
 exceptions and returns a generic 500, and exposes a `GET /health` liveness
 check. Run locally with `uvicorn app.main:app --reload` (or `make run`).
@@ -512,7 +517,7 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 - **Fix `delete_unit` (bug)** *(S)* — guard against `ArmyUnit`/`UserUnit`
   references → `ConflictError`. Today deleting an in-use unit 500s. No route change
-  (409 flows through the `ServiceError` handler).
+  (409 flows through the `ConflictError` handler).
 - **Unlink weapon/ability** *(S)* — `unlink_weapon(unit_id, weapon_id)` /
   `unlink_ability(unit_id, ability_id)` on `UnitService` (idempotent), exposed as
   `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
@@ -532,79 +537,103 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 ## Custom service errors
 
-**Implemented.** Services raise a typed hierarchy from
-`app/core/services/errors.py` instead of bare builtins, so errors carry the
-offending **field** and a **duplicate** gets its own **409** (rather than being
-lumped into 400). It is **backward-compatible**: each custom error subclasses the
-builtin it replaces (`NotFoundError(LookupError)`; the `ValueError` family), and a
-single `ServiceError` handler in `app/main.py` maps them by their `status_code` —
-chosen over the builtin `LookupError`/`ValueError` handlers because `ServiceError`
-precedes those in each subclass's MRO. The builtin handlers stay as fallbacks.
-Mirrors `attention-api`.
+**Implemented.** Services raise typed exceptions instead of bare builtins, so
+errors carry the offending **field**, a **duplicate** gets its own **409**, and
+every service error comes back in one shape — `{"detail", "code", "field"?}` —
+with a stable, machine-readable **`code`** the frontend branches on (instead of
+parsing status or message text).
 
-Two families.
+**There is no shared base class.** Each error **inherits the builtin it maps to**
+and **carries its own** `code` (`ErrorCode`), `message`, and optional `field`.
+Keeping them subclasses of the builtins (`LookupError`/`ValueError`) lets
+service-level tests `pytest.raises(LookupError / ValueError)`.
 
-**Shared errors** — cross-cutting, carry `message`, an optional `field`, and a
-`status_code`:
+**Cross-cutting errors** live in `app/core/services/errors.py`:
 
-- `NotFoundError(LookupError)` — a row doesn't exist. **→ 404** (already, via the
-  existing `LookupError` handler, since it subclasses it).
-- `ConflictError(ValueError)` — a uniqueness clash: duplicate `username`/`email`,
-  duplicate faction name, duplicate subfaction-for-faction. Wants **→ 409**; needs
-  its own handler to get 409, else falls back to 400 (it's a `ValueError`).
+- `NotFoundError(LookupError)` — a row doesn't exist. `code = NOT_FOUND` → **404**.
+- `ConflictError(ValueError)` — a uniqueness clash (duplicate `username`/`email`,
+  duplicate faction name, duplicate subfaction-for-faction). `code = CONFLICT` →
+  **409**.
 
 (Ownership on `/me/armies/{id}` intentionally stays a **404** through
 `get_owned_army` to hide existence rather than a 403, so there's no
 `ForbiddenError` in the hierarchy today — add one if a case ever needs to reveal
 "exists but not yours.")
 
-**Per-service validation errors** — one `ValueError` subclass per service,
-constructed as `(field, message)`, rendering `"{field}: {message}"` and exposing
-`.field`. They map to **400** (bad request), and their handler adds the offending
-`field` to the response body. We keep them at **400**, not 422: 422 is reserved
-for FastAPI's *request-shape* validation (a malformed body), whereas these are
-semantically-invalid-but-well-formed requests (a business rule failed).
+**Per-service validation errors** — each service defines its own
+`*ValidationError(ValueError)` **in its own module** (not in `errors.py`), each
+carrying `code = VALIDATION` and constructed as `(field, message)` (rendering
+`"{field}: {message}"`, exposing `.field`). They map to **400**:
 
-- `UserValidationError` — registration/account rules (empty/oversized fields).
-- `UnitValidationError` — catalog input across `UnitService` (unknown updatable
-  field; `category` not `range`/`melee`; a faction name outside `FactionName`; a
-  subfaction not allowed under its faction).
-- `ArmyValidationError` — roster input (`amount < 1` on set, `points_limit < 0`).
-- `InventoryValidationError` — inventory input (`amount < 1` on set).
+- `UnitValidationError` (`service_unit.py`) — catalog input across `UnitService`
+  (unknown updatable field; `category` not `range`/`melee`; a faction name outside
+  `FactionName`; a subfaction not allowed under its faction).
+- `ArmyValidationError` (`service_army.py`) — roster input (`amount < 1` on set,
+  `points_limit < 0`).
+- `InventoryValidationError` (`service_inventory.py`) — inventory input
+  (`amount < 1` on set).
+
+(No `UserValidationError`: `UserService` does no field-validation — registration
+input is validated at the Pydantic boundary (`Register_Create`) and surfaces as a
+422. Add one to `service_user.py` if a user business rule ever needs it.)
+
+Validation stays **400**, not 422: 422 is reserved for FastAPI's *request-shape*
+validation (a malformed body); these are well-formed requests that fail a business
+rule.
+
+### The `code` vocabulary and its HTTP mapping
+
+- **`ErrorCode`** (`app/core/errors.py`) — a `StrEnum` of stable codes
+  (`NOT_FOUND`, `CONFLICT`, `VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL`).
+  It lives *below* both the service and API layers so each can reference it
+  without importing the other. The `code` is a *semantic* label, independent of
+  HTTP.
+- **`CODE_STATUS`** (`app/api/errors.py`) — the single `code → HTTP status` map.
+  Deriving the status from the code here (rather than storing it on the error)
+  makes it impossible for the two to disagree.
+
+This split keeps the service layer HTTP-agnostic: a service raises
+`NotFoundError`; the API layer alone decides "that's `NOT_FOUND`, HTTP 404."
+
+### API-layer handlers (`app/main.py`)
+
+Because there is **no shared base to catch through**, one handler function is
+registered **per concrete error class** via a `_SERVICE_ERRORS` tuple
+(`NotFoundError`, `ConflictError`, and each `*ValidationError`). It builds the
+body `{"detail": message, "code": code, "field"?: field}` and sets the status
+from `CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
+`{data, meta}` envelope** (intentionally deferred; see roadmap R9).
+
+> **Adding a new service `*ValidationError`?** Register it in `_SERVICE_ERRORS`
+> in `app/main.py`, or it falls through to the generic 500 handler.
+
+Registration is deliberately **per concrete class, never a blanket
+`ValueError`/`LookupError` handler**: those builtins are raised throughout the
+stdlib and third-party libs, so catching them would swallow library exceptions and
+leak their messages, and a `TypeError` (almost always a bug) would be mislabelled
+a client 400 instead of a server 500. Anything unmatched falls to the catch-all
+`Exception` handler → generic **500** (`code = INTERNAL`, logged with traceback);
+an `IntegrityError` backstop returns a generic **409** (`code = CONFLICT`).
 
 **Naming principle — name an error by how it's *handled*, not where it's raised.**
-`attention-api` mixes both styles on purpose, and so do we:
 
 - **Generic** for cross-cutting failures nothing branches on: a `NotFoundError`
   is a not-found regardless of resource (its `message` names the row). Minting
   `UnitNotFoundError`/`ArmyNotFoundError` that all become an identical 404 is
   class-proliferation for no gain.
-- **Resource-named** for validation, grouped per service (`UnitValidationError`,
-  …) — this is attention's `MessageValidationError` shape, and the `.field`
-  carries the specifics.
-- **Rule-named** (like attention's `ChallengeAlreadyExistsError`) *only* when a
-  failure needs its own status, its own handler, or the frontend must react
-  differently. Here every duplicate starts as a generic `ConflictError` (→ 409);
-  split out `DuplicateFactionError(ConflictError)` *later* only if the UI must
-  tell one duplicate from another. Add specificity when the handling diverges,
-  not before.
+- **Resource-named** for validation, one per service (`UnitValidationError`, …) —
+  the `.field` carries the specifics.
+- **Rule-named** *only* when a failure needs its own code/status or the frontend
+  must react differently. Every duplicate starts as a generic `ConflictError`
+  (→ 409); split out `DuplicateFactionError` *later* only if the UI must tell one
+  duplicate from another. Add specificity when the handling diverges, not before.
 
-**API layer.** A single `@app.exception_handler(ServiceError)` in `app/main.py`
-builds the response from `exc.status_code` and `exc.field`: the body is
-`{"detail": message, "field": field?}` — close to FastAPI's default, i.e. **no
-`{data, meta}` envelope** (that was intentionally deferred). It's picked over the
-builtin `LookupError`/`ValueError` handlers because Starlette matches handlers by
-walking the exception's MRO, where `ServiceError` sits ahead of them. Those
-builtin handlers remain as fallbacks for any un-migrated raise.
-
-**Status codes.** `NotFoundError` → 404, `ConflictError` → 409, and the
-`*ValidationError` family → 400 (with `field`). Validation stays 400, not 422: 422
-is reserved for FastAPI's request-shape validation (a malformed body), whereas
-these are well-formed requests that fail a business rule.
-
-**Done.** All four services now raise the typed errors; `errors.py` +
-the handler are in place, and the test suite covers the 404/409/400 mapping and
-the `field` payload.
+**Not yet normalized (roadmap R2).** Two error sources still use FastAPI's
+defaults and don't yet carry a `code`: **request validation**
+(`RequestValidationError` → 422, still a raw error *array*) and **auth**
+(`HTTPException` from `get_current_user`/`get_current_admin` → 401/403,
+`{"detail": …}` with no code). Reshaping these two into the `{detail, code,
+field?}` shape is the remaining R2 work.
 
 ## Populating the catalog
 
@@ -980,11 +1009,12 @@ Cross-cutting concerns:
     `docker-entrypoint.sh` (migrate-then-serve), `docker-compose.yml`
     (API + Postgres, healthcheck) + a `docker-compose.test.yml` overlay, and
     `make docker-*` targets — see "Deployment & containerization."
-12. ✓ Custom service errors: a typed exception hierarchy in
-    `app/core/services/errors.py` (`NotFoundError`, `ConflictError`, and
-    per-service `*ValidationError`) replacing the builtin `LookupError`/`ValueError`
-    across all services; a single `ServiceError` handler maps them (409 for
-    duplicates, `field` on validation) — see "Custom service errors."
+12. ✓ Custom service errors: typed exceptions carrying a `code` — `NotFoundError`
+    / `ConflictError` in `app/core/services/errors.py` and a per-service
+    `*ValidationError` in each service module — each inheriting the builtin
+    (`LookupError`/`ValueError`) it maps to; one handler registered per concrete
+    class maps them (409 for duplicates, `field` on validation) — see "Custom
+    service errors."
 
 ### Remaining work — ordered by ease of implementation
 

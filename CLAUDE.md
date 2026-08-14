@@ -25,12 +25,16 @@ pytest                               # run tests (once tests/ exists)
 
 - Layering is strict: API → service → DB. Routers never touch the session;
   services never raise `HTTPException`.
-- Services raise the typed errors from `app/core/services/errors.py`:
-  `NotFoundError` (→404), `ConflictError` for duplicates (→409), and a per-service
-  `*ValidationError(field, msg)` for bad input (→400, with the `field`). Each
-  subclasses the builtin it replaces (`LookupError`/`ValueError`), which the
-  `ServiceError` handler in `app/main.py` maps. Never raise `HTTPException` in a
-  service.
+- Services raise typed errors. The cross-cutting ones live in
+  `app/core/services/errors.py` — `NotFoundError` (→404) and `ConflictError` for
+  duplicates (→409). Each service defines its own `*ValidationError(ValueError)`
+  in its own module (→400, with a `field`; e.g. `UnitValidationError` in
+  `service_unit.py`). There is no shared base: every error inherits the builtin it
+  maps to (`LookupError`/`ValueError`) and carries its own `code` (`ErrorCode`,
+  from `app/core/errors.py`), `message`, and `field`. `app/main.py` registers a
+  handler per concrete error class — **add a new service `*ValidationError` to the
+  `_SERVICE_ERRORS` tuple there** or it falls through to a generic 500. Never
+  raise `HTTPException` in a service.
 - Schema changes go through `models.py` + an Alembic migration, never raw SQL.
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `save`, `wounds`, `leadership`,
