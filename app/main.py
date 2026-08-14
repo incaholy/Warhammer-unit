@@ -13,6 +13,7 @@ import logging
 import os
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -79,6 +80,22 @@ _SERVICE_ERRORS = (
 )
 for _service_exc in _SERVICE_ERRORS:
     app.add_exception_handler(_service_exc, _service_error)
+
+
+# Reshape FastAPI's default 422 (a raw error *array*) into the one error shape.
+# A distinct REQUEST_VALIDATION code (-> 422) keeps a malformed request
+# distinguishable from a business-rule VALIDATION (-> 400), and code->status holds.
+@app.exception_handler(RequestValidationError)
+def _request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = exc.errors()
+    first = errors[0] if errors else {}
+    # loc is like ("body", "email") or ("path", "unit_id"); drop the location
+    # prefix to get the field name (dotted for a nested body field).
+    field = ".".join(str(p) for p in first.get("loc", ())[1:]) or None
+    body = {"detail": first.get("msg", "invalid request"), "code": ErrorCode.REQUEST_VALIDATION}
+    if field:
+        body["field"] = field
+    return JSONResponse(status_code=CODE_STATUS[ErrorCode.REQUEST_VALIDATION], content=body)
 
 
 # Backstop for DB-constraint violations that slip past the service-layer guards

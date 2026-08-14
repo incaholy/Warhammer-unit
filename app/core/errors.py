@@ -13,7 +13,8 @@ from enum import StrEnum
 class ErrorCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     CONFLICT = "CONFLICT"
-    VALIDATION = "VALIDATION"
+    VALIDATION = "VALIDATION"  # a business rule failed (well-formed request) -> 400
+    REQUEST_VALIDATION = "REQUEST_VALIDATION"  # malformed request (Pydantic) -> 422
     UNAUTHORIZED = "UNAUTHORIZED"
     FORBIDDEN = "FORBIDDEN"
     INTERNAL = "INTERNAL"

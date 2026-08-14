@@ -13,6 +13,7 @@ CODE_STATUS: dict[ErrorCode, int] = {
     ErrorCode.NOT_FOUND: 404,
     ErrorCode.CONFLICT: 409,
     ErrorCode.VALIDATION: 400,
+    ErrorCode.REQUEST_VALIDATION: 422,
     ErrorCode.UNAUTHORIZED: 401,
     ErrorCode.FORBIDDEN: 403,
     ErrorCode.INTERNAL: 500,

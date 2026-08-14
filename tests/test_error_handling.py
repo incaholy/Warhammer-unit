@@ -55,3 +55,16 @@ def test_integrity_error_maps_to_generic_409(safe_client, monkeypatch):
     assert resp.status_code == 409
     assert resp.json() == {"detail": "conflict with an existing resource", "code": "CONFLICT"}
     assert "UNIQUE constraint" not in resp.text  # DB internals must not leak
+
+
+def test_request_validation_reshaped_to_one_shape(safe_client):
+    # A malformed path param triggers FastAPI's RequestValidationError. It must
+    # come back as our one error shape (a *string* detail + code + field), not the
+    # default error *array* that stringifies to "[object Object]" on the client.
+    resp = safe_client.get("/units/not-a-uuid")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert isinstance(body["detail"], str)  # not a list — the R2 bug
+    assert body["code"] == "REQUEST_VALIDATION"
+    assert body["field"] == "unit_id"
