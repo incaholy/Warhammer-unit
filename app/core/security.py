@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -20,6 +20,7 @@ from sqlmodel import Session
 
 from app.core.db.connection import get_session
 from app.core.db.models import User
+from app.core.errors import ErrorCode
 
 load_dotenv()
 
@@ -45,7 +46,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "2880"))
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 
 # ------------------------------ passwords ------------------------------
@@ -79,34 +80,56 @@ def decode_token(token: str) -> str:
     return subject
 
 
+# ------------------------------ auth errors ----------------------------
+# Coded like the service errors: they carry a `code` (+ message, and `field=None`
+# for the shared handler), so the API layer maps them by `code` — no HTTPException,
+# no status->code reverse lookup. Registered in `app/main.py`'s `_SERVICE_ERRORS`.
+
+
+class UnauthorizedError(Exception):
+    """Missing or invalid credentials. → 401 (the handler adds `WWW-Authenticate`)."""
+
+    code = ErrorCode.UNAUTHORIZED
+    field = None
+
+    def __init__(self, message: str = "could not validate credentials"):
+        super().__init__(message)
+        self.message = message
+
+
+class ForbiddenError(Exception):
+    """Authenticated but not permitted. → 403."""
+
+    code = ErrorCode.FORBIDDEN
+    field = None
+
+    def __init__(self, message: str = "admin only"):
+        super().__init__(message)
+        self.message = message
+
+
 # ---------------------------- dependencies -----------------------------
 
 
-def _unauthorized() -> HTTPException:
-    # Built fresh per raise (not a shared module-level instance): each raise gets
-    # its own traceback, with no cross-request mutable state on one global object.
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: str | None = Depends(oauth2_scheme),
     session: Session = Depends(get_session),
 ) -> User:
+    # oauth2_scheme has auto_error=False, so a missing header arrives here as None
+    # (rather than FastAPI's own uncoded 401) — we raise our coded error instead.
+    if token is None:
+        raise UnauthorizedError()
     try:
         user_id = UUID(decode_token(token))
     except ValueError:
-        raise _unauthorized()
+        raise UnauthorizedError() from None
     user = session.get(User, user_id)
     if user is None:
-        raise _unauthorized()
+        raise UnauthorizedError()
     return user
 
 
 def get_current_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+        raise ForbiddenError()
     return user

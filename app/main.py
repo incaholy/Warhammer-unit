@@ -25,6 +25,7 @@ from app.api.inventory import router as inventory_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
 from app.core.errors import ErrorCode
+from app.core.security import ForbiddenError, UnauthorizedError
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_army import ArmyValidationError
 from app.core.services.service_inventory import InventoryValidationError
@@ -60,14 +61,18 @@ def _service_error(request: Request, exc: Exception) -> JSONResponse:
     body = {"detail": exc.message, "code": exc.code}
     if exc.field is not None:
         body["field"] = exc.field
-    return JSONResponse(status_code=CODE_STATUS[exc.code], content=body)
+    # 401s carry the auth challenge header, per the OAuth2 bearer convention.
+    headers = {"WWW-Authenticate": "Bearer"} if exc.code == ErrorCode.UNAUTHORIZED else None
+    return JSONResponse(status_code=CODE_STATUS[exc.code], content=body, headers=headers)
 
 
 # One handler, registered per concrete class (no shared base to catch through).
-# Add a service's *ValidationError here so it maps to 400 instead of a generic 500.
+# Add a new coded error here so it maps to its status instead of a generic 500.
 _SERVICE_ERRORS = (
     NotFoundError,
     ConflictError,
+    UnauthorizedError,
+    ForbiddenError,
     UnitValidationError,
     ArmyValidationError,
     InventoryValidationError,
