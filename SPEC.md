@@ -459,9 +459,9 @@ arbitrary builtin:
 | `*ValidationError` (⊂ `ValueError`) — carries `field` | `VALIDATION` | 400 |
 | `UnauthorizedError` (auth) — adds `WWW-Authenticate` | `UNAUTHORIZED` | 401 |
 | `ForbiddenError` (auth) | `FORBIDDEN` | 403 |
+| `RequestValidationError` (Pydantic) — carries `field` | `REQUEST_VALIDATION` | 422 |
 | `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
 | any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
-| Pydantic request validation | *(none yet)* | 422 — FastAPI default array, not yet normalized (R2) |
 
 Handlers are registered **per concrete service-error class** (there is no shared
 base to catch through), and there are deliberately **no** catch-all
@@ -637,9 +637,13 @@ bare `HTTPException`. The bearer scheme uses `auto_error=False` so a missing tok
 reaches us as `None` and we raise the coded error rather than FastAPI's uncoded
 401. They register in `_SERVICE_ERRORS` alongside the service errors.
 
-**Still not normalized (roadmap R2).** One source remains: **request validation**
-(`RequestValidationError` → 422, still FastAPI's raw error *array*). Reshaping it
-into the `{detail, code, field?}` shape is the last R2 backend piece.
+**Request validation is reshaped too.** A `RequestValidationError` handler in
+`app/main.py` turns FastAPI's default 422 *array* into the one shape, using a
+distinct `REQUEST_VALIDATION` code (→ 422) so a malformed request stays
+distinguishable from a business-rule `VALIDATION` (→ 400). The `field` comes from
+the first error's `loc` (with the `body`/`path` prefix dropped). With this,
+**every backend error source returns `{detail, code, field?}`** — the remaining
+R2 work is on the frontend (branch on `code`, validate the body with `zod`).
 
 ## Populating the catalog
 
