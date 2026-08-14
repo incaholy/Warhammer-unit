@@ -457,10 +457,11 @@ arbitrary builtin:
 | `NotFoundError` (⊂ `LookupError`) | `NOT_FOUND` | 404 |
 | `ConflictError` (⊂ `ValueError`) — duplicate | `CONFLICT` | 409 |
 | `*ValidationError` (⊂ `ValueError`) — carries `field` | `VALIDATION` | 400 |
+| `UnauthorizedError` (auth) — adds `WWW-Authenticate` | `UNAUTHORIZED` | 401 |
+| `ForbiddenError` (auth) | `FORBIDDEN` | 403 |
 | `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
 | any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
 | Pydantic request validation | *(none yet)* | 422 — FastAPI default array, not yet normalized (R2) |
-| auth failure (`HTTPException`) | *(none yet)* | 401/403 — `{"detail"}`, not yet normalized (R2) |
 
 Handlers are registered **per concrete service-error class** (there is no shared
 base to catch through), and there are deliberately **no** catch-all
@@ -628,12 +629,17 @@ an `IntegrityError` backstop returns a generic **409** (`code = CONFLICT`).
   (→ 409); split out `DuplicateFactionError` *later* only if the UI must tell one
   duplicate from another. Add specificity when the handling diverges, not before.
 
-**Not yet normalized (roadmap R2).** Two error sources still use FastAPI's
-defaults and don't yet carry a `code`: **request validation**
-(`RequestValidationError` → 422, still a raw error *array*) and **auth**
-(`HTTPException` from `get_current_user`/`get_current_admin` → 401/403,
-`{"detail": …}` with no code). Reshaping these two into the `{detail, code,
-field?}` shape is the remaining R2 work.
+**Auth errors are coded too.** `app/core/security.py` defines
+`UnauthorizedError` (`code = UNAUTHORIZED` → 401, and the handler adds a
+`WWW-Authenticate: Bearer` header) and `ForbiddenError` (`code = FORBIDDEN` →
+403), raised by `get_current_user` / `get_current_admin` (and login) instead of a
+bare `HTTPException`. The bearer scheme uses `auto_error=False` so a missing token
+reaches us as `None` and we raise the coded error rather than FastAPI's uncoded
+401. They register in `_SERVICE_ERRORS` alongside the service errors.
+
+**Still not normalized (roadmap R2).** One source remains: **request validation**
+(`RequestValidationError` → 422, still FastAPI's raw error *array*). Reshaping it
+into the `{detail, code, field?}` shape is the last R2 backend piece.
 
 ## Populating the catalog
 
