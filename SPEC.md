@@ -213,8 +213,10 @@ replaced. Both the app and Alembic (`alembic/env.py`) read the same
 Getting a session depends on the caller:
 
 - **Requests** use `get_session()` as a FastAPI dependency
-  (`Depends(get_session)`) — it yields a `Session` and closes it after the
-  request.
+  (`Depends(get_session)`) — it yields a `Session` and is the request's
+  **transaction boundary**: it commits on success, rolls back on error, and
+  closes either way. Services `flush()` but never `commit()`, so a multi-step
+  route is one unit of work that can't leave a partial write behind.
 - **Scripts / seed code** use `Session(get_engine())` directly.
 - **Tests** build their own in-memory SQLite engine and inject the session, so
   they never call `get_session()` and never need `DATABASE_URL`.
@@ -324,7 +326,13 @@ Service conventions:
 - Bad input raises `ValueError` via the typed `*ValidationError`, with a
   descriptive message. Don't raise a bare `TypeError` for bad input — the API
   layer treats an unexpected `TypeError` as a bug (→ 500), not a client error.
-- Every write method ends with `commit()` + `refresh()` and returns the model.
+- A write method ends with `flush()` + `refresh()` and returns the model — it
+  **flushes, never commits**; `get_session` owns the commit (the request
+  boundary). `flush()` still assigns keys and surfaces constraint errors during
+  the request; `refresh()` reloads the row it returns. (The `refresh()`es are
+  retained for correctness even though most are now redundant — no `updated_at`
+  is serialized and identifiers/timestamps are Python-set; trimming them cleanly
+  needs a per-method relationship check, so it's a deferred micro-optimization.)
 - Services should take a `session` argument (`ArmyService(session)`)
   rather than calling `get_session()` in `__init__`, so a multi-table operation
   (check army, check unit, write the join) shares one transaction — and so
