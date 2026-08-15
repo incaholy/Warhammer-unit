@@ -68,6 +68,15 @@ Add a `concurrency` group to both, and commit a frontend `.env.example`.
 
 **Satisfies:** §2.2. **This is the highest-value item on the list.**
 
+**Status: ✅ Done (2026-08).** Backend — every error source returns
+`{detail, code, field?}` with a stable `ErrorCode` (service, auth,
+request-validation, integrity, and unhandled), status derived from code via a
+single `CODE_STATUS` map. Frontend — the API client validates the error body with
+zod (the `as` cast is gone) and carries `code`; `ArmyView` branches on it instead
+of collapsing to "not found"; a shared `messageForError` helper centralizes
+user-facing messages. Out of scope (larger follow-up): validating *success*
+response bodies (`as T`) with per-endpoint schemas — R2 was the error shape only.
+
 **What is missing.** The API emits two mutually incompatible error shapes. Probed against the running
 app:
 
