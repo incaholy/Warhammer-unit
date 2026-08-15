@@ -1,8 +1,11 @@
-"""The `get_session` FastAPI dependency: rolls back on error, closes always.
+"""The `get_session` FastAPI dependency: commits on success, rolls back on error,
+closes always — it is the request's transaction boundary.
 
 `get_session` is a generator dependency, so we drive it by hand — `next()` to
-enter (get the session at the `yield`), then `gen.throw(...)` to simulate the
-request handler raising. The uncommitted row must not survive.
+enter (get the session at the `yield`), then either drive it to completion (which
+commits) or `gen.throw(...)` to simulate the request handler raising (which rolls
+back). Uncommitted work must not survive an error; flushed work must persist on
+success.
 """
 
 import pytest
@@ -45,4 +48,22 @@ def test_get_session_keeps_committed_work(engine, monkeypatch):
 
     with Session(engine) as check:
         found = check.exec(select(Faction).where(Faction.name == "Committed")).first()
+    assert found is not None
+
+
+def test_get_session_commits_flushed_work_on_success(engine, monkeypatch):
+    # Driving the generator to completion (no error) commits the flushed work, so
+    # a service that only flushes still persists at the request boundary.
+    monkeypatch.setattr(connection, "get_engine", lambda: engine)
+
+    gen = connection.get_session()
+    session = next(gen)
+    session.add(Faction(name="Flushed then committed"))
+    session.flush()  # a service flushes, never commits
+
+    with pytest.raises(StopIteration):
+        next(gen)  # completing the generator runs the commit after the yield
+
+    with Session(engine) as check:
+        found = check.exec(select(Faction).where(Faction.name == "Flushed then committed")).first()
     assert found is not None

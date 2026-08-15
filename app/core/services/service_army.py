@@ -94,7 +94,7 @@ class ArmyService:
             points_limit=points_limit,
         )
         self.session.add(army)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(army)
         return army
 
@@ -123,7 +123,7 @@ class ArmyService:
         # their (NOT NULL) army_id. The DB FK also cascades; this is explicit.
         self.session.execute(sa_delete(ArmyUnit).where(ArmyUnit.army_id == army_id))
         self.session.delete(army)
-        self.session.commit()
+        self.session.flush()
 
     def update_army(self, army_id: UUID, **fields) -> Army:
         army = self.get_army(army_id)
@@ -147,7 +147,7 @@ class ArmyService:
         for key, value in fields.items():
             setattr(army, key, value)
         self.session.add(army)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(army)
         return army
 
@@ -167,7 +167,7 @@ class ArmyService:
             self.session.add(entry)
         else:
             entry.amount += amount  # upsert: increment
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry, created
 
@@ -179,7 +179,7 @@ class ArmyService:
             raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         entry.amount = amount
         self.session.add(entry)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry
 
@@ -188,7 +188,7 @@ class ArmyService:
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         self.session.delete(entry)
-        self.session.commit()
+        self.session.flush()
 
     def list_army_units(self, army_id: UUID) -> list[ArmyUnit]:
         return list(self.session.exec(select(ArmyUnit).where(ArmyUnit.army_id == army_id)).all())

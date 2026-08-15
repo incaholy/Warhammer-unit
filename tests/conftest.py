@@ -55,8 +55,20 @@ def session_fixture(engine):
 @pytest.fixture(name="client")
 def client_fixture(session):
     """A TestClient whose routes run against the test `session` (same DB as the
-    factories) by overriding the `get_session` dependency."""
-    app.dependency_overrides[get_session] = lambda: session
+    factories) by overriding the `get_session` dependency. The override mirrors
+    production's boundary — commit on success, roll back on error — so tests
+    exercise the real transaction behavior (services flush; the request commits).
+    It does *not* close the session, which the `session` fixture owns."""
+
+    def _session_override():
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    app.dependency_overrides[get_session] = _session_override
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()

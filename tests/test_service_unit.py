@@ -425,6 +425,10 @@ def test_delete_weapon_cascades_unit_link(session, make_unit):
     svc.link_weapon(unit.id, w.id)
     assert [x.name for x in svc.get_unit(unit.id).weapons] == ["Bolt rifle"]
     svc.delete_weapon(w.id)  # succeeds despite the link (unit_weapons cascades)
+    # The cascade is a DB-level delete; expire so this session reloads it. (In
+    # production the next read is a fresh request/session that sees it anyway —
+    # the service flushes now instead of committing, so it no longer auto-expires.)
+    session.expire_all()
     assert svc.get_unit(unit.id).weapons == []
 
 
@@ -435,4 +439,5 @@ def test_delete_ability_cascades_unit_link(session, make_unit):
     svc.link_ability(unit.id, a.id)
     assert [x.name for x in svc.get_unit(unit.id).abilities] == ["Oath"]
     svc.delete_ability(a.id)  # succeeds despite the link (unit_abilities cascades)
+    session.expire_all()  # DB-level cascade; reload the session to see it (see above)
     assert svc.get_unit(unit.id).abilities == []

@@ -30,7 +30,7 @@ class UserService:
 
         user = User(username=username, email=email, password_hash=password_hash)
         self.session.add(user)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(user)
         return user
 
@@ -55,6 +55,6 @@ class UserService:
                 raise ConflictError("cannot demote the last admin")
         user.is_admin = is_admin
         self.session.add(user)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(user)
         return user

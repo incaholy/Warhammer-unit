@@ -108,7 +108,7 @@ class UnitService:
             keywords=keywords or [],
         )
         self.session.add(unit)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(unit)
         return unit
 
@@ -183,7 +183,7 @@ class UnitService:
         for key, value in fields.items():
             setattr(unit, key, value)
         self.session.add(unit)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(unit)
         return unit
 
@@ -195,7 +195,7 @@ class UnitService:
         if self._unit_is_referenced(unit_id):
             raise ConflictError(f"unit {unit_id} is in use by an army or inventory")
         self.session.delete(unit)
-        self.session.commit()
+        self.session.flush()
 
     def _unit_is_referenced(self, unit_id: UUID) -> bool:
         for model in (ArmyUnit, UserUnit):
@@ -230,7 +230,7 @@ class UnitService:
             keywords=keywords or [],
         )
         self.session.add(weapon)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(weapon)
         return weapon
 
@@ -249,7 +249,7 @@ class UnitService:
         for key, value in fields.items():
             setattr(weapon, key, value)
         self.session.add(weapon)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(weapon)
         return weapon
 
@@ -259,12 +259,12 @@ class UnitService:
             raise NotFoundError(f"weapon {weapon_id} not found")
         # unit_weapons links cascade, so no reference guard is needed.
         self.session.delete(weapon)
-        self.session.commit()
+        self.session.flush()
 
     def create_ability(self, name: str, description: str) -> Ability:
         ability = Ability(name=name, description=description)
         self.session.add(ability)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(ability)
         return ability
 
@@ -281,7 +281,7 @@ class UnitService:
         for key, value in fields.items():
             setattr(ability, key, value)
         self.session.add(ability)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(ability)
         return ability
 
@@ -291,7 +291,7 @@ class UnitService:
             raise NotFoundError(f"ability {ability_id} not found")
         # unit_abilities links cascade, so no reference guard is needed.
         self.session.delete(ability)
-        self.session.commit()
+        self.session.flush()
 
     def link_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
         unit = self.get_unit(unit_id)
@@ -301,7 +301,7 @@ class UnitService:
         if weapon not in unit.weapons:
             unit.weapons.append(weapon)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -313,7 +313,7 @@ class UnitService:
         if ability not in unit.abilities:
             unit.abilities.append(ability)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -324,7 +324,7 @@ class UnitService:
         if weapon is not None and weapon in unit.weapons:
             unit.weapons.remove(weapon)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -335,7 +335,7 @@ class UnitService:
         if ability is not None and ability in unit.abilities:
             unit.abilities.remove(ability)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -358,7 +358,7 @@ class UnitService:
             raise ConflictError(f"faction {name!r} already exists")
         faction = Faction(name=name)
         self.session.add(faction)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(faction)
         return faction
 
@@ -380,7 +380,7 @@ class UnitService:
             raise ConflictError(f"subfaction {name!r} already exists for that faction")
         sub = Subfaction(faction_id=faction_id, name=name)
         self.session.add(sub)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(sub)
         return sub
 
@@ -393,7 +393,7 @@ class UnitService:
         if self._subfaction_is_referenced(subfaction_id):
             raise ConflictError(f"subfaction {subfaction_id} is in use by a unit or army")
         self.session.delete(sub)
-        self.session.commit()
+        self.session.flush()
 
     def _subfaction_is_referenced(self, subfaction_id: UUID) -> bool:
         for model in (Unit, Army):

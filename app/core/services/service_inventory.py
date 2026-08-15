@@ -44,7 +44,7 @@ class InventoryService:
             self.session.add(entry)
         else:
             entry.amount += amount  # upsert: increment
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry, created
 
@@ -56,7 +56,7 @@ class InventoryService:
             raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         entry.amount = amount
         self.session.add(entry)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry
 
@@ -65,7 +65,7 @@ class InventoryService:
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         self.session.delete(entry)
-        self.session.commit()
+        self.session.flush()
 
     def list_inventory(self, user_id: UUID, q: str | None = None) -> list[UserUnit]:
         statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
