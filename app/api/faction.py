@@ -81,12 +81,16 @@ def list_factions(
     return service.list_factions()
 
 
-@router.get("/factions/taxonomy", response_model=dict[str, list[str]])
+@router.get("/taxonomy", response_model=dict[str, list[str]])
 def faction_taxonomy() -> dict[str, list[str]]:
     """The allowed subfactions under each faction (for building dropdowns).
 
     Sourced from the `FACTION_SUBFACTIONS` map, not the DB — these are the values
     `create_subfaction` will accept, whether or not any have been created yet.
+
+    Deliberately *not* under `/factions/...`: it's static reference data, not a
+    faction resource, and `/factions/taxonomy` would collide with a future
+    `GET /factions/{faction_id}` (both claim the same path slot). See ROADMAP R12.
     """
     return {faction.value: list(subs) for faction, subs in FACTION_SUBFACTIONS.items()}
 

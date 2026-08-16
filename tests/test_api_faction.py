@@ -148,7 +148,7 @@ def test_list_abilities_is_public(client, admin_client):
 
 
 def test_faction_taxonomy(client):
-    resp = client.get("/factions/taxonomy")
+    resp = client.get("/taxonomy")
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == {"Imperium", "Xenos", "Chaos", "Space Marines"}
