@@ -184,6 +184,32 @@ def test_delete_subfaction_requires_admin(auth_client):
     assert resp.status_code == 403
 
 
+def test_list_subfactions(admin_client, client):
+    _make_subfaction(admin_client, faction="Space Marines", name="Ultramarines")
+    _make_subfaction(admin_client, faction="Xenos", name="Necrons")
+
+    # public read (no admin), mirroring GET /factions
+    resp = client.get("/subfactions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {row["name"] for row in body} == {"Ultramarines", "Necrons"}
+    # each row carries its parent faction_id (the flat list would be ambiguous without it)
+    assert all("faction_id" in row for row in body)
+
+
+def test_list_subfactions_filtered_by_faction(admin_client):
+    sm = admin_client.post("/factions", json={"name": "Space Marines"}).json()
+    xn = admin_client.post("/factions", json={"name": "Xenos"}).json()
+    admin_client.post("/subfactions", json={"faction_id": sm["id"], "name": "Ultramarines"})
+    admin_client.post("/subfactions", json={"faction_id": xn["id"], "name": "Necrons"})
+
+    resp = admin_client.get("/subfactions", params={"faction_id": sm["id"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [row["name"] for row in body] == ["Ultramarines"]
+    assert body[0]["faction_id"] == sm["id"]
+
+
 def _make_weapon(admin_client, name="Bolt rifle"):
     return admin_client.post(
         "/weapons",

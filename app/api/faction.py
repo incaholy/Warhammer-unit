@@ -22,6 +22,14 @@ class Subfaction_Read(SQLModel):
     name: str
 
 
+class Subfaction_ListRead(SQLModel):
+    # Flat listing (GET /subfactions) carries faction_id, which the nested form
+    # inside Faction_Read can omit because its parent already supplies it.
+    id: UUID
+    faction_id: UUID
+    name: str
+
+
 class Faction_Read(SQLModel):
     id: UUID
     name: str
@@ -79,6 +87,19 @@ def list_factions(
     service: UnitService = Depends(get_unit_service),
 ) -> list[Faction_Read]:
     return service.list_factions()
+
+
+@router.get("/subfactions", response_model=list[Subfaction_ListRead])
+def list_subfactions(
+    faction_id: UUID | None = None,
+    service: UnitService = Depends(get_unit_service),
+) -> list[Subfaction_ListRead]:
+    """Every created subfaction, optionally filtered to one faction.
+
+    Distinct from GET /taxonomy: that publishes the *allowed* subfaction names
+    (from the constant); this lists the rows actually created in the DB (with ids).
+    """
+    return service.list_subfactions(faction_id)
 
 
 @router.get("/taxonomy", response_model=dict[str, list[str]])

@@ -344,6 +344,12 @@ class UnitService:
     def list_factions(self) -> list[Faction]:
         return list(self.session.exec(select(Faction)).all())
 
+    def list_subfactions(self, faction_id: UUID | None = None) -> list[Subfaction]:
+        query = select(Subfaction)
+        if faction_id is not None:
+            query = query.where(Subfaction.faction_id == faction_id)
+        return list(self.session.exec(query).all())
+
     def create_faction(self, name: str) -> Faction:
         # Guard the direct-session path (seed scripts, etc.) the same way the
         # API schema guards HTTP: the name must be a canonical faction.

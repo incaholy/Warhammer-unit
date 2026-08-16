@@ -491,6 +491,20 @@ Decide the set deliberately. "These are admin-managed reference data, so create 
 perfectly good answer, as long as it is applied to all four and written down in
 `docs/api/conventions.md` (R8).
 
+**Resolved (deliberate policy).** Two tiers, split by whether the entity is editable content or
+canonical taxonomy:
+
+| Resource | Verbs | Rationale |
+|---|---|---|
+| Weapons, Abilities, Units | full CRUD | rich, correctable content |
+| Subfactions | create · list · delete | thin reference rows; no in-place edit — recreate instead |
+| Factions | create · list | canonical `FactionName` enum; not renamed or deleted (units reference them) |
+
+The one gap this closed in code: added `GET /subfactions` (optional `?faction_id=` filter) so created
+subfactions are enumerable — the sharpest case above. No `PATCH` on subfactions or factions, and no
+`DELETE` on factions, by design. The formal write-down lands in `docs/api/conventions.md` when R8 runs;
+this table is the interim record.
+
 ### Subfactions do not nest, but weapons do
 
 `POST /subfactions` is top-level with `faction_id` in the body, while `POST /units/{unit_id}/weapons`
@@ -499,3 +513,6 @@ subfaction is the one that reads oddly, since a subfaction cannot exist without 
 
 Lowest priority of the four. Worth folding into whichever pass touches the catalog routes next, not
 worth its own change.
+
+**Deferred (by its own guidance).** Left as-is; fold into the next catalog-routes pass (R8 territory)
+rather than churning the route now.
