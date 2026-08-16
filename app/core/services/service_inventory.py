@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.core.db.models import Unit, User, UserUnit
 from app.core.errors import ErrorCode
-from app.core.services.errors import NotFoundError
+from app.core.services.errors import ConflictError, NotFoundError
 
 
 class InventoryValidationError(ValueError):
@@ -30,23 +30,23 @@ class InventoryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> tuple[UserUnit, bool]:
-        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
-        without re-querying the inventory."""
+    def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> UserUnit:
+        """Add a unit to the inventory — **create-only**. If it's already owned,
+        raise `ConflictError` (→ 409) rather than incrementing; change the quantity
+        with `set_amount` (PATCH), which sets an absolute value and is idempotent.
+        An incrementing add is not retry-safe — a timeout+retry would double-apply.
+        See ROADMAP R12."""
         if amount < 1:
             raise InventoryValidationError("amount", "must be >= 1")
         self._require_user(user_id)
         self._require_unit(unit_id)
-        entry = self._find_entry(user_id, unit_id)
-        created = entry is None
-        if created:
-            entry = UserUnit(owner_user_id=user_id, unit_id=unit_id, amount=amount)
-            self.session.add(entry)
-        else:
-            entry.amount += amount  # upsert: increment
+        if self._find_entry(user_id, unit_id) is not None:
+            raise ConflictError(f"unit {unit_id} is already in {user_id}'s inventory")
+        entry = UserUnit(owner_user_id=user_id, unit_id=unit_id, amount=amount)
+        self.session.add(entry)
         self.session.flush()
         self.session.refresh(entry)
-        return entry, created
+        return entry
 
     def set_amount(self, user_id: UUID, unit_id: UUID, amount: int) -> UserUnit:
         if amount < 1:

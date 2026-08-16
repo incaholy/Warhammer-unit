@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
 from app.core.errors import ErrorCode
-from app.core.services.errors import NotFoundError
+from app.core.services.errors import ConflictError, NotFoundError
 
 
 class ArmyValidationError(ValueError):
@@ -153,23 +153,23 @@ class ArmyService:
 
     # -------------------------- units in an army --------------------------
 
-    def add_unit(self, army_id: UUID, unit_id: UUID, amount: int = 1) -> tuple[ArmyUnit, bool]:
-        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
-        without re-querying the army's units."""
+    def add_unit(self, army_id: UUID, unit_id: UUID, amount: int = 1) -> ArmyUnit:
+        """Add a unit to the army — **create-only**. If the unit is already in the
+        army, raise `ConflictError` (→ 409) rather than incrementing; change the
+        quantity with `set_amount` (PATCH), which sets an absolute value and is
+        idempotent. An incrementing add is not retry-safe — a timeout+retry would
+        double-apply. See ROADMAP R12."""
         if amount < 1:
             raise ArmyValidationError("amount", "must be >= 1")
         self._require_army(army_id)
         self._require_unit(unit_id)
-        entry = self._find_entry(army_id, unit_id)
-        created = entry is None
-        if created:
-            entry = ArmyUnit(army_id=army_id, unit_id=unit_id, amount=amount)
-            self.session.add(entry)
-        else:
-            entry.amount += amount  # upsert: increment
+        if self._find_entry(army_id, unit_id) is not None:
+            raise ConflictError(f"unit {unit_id} is already in army {army_id}")
+        entry = ArmyUnit(army_id=army_id, unit_id=unit_id, amount=amount)
+        self.session.add(entry)
         self.session.flush()
         self.session.refresh(entry)
-        return entry, created
+        return entry
 
     def set_amount(self, army_id: UUID, unit_id: UUID, amount: int) -> ArmyUnit:
         if amount < 1:

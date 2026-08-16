@@ -183,15 +183,12 @@ def validate(
 @router.post("/{army_id}/units", response_model=ArmyUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
     payload: ArmyUnitAdd,
-    response: Response,
     army: Army = Depends(get_owned_army),
     service: ArmyService = Depends(get_army_service),
 ) -> ArmyUnit_Read:
-    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    entry, created = service.add_unit(army.id, payload.unit_id, payload.amount)
-    if not created:
-        response.status_code = status.HTTP_200_OK
-    return entry
+    # Create-only: 201 on success, 409 if the unit is already in the army — change
+    # the quantity via PATCH (idempotent / retry-safe). See ROADMAP R12.
+    return service.add_unit(army.id, payload.unit_id, payload.amount)
 
 
 @router.patch("/{army_id}/units/{unit_id}", response_model=ArmyUnit_Read)

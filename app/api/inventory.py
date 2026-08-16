@@ -50,15 +50,12 @@ def list_inventory(
 @router.post("", response_model=UserUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
     payload: InventoryAdd,
-    response: Response,
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
-    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    entry, created = service.add_unit(current_user.id, payload.unit_id, payload.amount)
-    if not created:
-        response.status_code = status.HTTP_200_OK
-    return entry
+    # Create-only: 201 on success, 409 if the unit is already owned — change the
+    # quantity via PATCH (idempotent / retry-safe). See ROADMAP R12.
+    return service.add_unit(current_user.id, payload.unit_id, payload.amount)
 
 
 @router.patch("/{unit_id}", response_model=UserUnit_Read)

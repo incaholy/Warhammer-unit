@@ -86,15 +86,21 @@ def test_delete_army(auth_client, make_faction):
     assert auth_client.get(f"/me/armies/{army['id']}").status_code == 404
 
 
-def test_add_unit_twice_increments(auth_client, make_faction, make_unit):
+def test_add_unit_is_create_only_conflicts_on_repeat(auth_client, make_faction, make_unit):
+    # Create-only (retry-safe): re-POSTing a unit already in the army is a 409,
+    # not an increment. Change the amount with PATCH (idempotent). See ROADMAP R12.
     f = make_faction()
     unit = make_unit()
     army = _make_army(auth_client, f)
     first = auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 2})
     assert first.status_code == 201
     resp = auth_client.post(f"/me/armies/{army['id']}/units", json={"unit_id": str(unit.id), "amount": 3})
-    assert resp.status_code == 200
-    assert resp.json()["amount"] == 5
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "CONFLICT"
+    # the amount is unchanged — the repeat did not apply
+    patched = auth_client.patch(f"/me/armies/{army['id']}/units/{unit.id}", json={"amount": 5})
+    assert patched.status_code == 200
+    assert patched.json()["amount"] == 5
 
 
 def test_set_amount_below_one_returns_400(auth_client, make_faction, make_unit):

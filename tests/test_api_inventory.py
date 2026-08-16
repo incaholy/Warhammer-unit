@@ -16,13 +16,18 @@ def test_add_and_list_inventory(auth_client, make_unit):
     assert len(listing.json()) == 1
 
 
-def test_add_twice_increments(auth_client, make_unit):
+def test_add_is_create_only_conflicts_on_repeat(auth_client, make_unit):
+    # Create-only (retry-safe): re-POSTing an owned unit is a 409, not an
+    # increment. Change the amount with PATCH (idempotent). See ROADMAP R12.
     unit = make_unit()
     first = auth_client.post("/me/inventory", json={"unit_id": str(unit.id), "amount": 1})
     assert first.status_code == 201  # created
     resp = auth_client.post("/me/inventory", json={"unit_id": str(unit.id), "amount": 2})
-    assert resp.status_code == 200  # incremented existing
-    assert resp.json()["amount"] == 3
+    assert resp.status_code == 409  # already owned — no increment
+    assert resp.json()["code"] == "CONFLICT"
+    patched = auth_client.patch(f"/me/inventory/{unit.id}", json={"amount": 3})
+    assert patched.status_code == 200
+    assert patched.json()["amount"] == 3
 
 
 def test_inventory_requires_auth(client):
