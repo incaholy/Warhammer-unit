@@ -1,25 +1,24 @@
-"""Password hashing, JWT tokens, and the auth dependencies.
+"""Password hashing, JWT tokens, and the coded auth errors.
 
 Config comes from the environment (loaded from `.env`):
   SECRET_KEY                   — JWT signing key. REQUIRED unless APP_ENV=dev.
   APP_ENV                      — "dev" (default) enables a throwaway key; any
                                  other value requires a real SECRET_KEY.
   ACCESS_TOKEN_EXPIRE_MINUTES  — token lifetime (default 2880 = 2 days)
+
+Deliberately free of any web-framework import: the FastAPI auth dependencies
+(`get_current_user`, the bearer scheme) live in `app/api/deps.py`, so the
+service layer can hash passwords and mint tokens without depending on transport.
+The `app.core` layer must not import `fastapi` — enforced by `.importlinter`.
 """
 
 import os
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
 
 from dotenv import load_dotenv
-from fastapi import Depends
-from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlmodel import Session
 
-from app.core.db.connection import get_session
-from app.core.db.models import User
 from app.core.errors import ErrorCode
 
 load_dotenv()
@@ -46,7 +45,6 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "2880"))
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 
 # ------------------------------ passwords ------------------------------
@@ -84,6 +82,8 @@ def decode_token(token: str) -> str:
 # Coded like the service errors: they carry a `code` (+ message, and `field=None`
 # for the shared handler), so the API layer maps them by `code` — no HTTPException,
 # no status->code reverse lookup. Registered in `app/main.py`'s `_SERVICE_ERRORS`.
+# Framework-free value types, so they stay in the domain module even though the
+# dependencies that raise them now live in `app/api/deps.py`.
 
 
 class UnauthorizedError(Exception):
@@ -106,30 +106,3 @@ class ForbiddenError(Exception):
     def __init__(self, message: str = "admin only"):
         super().__init__(message)
         self.message = message
-
-
-# ---------------------------- dependencies -----------------------------
-
-
-def get_current_user(
-    token: str | None = Depends(oauth2_scheme),
-    session: Session = Depends(get_session),
-) -> User:
-    # oauth2_scheme has auto_error=False, so a missing header arrives here as None
-    # (rather than FastAPI's own uncoded 401) — we raise our coded error instead.
-    if token is None:
-        raise UnauthorizedError()
-    try:
-        user_id = UUID(decode_token(token))
-    except ValueError:
-        raise UnauthorizedError() from None
-    user = session.get(User, user_id)
-    if user is None:
-        raise UnauthorizedError()
-    return user
-
-
-def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    if not user.is_admin:
-        raise ForbiddenError()
-    return user

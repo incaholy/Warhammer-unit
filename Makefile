@@ -11,6 +11,7 @@ ALEMBIC := $(PYENV) exec alembic
 PYTEST := $(PYENV) exec pytest
 UVICORN := $(PYENV) exec uvicorn
 RUFF := $(PYENV) exec ruff
+IMPORTLINTER := $(PYENV) exec lint-imports
 PSQL ?= psql
 
 # ---- Database URL + its parsed parts ----
@@ -35,7 +36,7 @@ APP_PORT ?= 8000
 # ---- Docker ----
 COMPOSE ?= docker compose
 
-.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test lint lint-detailed format check openapi create-admin seed scrape docker-build docker-up docker-down docker-test
+.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test lint lint-detailed lint-imports format check openapi create-admin seed scrape docker-build docker-up docker-down docker-test
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -99,9 +100,13 @@ format: ## Auto-fix lint issues and format the code (mutating — edits files).
 	@$(RUFF) check --fix . || true
 	@$(RUFF) format .
 
-check: ## Pre-PR gate: strict lint + format-check + tests (fails on any issue).
+lint-imports: ## Check the architecture import contracts (layering, .importlinter).
+	@$(IMPORTLINTER)
+
+check: ## Pre-PR gate: strict lint + format-check + import contracts + tests (fails on any issue).
 	@$(RUFF) check .
 	@$(RUFF) format --check .
+	@$(IMPORTLINTER)
 	@$(PYTEST) tests/ -v
 
 openapi: ## Regenerate openapi.json from the app (no DB needed).

@@ -27,6 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      # Architecture contracts: the layering rule (API -> service -> DB) and
+      # "app.core imports no web framework", enforced from .importlinter (R11).
+      - name: Check import contracts
+        run: lint-imports
+
       # Tests run against in-memory SQLite (see tests/conftest.py), so no
       # database service or DATABASE_URL/SECRET_KEY is needed here.
       - name: Test

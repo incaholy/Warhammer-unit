@@ -9,3 +9,6 @@
 beautifulsoup4==4.15.0
 lxml==6.1.1
 ruff==0.14.4
+
+# architecture enforcement — checks the import contracts in .importlinter (R11)
+import-linter==2.13

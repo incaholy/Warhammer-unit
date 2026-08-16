@@ -1,0 +1,24 @@
+# Architecture contracts, enforced by import-linter (`lint-imports`, run in
+# `make check` and CI). These turn the layering rule from a sentence in CLAUDE.md
+# into a check that fails the build when broken. See ROADMAP R11.
+
+[importlinter]
+root_package = app
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = API -> service -> DB (a lower layer may not import a higher one)
+type = layers
+layers =
+    app.api
+    app.core.services
+    app.core.db
+
+[importlinter:contract:core-web-agnostic]
+name = app.core does not import the web framework
+type = forbidden
+source_modules =
+    app.core
+forbidden_modules =
+    fastapi
+    starlette

@@ -9,9 +9,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import SQLModel
 
+from app.api.deps import get_current_admin
 from app.api.unit import Ability_Read, Weapon_Read, get_unit_service
 from app.core.db.models import FACTION_SUBFACTIONS, FactionName
-from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(tags=["catalog"])
