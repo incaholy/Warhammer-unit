@@ -422,6 +422,16 @@ document is indistinguishable from no rule.
 
 **Satisfies:** §2.5.
 
+**Status: ✅ Done (2026-08).** (1) `POST` add-unit is now create-only on both
+inventory and army — a repeat is a `409 CONFLICT`, not a silent increment;
+quantity changes go through the idempotent `PATCH`. Frontend `CatalogView`
+disables the add control ("Added") for units already in the target. (2) The
+taxonomy moved out of the `/factions` id namespace to `GET /taxonomy` (no future
+collision with `GET /factions/{id}`; frontend follows). (3) Catalog CRUD policy
+settled and `GET /subfactions` added so subfactions are enumerable — see the
+table below. (4) Subfaction non-nesting left as-is, deferred to the next
+catalog-routes pass by its own guidance.
+
 The routing is in good shape overall: plural collection nouns, correct verb and status-code
 semantics, nesting that reflects real hierarchy, `/me/*` scoping that keeps user ids out of paths,
 and membership rows addressed by their natural key rather than an exposed surrogate. Four things
