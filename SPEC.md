@@ -375,7 +375,8 @@ public; catalog **writes** require an admin (**403** otherwise).
 |---|---|---|---|---|
 | POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | done |
 | GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | done |
-| GET | `/units` | list units; query params: `faction_id`, `subfaction_id`, `q` (name search), `limit` (1–200), `offset` | `UnitService.list_units` | done |
+| GET | `/units` | list units (paged: returns a `Page` envelope `{items, total, limit, offset}`); query params: `faction_id`, `subfaction_id`, `q` (name search), `limit` (1–200), `offset` | `UnitService.list_units` | done |
+| GET | `/units/facets` | per-faction unit counts for the current filter (`{total, by_faction}`), computed server-side in one `GROUP BY` | `UnitService.faction_facets` | done |
 | PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` | done |
 | DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` | done |
 | POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` | done |
@@ -504,13 +505,20 @@ need. **Effort: all S** unless noted.
   map, so an admin UI has no way to render a subfaction dropdown.
   *Plan:* a read route returning `{faction_name: [allowed subfactions]}` straight
   from the map (no DB) — e.g. `{"Xenos": ["Aeldari", "Necrons", …], …}`. Public.
-- **`X-Total-Count` header on `GET /units`** — the list is paged but returns no
-  total, so the catalog view can't show "showing 20 of 137."
-  *Plan:* add a `UnitService.count_units(**filters)` (a `select(func.count())`
-  with the same `where` clauses as `list_units`) and set an `X-Total-Count`
-  response header in the route. Chosen over an `{items, total}` envelope because
-  it keeps the bare-list body **non-breaking** (see "Custom service errors" for
-  the same no-envelope stance).
+- **Pagination is a convention (done, R4).** Every list endpoint returns a
+  `Page` envelope — `{items, total, limit, offset}` — via the shared `Page[T]`
+  schema and `PageParams` dependency in `app/api/pagination.py` (`limit` 1–200,
+  default 50; `offset` ≥ 0). The **total travels in the body**, not a header: an
+  earlier design set `X-Total-Count` on `GET /units`, but a response header is
+  invisible to cross-origin JS unless named in CORS `expose_headers`, so on the
+  Firebase→Cloud Run deploy the browser read no total and the catalog silently
+  fell back to `0` (see the resolved BUG1). Reversing the earlier no-envelope
+  stance was deliberate; whether to nest `Page` inside a `{data, errors, meta}`
+  response envelope is a separate, still-open decision (ARCHITECTURE §2.6 / R9).
+  Each list orders by a natural key plus the primary-key `id` as a tiebreaker, so
+  offset paging is stable across page boundaries. `GET /units/facets` adds the
+  per-faction counts the catalog rail needs as a server-side `GROUP BY`, so the
+  client no longer downloads the catalog to count it.
 
 ### Catalog administration
 
@@ -1051,8 +1059,10 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `UnitService`). See "API layer → Planned additions."
 16. ✓ **`GET /factions/taxonomy`** — exposes `FACTION_SUBFACTIONS` for subfaction
     dropdowns. See "API layer → Planned additions."
-17. ✓ **`X-Total-Count` on `GET /units`** — `UnitService.count_units` sets the
-    total header for the catalog's "N results" count. See "API layer → Planned
+17. ✓ **Pagination convention (R4)** — every list endpoint returns a `Page`
+    envelope `{items, total, limit, offset}` with the total in the body (an
+    earlier `X-Total-Count` header was replaced — see the resolved BUG1), plus
+    `GET /units/facets` for per-faction counts. See "API layer → Planned
     additions."
 18. ✓ **Seed script** — `scripts/seed_datasheets.py` (get-or-create, idempotent) +
     `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
@@ -1180,7 +1190,7 @@ already exist on the tables; the work is exposing them.
 | FE1 | Add `created_at` (optionally `updated_at`) to `Army_Read` so the frontend can show the army's "Created" date | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also add `created_at` to the frontend `types.ts` | S |
 | FE2 | Add a `q` filter to `GET /me/inventory` so inventory search is server-side, not client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count already in `GET /units` (`service_unit._apply_unit_filters`) | S |
 | FE3 | Add `is_admin` to the `/me` response to unblock admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | S |
-| BUG1 | **Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` comes from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser can't read the header → `total` defaults to `0` → pager is hidden → stuck on the first 25. Works locally because the Vite proxy makes it same-origin. **Fix:** add `expose_headers=["X-Total-Count"]` to `CORSMiddleware`; if the symptom persists, confirm the header round-trips and that `units.ts`/`client.ts` parse it | `app/main.py` (CORS `expose_headers`); verify `src/api/units.ts`/`client.ts` in the web repo | S |
+| BUG1 | ✓ **RESOLVED (R4). Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` came from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser couldn't read the header → `total` defaulted to `0` → pager hidden → stuck on the first 25. **Fixed** by R4 moving `total` into the response body (`Page` envelope), which removes the header entirely — there is no cross-origin-invisible side channel left, so no `expose_headers` entry is needed | resolved in `app/api/pagination.py` + the list endpoints; frontend reads `total` off the body | S |
 
 ### Tier 1 — Make the scrape→seed pipeline honest & robust
 
