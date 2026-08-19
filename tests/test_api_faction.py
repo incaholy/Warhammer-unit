@@ -22,7 +22,9 @@ def test_list_factions_is_public(client, make_faction):
     make_faction()
     resp = client.get("/factions")  # no auth required for reads
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    body = resp.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
 
 
 def test_create_faction_requires_admin(auth_client):
@@ -46,9 +48,9 @@ def test_list_factions_with_subfactions(admin_client):
     admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"})
     resp = admin_client.get("/factions")
     assert resp.status_code == 200
-    listing = resp.json()
-    assert len(listing) == 1
-    assert [s["name"] for s in listing[0]["subfactions"]] == ["Ultramarines"]
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert [s["name"] for s in items[0]["subfactions"]] == ["Ultramarines"]
 
 
 def test_create_subfaction(admin_client):
@@ -137,14 +139,14 @@ def test_list_weapons_is_public(client, admin_client):
     )
     resp = client.get("/weapons")  # public read
     assert resp.status_code == 200
-    assert [w["name"] for w in resp.json()] == ["Bolt rifle"]
+    assert [w["name"] for w in resp.json()["items"]] == ["Bolt rifle"]
 
 
 def test_list_abilities_is_public(client, admin_client):
     admin_client.post("/abilities", json={"name": "Oath", "description": "reroll"})
     resp = client.get("/abilities")  # public read
     assert resp.status_code == 200
-    assert [a["name"] for a in resp.json()] == ["Oath"]
+    assert [a["name"] for a in resp.json()["items"]] == ["Oath"]
 
 
 def test_faction_taxonomy(client):
@@ -191,10 +193,10 @@ def test_list_subfactions(admin_client, client):
     # public read (no admin), mirroring GET /factions
     resp = client.get("/subfactions")
     assert resp.status_code == 200
-    body = resp.json()
-    assert {row["name"] for row in body} == {"Ultramarines", "Necrons"}
+    items = resp.json()["items"]
+    assert {row["name"] for row in items} == {"Ultramarines", "Necrons"}
     # each row carries its parent faction_id (the flat list would be ambiguous without it)
-    assert all("faction_id" in row for row in body)
+    assert all("faction_id" in row for row in items)
 
 
 def test_list_subfactions_filtered_by_faction(admin_client):
@@ -205,9 +207,9 @@ def test_list_subfactions_filtered_by_faction(admin_client):
 
     resp = admin_client.get("/subfactions", params={"faction_id": sm["id"]})
     assert resp.status_code == 200
-    body = resp.json()
-    assert [row["name"] for row in body] == ["Ultramarines"]
-    assert body[0]["faction_id"] == sm["id"]
+    items = resp.json()["items"]
+    assert [row["name"] for row in items] == ["Ultramarines"]
+    assert items[0]["faction_id"] == sm["id"]
 
 
 def _make_weapon(admin_client, name="Bolt rifle"):
@@ -254,7 +256,7 @@ def test_delete_weapon(admin_client):
     w = _make_weapon(admin_client)
     resp = admin_client.delete(f"/weapons/{w['id']}")
     assert resp.status_code == 204
-    assert admin_client.get("/weapons").json() == []
+    assert admin_client.get("/weapons").json()["items"] == []
 
 
 def test_update_and_delete_ability(admin_client):
@@ -263,4 +265,4 @@ def test_update_and_delete_ability(admin_client):
     assert patched.status_code == 200
     assert patched.json()["description"] == "new"
     assert admin_client.delete(f"/abilities/{a['id']}").status_code == 204
-    assert admin_client.get("/abilities").json() == []
+    assert admin_client.get("/abilities").json()["items"] == []

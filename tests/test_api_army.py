@@ -16,7 +16,9 @@ def test_create_and_list_armies(auth_client, make_faction):
 
     listing = auth_client.get("/me/armies")
     assert listing.status_code == 200
-    assert len(listing.json()) == 1
+    body = listing.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
 
 
 def test_armies_require_auth(client):

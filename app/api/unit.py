@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.api.deps import get_current_admin
+from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
 from app.core.services.service_unit import UnitService
 
@@ -83,6 +84,14 @@ class Unit_Update(SQLModel):
     keywords: list[str] | None = None
 
 
+class UnitFacets(SQLModel):
+    # Per-faction unit counts for the current filter, computed server-side in one
+    # GROUP BY (see UnitService.faction_facets). `total` is the count across all
+    # factions for the same filter. Replaces the client's download-and-count hack.
+    total: int
+    by_faction: dict[UUID, int]
+
+
 class WeaponLink(SQLModel):
     weapon_id: UUID
 
@@ -105,27 +114,34 @@ def create_unit(payload: Unit_Create, service: UnitService = Depends(get_unit_se
     return service.create_unit(**payload.model_dump())
 
 
-@router.get("", response_model=list[Unit_Read])
+@router.get("", response_model=Page[Unit_Read])
 def list_units(
-    response: Response,
     faction_id: UUID | None = None,
     subfaction_id: UUID | None = None,
     q: str | None = Query(default=None, description="case-insensitive name search"),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Unit_Read]:
-    # Total across the filter (ignoring paging) so the catalog can show "N of M".
-    response.headers["X-Total-Count"] = str(
-        service.count_units(faction_id=faction_id, subfaction_id=subfaction_id, q=q)
-    )
-    return service.list_units(
+) -> Page[Unit_Read]:
+    items = service.list_units(
         faction_id=faction_id,
         subfaction_id=subfaction_id,
         q=q,
-        limit=limit,
-        offset=offset,
+        limit=page.limit,
+        offset=page.offset,
     )
+    total = service.count_units(faction_id=faction_id, subfaction_id=subfaction_id, q=q)
+    return paginate(items, total, page)
+
+
+@router.get("/facets", response_model=UnitFacets)
+def unit_facets(
+    subfaction_id: UUID | None = None,
+    q: str | None = Query(default=None, description="case-insensitive name search"),
+    service: UnitService = Depends(get_unit_service),
+) -> UnitFacets:
+    # Declared before `/{unit_id}` so the literal path wins over the UUID param.
+    total, by_faction = service.faction_facets(subfaction_id=subfaction_id, q=q)
+    return UnitFacets(total=total, by_faction=by_faction)
 
 
 @router.get("/{unit_id}", response_model=Unit_Read)

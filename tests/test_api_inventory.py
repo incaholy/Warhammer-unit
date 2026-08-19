@@ -13,7 +13,9 @@ def test_add_and_list_inventory(auth_client, make_unit):
 
     listing = auth_client.get("/me/inventory")
     assert listing.status_code == 200
-    assert len(listing.json()) == 1
+    body = listing.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
 
 
 def test_add_is_create_only_conflicts_on_repeat(auth_client, make_unit):
@@ -60,7 +62,7 @@ def test_remove_unit(auth_client, make_unit):
     auth_client.post("/me/inventory", json={"unit_id": str(unit.id), "amount": 1})
     resp = auth_client.delete(f"/me/inventory/{unit.id}")
     assert resp.status_code == 204
-    assert auth_client.get("/me/inventory").json() == []
+    assert auth_client.get("/me/inventory").json()["items"] == []
 
 
 def test_add_unit_zero_amount_returns_422(auth_client, make_unit):
@@ -78,7 +80,7 @@ def test_list_inventory_search_filters_by_name(auth_client, make_unit):
     # case-insensitive substring match on unit_name
     resp = auth_client.get("/me/inventory", params={"q": "termin"})
     assert resp.status_code == 200
-    assert [row["unit"]["unit_name"] for row in resp.json()] == ["Terminator Squad"]
+    assert [row["unit"]["unit_name"] for row in resp.json()["items"]] == ["Terminator Squad"]
 
     # no q -> the whole inventory
-    assert len(auth_client.get("/me/inventory").json()) == 2
+    assert auth_client.get("/me/inventory").json()["total"] == 2

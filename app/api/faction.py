@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import SQLModel
 
 from app.api.deps import get_current_admin
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Ability_Read, Weapon_Read, get_unit_service
 from app.core.db.models import FACTION_SUBFACTIONS, FactionName
 from app.core.services.service_unit import UnitService
@@ -82,24 +83,28 @@ class Ability_Update(SQLModel):
     description: str | None = None
 
 
-@router.get("/factions", response_model=list[Faction_Read])
+@router.get("/factions", response_model=Page[Faction_Read])
 def list_factions(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Faction_Read]:
-    return service.list_factions()
+) -> Page[Faction_Read]:
+    items = service.list_factions(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_factions(), page)
 
 
-@router.get("/subfactions", response_model=list[Subfaction_ListRead])
+@router.get("/subfactions", response_model=Page[Subfaction_ListRead])
 def list_subfactions(
     faction_id: UUID | None = None,
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Subfaction_ListRead]:
+) -> Page[Subfaction_ListRead]:
     """Every created subfaction, optionally filtered to one faction.
 
     Distinct from GET /taxonomy: that publishes the *allowed* subfaction names
     (from the constant); this lists the rows actually created in the DB (with ids).
     """
-    return service.list_subfactions(faction_id)
+    items = service.list_subfactions(faction_id, limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_subfactions(faction_id), page)
 
 
 @router.get("/taxonomy", response_model=dict[str, list[str]])
@@ -159,11 +164,13 @@ def create_weapon(payload: Weapon_Create, service: UnitService = Depends(get_uni
     return service.create_weapon(**payload.model_dump())
 
 
-@router.get("/weapons", response_model=list[Weapon_Read])
+@router.get("/weapons", response_model=Page[Weapon_Read])
 def list_weapons(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Weapon_Read]:
-    return service.list_weapons()
+) -> Page[Weapon_Read]:
+    items = service.list_weapons(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_weapons(), page)
 
 
 @router.patch(
@@ -199,11 +206,13 @@ def create_ability(payload: Ability_Create, service: UnitService = Depends(get_u
     return service.create_ability(payload.name, payload.description)
 
 
-@router.get("/abilities", response_model=list[Ability_Read])
+@router.get("/abilities", response_model=Page[Ability_Read])
 def list_abilities(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Ability_Read]:
-    return service.list_abilities()
+) -> Page[Ability_Read]:
+    items = service.list_abilities(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_abilities(), page)
 
 
 @router.patch(

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
 from app.core.db.models import User
@@ -38,13 +39,16 @@ def get_inventory_service(
     return InventoryService(session)
 
 
-@router.get("", response_model=list[UserUnit_Read])
+@router.get("", response_model=Page[UserUnit_Read])
 def list_inventory(
     q: str | None = Query(default=None),
+    page: PageParams = Depends(),
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
-) -> list[UserUnit_Read]:
-    return service.list_inventory(current_user.id, q)
+) -> Page[UserUnit_Read]:
+    items = service.list_inventory(current_user.id, q, limit=page.limit, offset=page.offset)
+    total = service.count_inventory(current_user.id, q)
+    return paginate(items, total, page)
 
 
 @router.post("", response_model=UserUnit_Read, status_code=status.HTTP_201_CREATED)

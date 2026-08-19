@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
 from app.core.db.models import Army, User
@@ -126,12 +127,16 @@ def create_army(
     return _army_read(service, army)
 
 
-@router.get("", response_model=list[Army_Read])
+@router.get("", response_model=Page[Army_Read])
 def list_armies(
+    page: PageParams = Depends(),
     current_user: User = Depends(get_current_user),
     service: ArmyService = Depends(get_army_service),
-) -> list[Army_Read]:
-    return [_army_read(service, army) for army in service.list_armies(current_user.id)]
+) -> Page[Army_Read]:
+    armies = service.list_armies(current_user.id, limit=page.limit, offset=page.offset)
+    items = [_army_read(service, army) for army in armies]
+    total = service.count_armies(current_user.id)
+    return paginate(items, total, page)
 
 
 @router.get("/{army_id}", response_model=Army_Read)
