@@ -104,7 +104,7 @@ class ArmyService:
             raise NotFoundError(f"army {army_id} not found")
         return army
 
-    def list_armies(self, user_id: UUID) -> list[Army]:
+    def list_armies(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[Army]:
         # Eager-load the units subtree (units -> unit -> weapons/abilities) so
         # serializing each Army_Read doesn't lazy-load it per army (the N+1).
         statement = (
@@ -114,8 +114,15 @@ class ArmyService:
                 selectinload(Army.units).selectinload(ArmyUnit.unit).selectinload(Unit.weapons),
                 selectinload(Army.units).selectinload(ArmyUnit.unit).selectinload(Unit.abilities),
             )
+            .order_by(Army.created_at, Army.id)  # id breaks created_at ties -> stable paging
+            .offset(offset)
+            .limit(limit)
         )
         return list(self.session.exec(statement).all())
+
+    def count_armies(self, user_id: UUID) -> int:
+        statement = select(func.count(Army.id)).where(Army.owner_user_id == user_id)
+        return self.session.exec(statement).one()
 
     def delete_army(self, army_id: UUID) -> None:
         army = self.get_army(army_id)

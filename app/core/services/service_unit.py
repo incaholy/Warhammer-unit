@@ -152,7 +152,7 @@ class UnitService:
         # them per unit (the N+1). selectinload batches each with one WHERE-IN.
         statement = (
             statement.options(selectinload(Unit.weapons), selectinload(Unit.abilities))
-            .order_by(Unit.unit_name)
+            .order_by(Unit.unit_name, Unit.id)  # id breaks ties -> total order for stable paging
             .offset(offset)
             .limit(limit)
         )
@@ -234,8 +234,12 @@ class UnitService:
         self.session.refresh(weapon)
         return weapon
 
-    def list_weapons(self) -> list[Weapon]:
-        return list(self.session.exec(select(Weapon)).all())
+    def list_weapons(self, limit: int = 50, offset: int = 0) -> list[Weapon]:
+        statement = select(Weapon).order_by(Weapon.name, Weapon.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_weapons(self) -> int:
+        return self.session.exec(select(func.count(Weapon.id))).one()
 
     def update_weapon(self, weapon_id: UUID, **fields) -> Weapon:
         weapon = self.session.get(Weapon, weapon_id)
@@ -268,8 +272,12 @@ class UnitService:
         self.session.refresh(ability)
         return ability
 
-    def list_abilities(self) -> list[Ability]:
-        return list(self.session.exec(select(Ability)).all())
+    def list_abilities(self, limit: int = 50, offset: int = 0) -> list[Ability]:
+        statement = select(Ability).order_by(Ability.name, Ability.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_abilities(self) -> int:
+        return self.session.exec(select(func.count(Ability.id))).one()
 
     def update_ability(self, ability_id: UUID, **fields) -> Ability:
         ability = self.session.get(Ability, ability_id)
@@ -341,14 +349,40 @@ class UnitService:
 
     # ---- factions & subfactions (catalog reference data) ----
 
-    def list_factions(self) -> list[Faction]:
-        return list(self.session.exec(select(Faction)).all())
+    def list_factions(self, limit: int = 50, offset: int = 0) -> list[Faction]:
+        statement = select(Faction).order_by(Faction.name, Faction.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
 
-    def list_subfactions(self, faction_id: UUID | None = None) -> list[Subfaction]:
-        query = select(Subfaction)
+    def count_factions(self) -> int:
+        return self.session.exec(select(func.count(Faction.id))).one()
+
+    def list_subfactions(
+        self, faction_id: UUID | None = None, limit: int = 50, offset: int = 0
+    ) -> list[Subfaction]:
+        statement = select(Subfaction)
         if faction_id is not None:
-            query = query.where(Subfaction.faction_id == faction_id)
-        return list(self.session.exec(query).all())
+            statement = statement.where(Subfaction.faction_id == faction_id)
+        statement = statement.order_by(Subfaction.name, Subfaction.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_subfactions(self, faction_id: UUID | None = None) -> int:
+        statement = select(func.count(Subfaction.id))
+        if faction_id is not None:
+            statement = statement.where(Subfaction.faction_id == faction_id)
+        return self.session.exec(statement).one()
+
+    def faction_facets(
+        self, subfaction_id: UUID | None = None, q: str | None = None
+    ) -> tuple[int, dict[UUID, int]]:
+        """Per-faction unit counts for the current filter, in one GROUP BY — the
+        server-side aggregate the catalog rail needs (so the client never has to
+        download the catalog to count it). Shares `list_units`' filters, minus
+        `faction_id` (the column it groups by). Returns (total, {faction_id: n})."""
+        statement = self._apply_unit_filters(
+            select(Unit.faction_id, func.count(Unit.id)), None, subfaction_id, q
+        ).group_by(Unit.faction_id)
+        by_faction = {faction_id: count for faction_id, count in self.session.exec(statement).all()}
+        return sum(by_faction.values()), by_faction
 
     def create_faction(self, name: str) -> Faction:
         # Guard the direct-session path (seed scripts, etc.) the same way the

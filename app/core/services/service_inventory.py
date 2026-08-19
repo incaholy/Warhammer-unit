@@ -6,6 +6,7 @@ bad amounts, per SPEC.md conventions.
 
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
@@ -67,19 +68,36 @@ class InventoryService:
         self.session.delete(entry)
         self.session.flush()
 
-    def list_inventory(self, user_id: UUID, q: str | None = None) -> list[UserUnit]:
-        statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
+    def list_inventory(
+        self, user_id: UUID, q: str | None = None, limit: int = 50, offset: int = 0
+    ) -> list[UserUnit]:
+        statement = self._apply_inventory_filter(select(UserUnit), user_id, q)
+        # Eager-load each entry's unit and that unit's weapons/abilities so
+        # serialization doesn't lazy-load them per row (the N+1).
+        statement = (
+            statement.options(
+                selectinload(UserUnit.unit).selectinload(Unit.weapons),
+                selectinload(UserUnit.unit).selectinload(Unit.abilities),
+            )
+            .order_by(UserUnit.unit_id, UserUnit.id)  # id breaks ties -> stable paging
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(self.session.exec(statement).all())
+
+    def count_inventory(self, user_id: UUID, q: str | None = None) -> int:
+        statement = self._apply_inventory_filter(select(func.count(UserUnit.unit_id)), user_id, q)
+        return self.session.exec(statement).one()
+
+    def _apply_inventory_filter(self, statement, user_id: UUID, q: str | None):
+        """Shared filter for `list_inventory`/`count_inventory` so page and total
+        always agree: owned by `user_id`, optional case-insensitive name search."""
+        statement = statement.where(UserUnit.owner_user_id == user_id)
         if q:
             statement = statement.join(Unit, UserUnit.unit_id == Unit.id).where(
                 Unit.unit_name.ilike(f"%{q}%")
             )
-        # Eager-load each entry's unit and that unit's weapons/abilities so
-        # serialization doesn't lazy-load them per row (the N+1).
-        statement = statement.options(
-            selectinload(UserUnit.unit).selectinload(Unit.weapons),
-            selectinload(UserUnit.unit).selectinload(Unit.abilities),
-        )
-        return list(self.session.exec(statement).all())
+        return statement
 
     # ------------------------------ helpers ------------------------------
 
