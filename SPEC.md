@@ -1229,7 +1229,7 @@ these before opening the API to real traffic.
 |---|---|---|---|
 | H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
 | Q1 | **Extend the N+1 fix beyond `/units`** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so *every* list that serializes units lazy-loads them per row: `GET /units` (`1+2N`), `GET /me/inventory` (each entry's `unit` + its weapons/abilities), and `GET /me/armies` — which is worst: it serializes `Army_Read.units` (lazy) **and** re-queries the same units in `points_total`. Options: `selectinload` the chains; compute `points_total` with a single `SUM(amount*points)` aggregate instead of a per-entry loop; and/or split `Army_Read` into a **summary** schema (list — no `units`) vs a **detail** schema (`GET /{id}` — units eager-loaded), the classic list-vs-detail split. Coordinated FE change (the web app reads `army.units`) | `app/api/unit.py`, `app/api/inventory.py`, `app/api/army.py`, `service_army.points_total` | M |
-| M5 | Wire the already-installed `sentry-sdk` (no-op when `SENTRY_DSN` unset), add basic structured logging, and a sanitized catch-all `Exception` → 500 handler so internals never leak | `app/main.py` | S/M |
+| M5 | ✅ **Done (R7).** `app/observability.py`: request-ID middleware (`X-Request-ID` generated or echoed, on the header + every error body), JSON structured logging with that ID on every line, and `sentry-sdk` initialized only when `SENTRY_DSN` is set (no-op otherwise). The sanitized catch-all `Exception` → 500 was already in place | `app/observability.py`, `app/main.py` | S/M |
 
 > **Revisit: relationship-loading strategy.** The loading strategy across the
 > `*_Read` schemas needs a deliberate pass — everything defaults to **lazy**
@@ -1440,7 +1440,8 @@ expired-token handling.
 
 ### Production-readiness
 
-The top ops gap is **logging/observability** (M5) — nothing surfaces errors
-today. Behind it: a deep healthcheck (L3), a single typed `Settings` (L4), and
+Logging/observability (M5) is **done** (R7): request IDs, JSON logs, and
+DSN-guarded Sentry. The remaining ops items: a deep healthcheck (L3), a single
+typed `Settings` (L4), and
 JWT lifetime/revocation (L5). Address these before treating a deploy as
 production-grade.

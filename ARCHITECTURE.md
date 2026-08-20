@@ -168,11 +168,12 @@ piece of work rather than three tickets.
 
 Concepts: ASGI middleware, `request.state`, structured logging, log correlation.
 
-**Status: Not yet.** One third is in place: `app/main.py:78-83` catches unhandled exceptions, logs the
-traceback, and returns a generic body so internals never leak. There is no request ID, no logging
-configuration of any kind, and `sentry-sdk` is pinned in `requirements.txt:41` but never imported or
-initialized, so it ships in the image and does nothing. This is `SPEC.md`'s M5 item; see
-[ROADMAP R7](ROADMAP.md#r7-land-observability-request-id-structured-logs-error-reporting).
+**Status: ✅ Done (R7).** All three pieces, wired together in `app/observability.py`
+(`install_observability`): a middleware generates or echoes an `X-Request-ID` and stashes it in a
+context variable; a logging filter puts that ID on every JSON log line (`configure_logging`); and the
+same ID goes into every error body and the response header. Sentry is initialized only when
+`SENTRY_DSN` is set (a true no-op locally and in tests) and tags each event with the request ID. The
+unhandled-exception handler still returns a sanitized body.
 
 ### 2.5 Resource and verb semantics
 
