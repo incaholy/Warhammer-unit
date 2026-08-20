@@ -202,15 +202,15 @@ CRUD coverage is uneven across the catalog resources. See
 
 ### 2.6 Response envelope
 
-**Status: Undecided.** The reference wraps every response in `{data, errors, meta}` so that
-pagination metadata, multiple errors, and the trace ID have a defined home. It is a real improvement
-and it is also the most invasive change available: it touches every route, every response model, and
-every frontend call site.
-
-The decision is deliberately left open rather than defaulted into, because 2.2, 2.3 and 2.4 deliver
-most of the value on their own. If it is adopted, it should be adopted in one migration and before
-the API has more consumers. A half-enveloped API is worse than either end state. See
-[ROADMAP R9](ROADMAP.md#r9-decide-on-the-response-envelope).
+**Status: ✅ Decided — no full envelope (R9, option C).** The reference wraps every response in
+`{data, errors, meta}` so pagination metadata, multiple errors, and the trace ID have a defined home.
+But §2.2 (error shape + code), §2.3 (pagination total in the body), and §2.4 (request ID) already
+deliver all three on their own, so the full envelope — the most invasive change available (every
+route, every response model, every frontend call site, and now the generated types) — would buy only
+structural uniformity. The one functional gap it also closed, **multiple validation errors in one
+response**, was closed directly instead: every error body carries a uniform `errors[]` array (see
+§2.2 / `docs/api/conventions.md`), with the top level mirroring `errors[0]` for back-compat. Success
+responses stay bare. See [ROADMAP R9](ROADMAP.md#r9-decide-on-the-response-envelope).
 
 ---
 

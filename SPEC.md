@@ -560,9 +560,11 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 **Implemented.** Services raise typed exceptions instead of bare builtins, so
 errors carry the offending **field**, a **duplicate** gets its own **409**, and
-every service error comes back in one shape — `{"detail", "code", "field"?}` —
-with a stable, machine-readable **`code`** the frontend branches on (instead of
-parsing status or message text).
+every service error comes back in one shape — `{"detail", "code", "field"?,
+"errors"[]}` — with a stable, machine-readable **`code`** the frontend branches on
+(instead of parsing status or message text). The uniform **`errors`** array lists
+every failure at once — all bad fields of a `422` in one response — with the top
+level mirroring `errors[0]` (ROADMAP R9, option C).
 
 **There is no shared base class.** Each error **inherits the builtin it maps to**
 and **carries its own** `code` (`ErrorCode`), `message`, and optional `field`.
@@ -660,10 +662,10 @@ reaches us as `None` and we raise the coded error rather than FastAPI's uncoded
 **Request validation is reshaped too.** A `RequestValidationError` handler in
 `app/main.py` turns FastAPI's default 422 *array* into the one shape, using a
 distinct `REQUEST_VALIDATION` code (→ 422) so a malformed request stays
-distinguishable from a business-rule `VALIDATION` (→ 400). The `field` comes from
-the first error's `loc` (with the `body`/`path` prefix dropped). With this,
-**every backend error source returns `{detail, code, field?}`** — the remaining
-R2 work is on the frontend (branch on `code`, validate the body with `zod`).
+distinguishable from a business-rule `VALIDATION` (→ 400). Every Pydantic error
+becomes an `errors[]` element (`field` from its `loc`, with the `body`/`path`
+prefix dropped); the top level mirrors the first (R9/C). With this, **every
+backend error source returns `{detail, code, field?, errors[]}`** in one shape.
 
 ## Populating the catalog
 

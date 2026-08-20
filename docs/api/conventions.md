@@ -37,12 +37,18 @@ Every error — from any layer — has **one shape**:
 { "detail": "human-readable message",
   "code": "MACHINE_CODE",
   "field": "optional; the offending field",
-  "request_id": "correlation id (also the X-Request-ID header)" }
+  "request_id": "correlation id (also the X-Request-ID header)",
+  "errors": [ { "code": "MACHINE_CODE", "field": "email", "detail": "…" } ] }
 ```
 
 - `detail` is for humans; **branch on `code`, never on `detail` or the raw status.**
 - `field` is present on validation errors that concern a specific field.
 - `request_id` ties the error to its server log line (see Observability).
+- **`errors` is a uniform array on every error body** — one element for most
+  failures, and **all of them at once** for a multi-field request validation
+  (`422`), so a form learns its three bad inputs in one round-trip, not three. The
+  top-level `detail`/`code`/`field` always mirror `errors[0]` (so single-error
+  clients need no change). An element's `field` is `null` for a whole-body error.
 
 **`code` is a fixed enum**, and each code maps to exactly one HTTP status (the
 backend derives status from code, so they can't disagree):
