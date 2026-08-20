@@ -152,16 +152,16 @@ gcloud run deploy $SERVICE \
 
 Firebase Hosting can forward matching paths to Cloud Run. If the SPA and API answer on the same origin, then **CORS is not involved at all** (no `ALLOWED_ORIGINS`, no "deploy the frontend then go back and redeploy the API" ordering), and **`VITE_API_BASE_URL` can be empty**, which deletes the build-time baking trap that `DEPLOY.md` calls out as biting everyone.
 
-Firebase forwards the full path, so the API has to actually answer on `/api/...`. Mount the routers under a parent prefix in `app/main.py`:
+Firebase forwards the full path, so the API has to actually answer on `/api/...`. This is already done (ROADMAP R5): the routers mount under a **versioned** parent prefix in `app/main.py`, so a future breaking change can ship as `/api/v2` without breaking existing clients:
 
 ```python
-api = APIRouter(prefix="/api")
-api.include_router(auth_router)
+api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(auth_router)
 # ... the rest
-app.include_router(api)
+app.include_router(api_v1)
 ```
 
-Keep `/health` at the root so platform probes have an unprefixed target.
+`/health` stays at the root so platform probes have an unprefixed target that survives version bumps. The `/api/**` rewrite below already covers `/api/v1/**`.
 
 `firebase.json` (order matters, the run rewrite must precede the SPA catch-all or the catch-all swallows API calls):
 
@@ -177,7 +177,7 @@ Keep `/health` at the root so platform probes have an unprefixed target.
 }
 ```
 
-> **Coordinated change:** adding the `/api` prefix changes the API's public paths. If the Render deployment is still live, its `VITE_API_BASE_URL` needs the `/api` suffix at the same time, and the frontend needs a **rebuild**, not just a redeploy.
+> **Coordinated change:** the `/api/v1` prefix is part of the API's public paths. The frontend already bakes it in via `API_PREFIX` in `src/api/client.ts` (not `VITE_API_BASE_URL`, which stays the bare origin), so `VITE_API_BASE_URL` is empty for a same-origin deploy and the full backend origin for a cross-origin one. A prefix bump (`/api/v2`) is a coordinated change in both repos plus a frontend **rebuild**, not just a redeploy.
 
 **Read for this stage**
 
@@ -442,7 +442,7 @@ Set a **budget alert** on the project before you walk away. Two staging and prod
 
 ```bash
 curl https://<service>.run.app/health            # direct to Cloud Run
-curl https://<site>.web.app/api/units?limit=3    # through the rewrite
+curl https://<site>.web.app/api/v1/units?limit=3 # through the rewrite
 ```
 
 Open the site, register, build an army. In the browser Network tab, confirm API calls go to **your own origin** under `/api/...` with no CORS preflight. A preflight means the rewrite is not matching and you are hitting Cloud Run cross-origin.
@@ -452,7 +452,7 @@ Open the site, register, build an army. In the browser Network tab, confirm API 
 | Symptom | Cause | Fix |
 |---|---|---|
 | API calls return HTML with a `200` | The `/api/**` rewrite is missing or ordered after the SPA catch-all | Put the run rewrite first in `firebase.json` |
-| `404` on every API path | Routers not mounted under `/api`, or wrong service/region in the rewrite | Match the prefix to the rewrite exactly |
+| `404` on every API path | Routers not mounted under `/api/v1`, or wrong service/region in the rewrite, or the frontend's `API_PREFIX` drifted from the backend prefix | Match the backend prefix, the frontend `API_PREFIX`, and the rewrite (`/api/**` covers `/api/v1/**`) |
 | Container will not start, logs mention `SECRET_KEY` | `APP_ENV=production` with no secret bound | Bind it with `--set-secrets` |
 | Background work never completes | Cloud Run throttles CPU after the response | Stage 5 |
 | `FATAL: too many connections` | N instances times the pool size exceeds the instance limit | Lower `--max-instances`, shrink the pool (Stage 5) |

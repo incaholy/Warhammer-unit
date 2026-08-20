@@ -100,9 +100,9 @@ balancers and uptime monitors want a path that outlives any API version.
 Without a version prefix there is no way to ship a breaking change without breaking every deployed
 client at the same instant. The prefix costs one router mount now and a migration later.
 
-**Status: Not yet.** Routers mount at the root (`app/main.py:94`). See
-[ROADMAP R5](ROADMAP.md#r5-add-the-apiv1-prefix). `DEPLOY-GCP.md:155` already requires a parent prefix
-for the Firebase rewrite, so this lands with that work.
+**Status: ✅ Done (R5).** Every resource router mounts under a `/api/v1` parent in `app/main.py`;
+`GET /health` stays unversioned at the root. The frontend bakes the prefix into `API_PREFIX` in
+`src/api/client.ts`, and the Firebase rewrite's `/api/**` already covers `/api/v1/**`.
 
 ### 2.2 One error shape, with stable codes
 

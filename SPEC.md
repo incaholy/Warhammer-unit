@@ -344,7 +344,11 @@ One router module per resource; each is backed by one service and defines its
 own request/response schemas (`*_Create`, `*_Read`) so internal model fields
 aren't exposed accidentally. All ids in paths and schemas are UUIDs.
 
-Router modules (each mounted in `app/main.py` with `app.include_router(...)`):
+Every resource router mounts under a versioned `/api/v1` parent (ROADMAP R5), so
+the paths below are served at `/api/v1/…`; `GET /health` stays unversioned at the
+root. A future breaking change ships as `/api/v2` without breaking existing clients.
+
+Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 
 | Module | Backing service | Resource |
 |---|---|---|
