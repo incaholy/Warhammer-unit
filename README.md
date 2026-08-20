@@ -48,7 +48,8 @@ Everything is driven through the `Makefile` — run `make help` for the full lis
 |---|---|
 | `make setup` | Install deps, create the DB, run migrations (one-shot bootstrap). |
 | `make run` | Run the API locally with auto-reload. |
-| `make test` | Run the test suite. |
+| `make test` | Run the test suite (fast in-memory SQLite tier). |
+| `make docker-test` | Run the suite against real Postgres (the parity tier — schema built from the migrations). |
 | `make check` | Pre-PR gate: strict lint + format-check + tests. |
 | `make lint` / `make format` | Read-only lint overview / auto-fix + format (mutating). |
 | `make migrate` | Apply Alembic migrations up to head. |
@@ -59,6 +60,13 @@ Everything is driven through the `Makefile` — run `make help` for the full lis
 
 After editing `models.py`, generate a migration with
 `alembic revision --autogenerate -m "msg"`, then `make migrate`.
+
+**Test tiers.** `make test` runs the fast in-memory SQLite tier. To run the same
+suite against Postgres (the parity tier — schema built by the real migrations,
+catching length/timestamp/native-type divergences), set `TEST_DATABASE_URL` to a
+**throwaway** database and run `pytest`, or use `make docker-test` (containerized).
+The parity setup drops and rebuilds the schema, so it refuses any `TEST_DATABASE_URL`
+whose name lacks `test` or that matches `DATABASE_URL`. See `.env.example`.
 
 ## Layout
 
