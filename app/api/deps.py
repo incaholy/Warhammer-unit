@@ -17,7 +17,7 @@ from app.core.db.connection import get_session
 from app.core.db.models import User
 from app.core.security import ForbiddenError, UnauthorizedError, decode_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login", auto_error=False)
 
 
 def get_current_user(

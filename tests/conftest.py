@@ -20,6 +20,29 @@ from app.core.db.models import Army, Faction, Subfaction, Unit, User
 from app.core.security import create_access_token
 from app.main import app
 
+# The API version prefix all resource routes mount under (ROADMAP R5). Tests
+# address routes by their bare path (e.g. "/units"); this client prepends the
+# prefix so every test doesn't have to. "/health" is unversioned and passes
+# through unchanged.
+API_V1_PREFIX = "/api/v1"
+
+
+class PrefixTestClient(TestClient):
+    """A TestClient that prepends `API_V1_PREFIX` to absolute API paths, mirroring
+    a real client's base URL — so tests read against the logical resource path
+    while the app serves it under the versioned prefix."""
+
+    def request(self, method, url, *args, **kwargs):
+        if (
+            isinstance(url, str)
+            and url.startswith("/")
+            and not url.startswith(API_V1_PREFIX)
+            and not url.startswith("/health")
+        ):
+            url = API_V1_PREFIX + url
+        return super().request(method, url, *args, **kwargs)
+
+
 # Unique-ish suffixes for fields with UNIQUE constraints (username, email,
 # faction name). A single global counter is enough: each test gets a fresh DB,
 # so uniqueness only has to hold within one test.
@@ -69,7 +92,7 @@ def client_fixture(session):
             raise
 
     app.dependency_overrides[get_session] = _session_override
-    with TestClient(app) as client:
+    with PrefixTestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
 
@@ -78,7 +101,7 @@ def _authed_client(user):
     """A fresh TestClient bearing `user`'s JWT, with the user exposed as `.user`.
     Its own client (not the shared `client`) so auth_client and admin_client can be
     used together in one test."""
-    c = TestClient(app)
+    c = PrefixTestClient(app)
     c.headers["Authorization"] = f"Bearer {create_access_token(str(user.id))}"
     c.user = user
     return c

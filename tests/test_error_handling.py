@@ -9,7 +9,7 @@ re-raises server exceptions instead of surfacing the response.
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import PrefixTestClient
 from sqlalchemy.exc import IntegrityError
 
 from app.core.db.connection import get_session
@@ -20,7 +20,7 @@ from app.main import app
 @pytest.fixture(name="safe_client")
 def safe_client_fixture(session):
     app.dependency_overrides[get_session] = lambda: session
-    with TestClient(app, raise_server_exceptions=False) as c:
+    with PrefixTestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
 

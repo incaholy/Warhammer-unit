@@ -12,7 +12,7 @@ mounted at the bottom.
 import logging
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -132,10 +132,16 @@ def health() -> dict[str, str]:
 
 
 # --- routers ---
+# Every resource router mounts under a versioned prefix so a future breaking
+# change can ship as /api/v2 without breaking existing clients. `/health` stays
+# unversioned (above) on purpose — platform tooling wants a path that survives
+# version bumps. See ROADMAP R5 / ARCHITECTURE §2.1.
 
-app.include_router(auth_router)
-app.include_router(user_router)
-app.include_router(unit_router)
-app.include_router(faction_router)
-app.include_router(inventory_router)
-app.include_router(army_router)
+api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(auth_router)
+api_v1.include_router(user_router)
+api_v1.include_router(unit_router)
+api_v1.include_router(faction_router)
+api_v1.include_router(inventory_router)
+api_v1.include_router(army_router)
+app.include_router(api_v1)
