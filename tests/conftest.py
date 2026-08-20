@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -35,12 +36,36 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 _ROOT = Path(__file__).resolve().parent.parent
 
 
+def _guard_parity_target(url: str) -> None:
+    """Refuse to run the parity tier against anything that isn't obviously
+    disposable. This tier `DROP SCHEMA ... CASCADE`s and rebuilds, so a
+    `TEST_DATABASE_URL` pointed at a real database would wipe it. The guard turns
+    that silent data loss into a loud, up-front error."""
+    target = make_url(url)
+    name = (target.database or "").lower()
+    if "test" not in name:
+        raise RuntimeError(
+            f"refusing to run the Postgres parity tier: TEST_DATABASE_URL names database "
+            f"{target.database!r}, which does not contain 'test'. This tier drops and "
+            f"rebuilds the schema — point it at a throwaway database (e.g. ..._test)."
+        )
+    prod = os.getenv("DATABASE_URL")
+    if prod:
+        p = make_url(prod)
+        if (target.host, target.port, target.database) == (p.host, p.port, p.database):
+            raise RuntimeError(
+                "refusing to run the Postgres parity tier: TEST_DATABASE_URL points at the "
+                "same database as DATABASE_URL. Use a separate throwaway database."
+            )
+
+
 def _build_postgres_schema(url: str) -> None:
     """Drop everything and rebuild the schema by running the migrations, so each
     test starts from a freshly *migrated* Postgres database."""
     from alembic import command
     from alembic.config import Config
 
+    _guard_parity_target(url)
     engine = create_engine(url)
     with engine.begin() as conn:
         conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
