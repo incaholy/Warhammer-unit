@@ -31,39 +31,45 @@ def test_logging_filter_injects_the_current_request_id():
     assert record.request_id == "rid-under-test"
 
 
-def test_unhandled_500_logs_the_traceback(session, monkeypatch):
-    # The 500 handler is sync, so FastAPI runs it in a worker thread where
-    # sys.exc_info() is empty; the traceback must be captured via exc_info=exc,
-    # not logger.exception(). Assert the emitted JSON log line actually carries it.
-    #
-    # Self-contained: set the get_session override and use a raise-safe client in
-    # a `with` block (the proven pattern) so the request reliably runs against the
-    # test session and returns the 500 response instead of hitting the real engine.
+def test_unhandled_500_logs_the_traceback():
+    # The 500 handler must capture the traceback via `exc_info=exc`, NOT
+    # `logger.exception()`: FastAPI runs sync exception handlers in a worker thread
+    # where the thread-local `sys.exc_info()` is empty, so `logger.exception()`
+    # would log "NoneType: None". This drives `_unhandled` directly (no HTTP, no
+    # threadpool, no DB — so it's deterministic) with `sys.exc_info()` deliberately
+    # empty: only `exc_info=exc` can then record the traceback.
     import io
     import logging
 
-    from conftest import PrefixTestClient
+    from starlette.requests import Request
 
-    from app.core.db.connection import get_session
-    from app.core.services import service_unit
-    from app.main import app
+    from app import main
 
-    def boom(self, unit_id):
+    try:
         raise RuntimeError("kaboom-secret")
+    except RuntimeError as exc:
+        err = exc  # captured out of the except block -> sys.exc_info() is now empty
 
-    monkeypatch.setattr(service_unit.UnitService, "get_unit", boom)
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/x",
+        "query_string": b"",
+        "headers": [],
+        "scheme": "http",
+        "server": ("test", 80),
+    }
+    request = Request(scope)
+    request.state.request_id = "rid-test"
 
-    app.dependency_overrides[get_session] = lambda: session
     buf = io.StringIO()
     handler = logging.getLogger("app").handlers[0]
     original = handler.stream
     handler.setStream(buf)
     try:
-        with PrefixTestClient(app, raise_server_exceptions=False) as safe:
-            safe.get("/units/11111111-1111-1111-1111-111111111111")
+        main._unhandled(request, err)
     finally:
         handler.setStream(original)
-        app.dependency_overrides.clear()
 
     log = buf.getvalue()
     assert "Traceback" in log and "RuntimeError: kaboom-secret" in log
