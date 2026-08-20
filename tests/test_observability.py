@@ -31,6 +31,39 @@ def test_logging_filter_injects_the_current_request_id():
     assert record.request_id == "rid-under-test"
 
 
+def test_unhandled_500_logs_the_traceback(client, monkeypatch):
+    # The 500 handler is sync, so FastAPI runs it in a worker thread where
+    # sys.exc_info() is empty; the traceback must be captured via exc_info=exc,
+    # not logger.exception(). Assert the emitted JSON log line actually carries it.
+    # `client` sets up the get_session override; use a raise-safe client so the
+    # 500 response (and its log line) come back instead of re-raising.
+    import io
+    import logging
+
+    from conftest import PrefixTestClient
+
+    from app.core.services import service_unit
+    from app.main import app
+
+    def boom(self, unit_id):
+        raise RuntimeError("kaboom-secret")
+
+    monkeypatch.setattr(service_unit.UnitService, "get_unit", boom)
+
+    buf = io.StringIO()
+    handler = logging.getLogger("app").handlers[0]
+    original = handler.stream
+    handler.setStream(buf)
+    try:
+        safe = PrefixTestClient(app, raise_server_exceptions=False)
+        safe.get("/units/11111111-1111-1111-1111-111111111111")
+    finally:
+        handler.setStream(original)
+
+    log = buf.getvalue()
+    assert "Traceback" in log and "RuntimeError: kaboom-secret" in log
+
+
 def test_sentry_init_is_a_noop_without_a_dsn(monkeypatch):
     monkeypatch.delenv("SENTRY_DSN", raising=False)
     monkeypatch.setattr(observability, "_sentry_enabled", False)

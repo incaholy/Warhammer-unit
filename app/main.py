@@ -158,7 +158,11 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
 # and a TypeError (almost always a bug) would be mislabelled a client 400.
 @app.exception_handler(Exception)
 def _unhandled(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("unhandled error on %s %s", request.method, request.url.path)
+    # Pass the exception explicitly (exc_info=exc), NOT logger.exception(), which
+    # reads the thread-local sys.exc_info(): FastAPI runs sync exception handlers
+    # in a worker thread where that context is empty, so the traceback would be
+    # lost. (_integrity_error above does the same for the same reason.)
+    logger.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
     return _error_response(
         request,
         status=CODE_STATUS[ErrorCode.INTERNAL],
