@@ -66,13 +66,19 @@ def _error_response(
     detail: str,
     code: ErrorCode,
     field: str | None = None,
+    errors: list[dict[str, object]] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
-    # The one place an error body is built: {detail, code, field?} plus the
-    # request_id (the correlation key — also on the X-Request-ID response header,
-    # set here too so the header is present even on the catch-all 500, whose
-    # handler runs outside the request-ID middleware).
-    body: dict[str, object] = {"detail": detail, "code": code}
+    # The one place an error body is built. Shape (ROADMAP R9, option C):
+    #   {detail, code, field?, request_id, errors: [{code, field, detail}, ...]}
+    # `errors` is a UNIFORM array on every error body — a single element for most
+    # failures, all of them for a multi-field request-validation (422). The
+    # top-level detail/code/field mirror errors[0] for back-compat. request_id is
+    # the correlation key, also set on the X-Request-ID header here so it's present
+    # even on the catch-all 500 (whose handler runs outside the request-ID middleware).
+    if errors is None:
+        errors = [{"code": code, "field": field, "detail": detail}]
+    body: dict[str, object] = {"detail": detail, "code": code, "errors": errors}
     if field is not None:
         body["field"] = field
     rid = getattr(request.state, "request_id", None)
@@ -122,17 +128,26 @@ for _service_exc in _SERVICE_ERRORS:
 # distinguishable from a business-rule VALIDATION (-> 400), and code->status holds.
 @app.exception_handler(RequestValidationError)
 def _request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    errors = exc.errors()
-    first = errors[0] if errors else {}
+    # Pydantic finds *every* bad field at once; surface them all in `errors` so a
+    # form learns its three problems in one round-trip, not three (ROADMAP R9/C).
     # loc is like ("body", "email") or ("path", "unit_id"); drop the location
     # prefix to get the field name (dotted for a nested body field).
-    field = ".".join(str(p) for p in first.get("loc", ())[1:]) or None
+    errors = [
+        {
+            "code": ErrorCode.REQUEST_VALIDATION,
+            "field": ".".join(str(p) for p in e.get("loc", ())[1:]) or None,
+            "detail": e.get("msg", "invalid request"),
+        }
+        for e in exc.errors()
+    ] or [{"code": ErrorCode.REQUEST_VALIDATION, "field": None, "detail": "invalid request"}]
+    first = errors[0]
     return _error_response(
         request,
         status=CODE_STATUS[ErrorCode.REQUEST_VALIDATION],
-        detail=first.get("msg", "invalid request"),
+        detail=first["detail"],
         code=ErrorCode.REQUEST_VALIDATION,
-        field=field,
+        field=first["field"],
+        errors=errors,
     )
 
 
