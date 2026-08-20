@@ -37,5 +37,5 @@ pytest                               # run tests (once tests/ exists)
   raise `HTTPException` in a service.
 - Schema changes go through `models.py` + an Alembic migration, never raw SQL.
 - Keep stat names matching the datasheet terms used in `models.py`
-  (`movement`, `toughness`, `save`, `wounds`, `leadership`,
+  (`movement`, `toughness`, `armor_save`, `wounds`, `leadership`,
   `objective_control`).
