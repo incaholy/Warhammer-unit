@@ -307,12 +307,12 @@ remains the one open piece.
   other docs. It is the only doc a new reader is guaranteed to open.
 - Docs change in the same PR as the code that changes them.
 
-**Status: Partial.** `openapi.json` is checked in, regenerable, and currently fresh, which is ahead of
-the reference. Four exceptions: nothing verifies that freshness, the frontend still hand-maintains
-`src/api/types.ts`, there is no `docs/` directory at all (so no `conventions.md`), and `SPEC.md` is
-89KB in one file while `README.md` is two lines. See
-[ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types) and
-[R10](ROADMAP.md#r10-write-a-readme).
+**Status: Mostly done (R8, R10).** `openapi.json` is checked in and now **CI-verified fresh**; the
+frontend's types are **generated from it** (`npm run gen:api` → `src/api/schema.d.ts`, re-exported by
+`types.ts`), not hand-maintained; `docs/api/conventions.md` is the cross-repo contract; and `README.md`
+is a real front door (R10). One piece remains: `SPEC.md` is still an 89KB monolith — splitting it into
+audience-scoped docs is the outstanding work. See
+[ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
 
 ---
 
@@ -334,12 +334,12 @@ the reference. Four exceptions: nothing verifies that freshness, the frontend st
   component. Ad hoc utility strings copy-pasted between components are what this avoids.
 - **TypeScript runs in `strict` mode.**
 
-**Status: Partial.** The client, query layer, and styling are all true in the code today and are the
-strongest work in either repo, but none of them is enforced: no lint rule stops a second `fetch` call
-site or an inline `useQuery` from appearing, so they are conventions rather than guarantees. Types
-are hand-maintained, `strict` is off, and the client asserts rather than validates. See
-[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter) and
-[R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
+**Status: Partial.** The client, query layer, and styling are the strongest work in either repo.
+`strict` is on (R1), the client **validates** the error boundary with zod rather than asserting (R2),
+and types are **generated** from `openapi.json` rather than hand-maintained (R8). What remains is
+enforcement: no lint rule stops a second `fetch` call site or an inline `useQuery` from appearing, so
+those stay conventions rather than guarantees. See
+[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter).
 
 ---
 
