@@ -252,9 +252,10 @@ around that. See [ROADMAP R3](ROADMAP.md#r3-move-the-transaction-boundary-into-g
   time rather than in review.
 - Stat and column names match the datasheet terms in `models.py`.
 
-**Status: Partial.** The first two hold. No test runs a migration: the suite builds its schema with
-`SQLModel.metadata.create_all()`, which reads the models and bypasses Alembic entirely. See
-[ROADMAP R6](ROADMAP.md#r6-add-a-postgres-parity-tier-driven-by-migrations).
+**Status: ✅ Done (R6).** The parity tier builds its schema by running `alembic upgrade head`, and
+`tests/test_migrations.py` autogenerates a diff against the models and fails on any difference — so
+model/migration drift is caught in CI, not at deploy time. The fast SQLite tier still uses
+`create_all` for speed.
 
 ---
 
@@ -280,12 +281,13 @@ scraper into a fetch half and a parse half, then testing the parse half against 
 the test path. The seam itself should eventually be covered too, by a fake fetch rather than by
 hitting the live site.
 
-**Status: Partial.** The fast tier is in good shape. The parity tier does not exist in a meaningful
-sense: `make docker-test` boots a Postgres container and sets `DATABASE_URL`, but
-`tests/conftest.py:31` hardcodes `create_engine("sqlite://")` and never reads that variable, so the
-containerized run executes the whole suite on in-memory SQLite and passes without proving anything.
-That is the more dangerous state to be in, because it looks like coverage. See
-[ROADMAP R6](ROADMAP.md#r6-add-a-postgres-parity-tier-driven-by-migrations).
+**Status: ✅ Done (R6).** Both tiers exist. `tests/conftest.py` selects the backend: with
+`TEST_DATABASE_URL` set it runs the whole suite against Postgres on a schema built by the real
+migrations; unset, it uses the fast in-memory SQLite tier. A dedicated variable (not `DATABASE_URL`)
+keeps a plain `pytest` from ever touching a developer's database. CI runs both jobs — the fast SQLite
+tier and the Postgres parity tier (a `postgres:16` service) — on every push, and `make docker-test`
+runs the parity tier in a container. The external-dependency seam (a fake fetch for the scraper)
+remains the one open piece.
 
 ---
 

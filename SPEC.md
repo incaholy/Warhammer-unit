@@ -948,10 +948,13 @@ API tests come with the API layer — one file per router (`test_api_user.py`,
 `test_api_auth.py` and authorization tests once auth lands (a user can't read
 another user's armies; a non-admin can't write the catalog).
 
-- Service tests run against an in-memory SQLite database (one fresh schema per
-  test, foreign keys enforced) so SQL actually executes. This is equivalent to
-  Postgres for our schema (UUIDs, JSON, CHECKs, and cascades all behave), though
-  Postgres-specific behavior isn't exercised.
+- Two test tiers (ROADMAP R6). By default, tests run against an in-memory SQLite
+  database (one fresh schema per test, foreign keys enforced) so SQL actually
+  executes — fast, no services. Set `TEST_DATABASE_URL` to a Postgres URL and the
+  same suite runs against Postgres with the schema built by `alembic upgrade head`
+  (the parity tier), which exercises what SQLite can't: `VARCHAR` length limits,
+  tz-aware timestamps, and native `UUID`/`JSON`. `tests/test_migrations.py` also
+  asserts the migrations and models agree. CI runs both tiers.
 - API tests use FastAPI's `TestClient` with the `get_session` dependency
   overridden (`app.dependency_overrides[get_session] = ...`) so routers run
   against the test session.
@@ -986,10 +989,10 @@ Pieces (all at the repo root):
     **service name** (`postgresql+psycopg2://…@db:5432/…`), not `localhost`.
   `make run` stays the fast bare-metal path; compose is the one-command path.
 - **`docker-compose.test.yml`** — an overlay that points the suite at a
-  throwaway Postgres (a separate `POSTGRES_DB`, no persistent volume) so
-  integration tests run against real Postgres without touching dev data. (The
-  current pytest suite uses in-memory SQLite and needs none of this; this is the
-  Postgres-parity option for later.)
+  throwaway Postgres (a separate `POSTGRES_DB`, no persistent volume) via
+  `TEST_DATABASE_URL`, so `make docker-test` runs the parity tier against real
+  Postgres without touching dev data (ROADMAP R6). A plain `pytest` ignores that
+  variable and uses the fast in-memory SQLite tier.
 
 Cross-cutting concerns:
 
