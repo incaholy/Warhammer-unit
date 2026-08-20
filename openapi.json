@@ -28,13 +28,13 @@
         }
       }
     },
-    "/auth/register": {
+    "/api/v1/auth/register": {
       "post": {
         "tags": [
           "auth"
         ],
         "summary": "Register",
-        "operationId": "register_auth_register_post",
+        "operationId": "register_api_v1_auth_register_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -69,18 +69,18 @@
         }
       }
     },
-    "/auth/login": {
+    "/api/v1/auth/login": {
       "post": {
         "tags": [
           "auth"
         ],
         "summary": "Login",
-        "operationId": "login_auth_login_post",
+        "operationId": "login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/Body_login_auth_login_post"
+                "$ref": "#/components/schemas/Body_login_api_v1_auth_login_post"
               }
             }
           },
@@ -110,13 +110,13 @@
         }
       }
     },
-    "/me": {
+    "/api/v1/me": {
       "get": {
         "tags": [
           "users"
         ],
         "summary": "Get Me",
-        "operationId": "get_me_me_get",
+        "operationId": "get_me_api_v1_me_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -136,14 +136,14 @@
         ]
       }
     },
-    "/users/{user_id}": {
+    "/api/v1/users/{user_id}": {
       "patch": {
         "tags": [
           "users"
         ],
         "summary": "Set User Admin",
         "description": "Grant/revoke admin on a user (admin only). The first admin is still\nbootstrapped out of band via `make create-admin`.",
-        "operationId": "set_user_admin_users__user_id__patch",
+        "operationId": "set_user_admin_api_v1_users__user_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -195,13 +195,13 @@
         }
       }
     },
-    "/units": {
+    "/api/v1/units": {
       "post": {
         "tags": [
           "units"
         ],
         "summary": "Create Unit",
-        "operationId": "create_unit_units_post",
+        "operationId": "create_unit_api_v1_units_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -245,7 +245,7 @@
           "units"
         ],
         "summary": "List Units",
-        "operationId": "list_units_units_get",
+        "operationId": "list_units_api_v1_units_get",
         "parameters": [
           {
             "name": "faction_id",
@@ -329,11 +329,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Unit_Read"
-                  },
-                  "title": "Response List Units Units Get"
+                  "$ref": "#/components/schemas/Page_Unit_Read_"
                 }
               }
             }
@@ -351,13 +347,81 @@
         }
       }
     },
-    "/units/{unit_id}": {
+    "/api/v1/units/facets": {
+      "get": {
+        "tags": [
+          "units"
+        ],
+        "summary": "Unit Facets",
+        "operationId": "unit_facets_api_v1_units_facets_get",
+        "parameters": [
+          {
+            "name": "subfaction_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subfaction Id"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "case-insensitive name search",
+              "title": "Q"
+            },
+            "description": "case-insensitive name search"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitFacets"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/units/{unit_id}": {
       "get": {
         "tags": [
           "units"
         ],
         "summary": "Get Unit",
-        "operationId": "get_unit_units__unit_id__get",
+        "operationId": "get_unit_api_v1_units__unit_id__get",
         "parameters": [
           {
             "name": "unit_id",
@@ -398,7 +462,7 @@
           "units"
         ],
         "summary": "Update Unit",
-        "operationId": "update_unit_units__unit_id__patch",
+        "operationId": "update_unit_api_v1_units__unit_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -454,7 +518,7 @@
           "units"
         ],
         "summary": "Delete Unit",
-        "operationId": "delete_unit_units__unit_id__delete",
+        "operationId": "delete_unit_api_v1_units__unit_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -489,13 +553,13 @@
         }
       }
     },
-    "/units/{unit_id}/weapons": {
+    "/api/v1/units/{unit_id}/weapons": {
       "post": {
         "tags": [
           "units"
         ],
         "summary": "Link Weapon",
-        "operationId": "link_weapon_units__unit_id__weapons_post",
+        "operationId": "link_weapon_api_v1_units__unit_id__weapons_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -547,13 +611,13 @@
         }
       }
     },
-    "/units/{unit_id}/abilities": {
+    "/api/v1/units/{unit_id}/abilities": {
       "post": {
         "tags": [
           "units"
         ],
         "summary": "Link Ability",
-        "operationId": "link_ability_units__unit_id__abilities_post",
+        "operationId": "link_ability_api_v1_units__unit_id__abilities_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -605,13 +669,13 @@
         }
       }
     },
-    "/units/{unit_id}/weapons/{weapon_id}": {
+    "/api/v1/units/{unit_id}/weapons/{weapon_id}": {
       "delete": {
         "tags": [
           "units"
         ],
         "summary": "Unlink Weapon",
-        "operationId": "unlink_weapon_units__unit_id__weapons__weapon_id__delete",
+        "operationId": "unlink_weapon_api_v1_units__unit_id__weapons__weapon_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -656,13 +720,13 @@
         }
       }
     },
-    "/units/{unit_id}/abilities/{ability_id}": {
+    "/api/v1/units/{unit_id}/abilities/{ability_id}": {
       "delete": {
         "tags": [
           "units"
         ],
         "summary": "Unlink Ability",
-        "operationId": "unlink_ability_units__unit_id__abilities__ability_id__delete",
+        "operationId": "unlink_ability_api_v1_units__unit_id__abilities__ability_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -707,24 +771,55 @@
         }
       }
     },
-    "/factions": {
+    "/api/v1/factions": {
       "get": {
         "tags": [
           "catalog"
         ],
         "summary": "List Factions",
-        "operationId": "list_factions_factions_get",
+        "operationId": "list_factions_api_v1_factions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Faction_Read"
-                  },
-                  "type": "array",
-                  "title": "Response List Factions Factions Get"
+                  "$ref": "#/components/schemas/Page_Faction_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -736,16 +831,21 @@
           "catalog"
         ],
         "summary": "Create Faction",
-        "operationId": "create_faction_factions_post",
+        "operationId": "create_faction_api_v1_factions_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Faction_Create"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -768,59 +868,102 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
+        }
       }
     },
-    "/factions/taxonomy": {
+    "/api/v1/subfactions": {
       "get": {
         "tags": [
           "catalog"
         ],
-        "summary": "Faction Taxonomy",
-        "description": "The allowed subfactions under each faction (for building dropdowns).\n\nSourced from the `FACTION_SUBFACTIONS` map, not the DB \u2014 these are the values\n`create_subfaction` will accept, whether or not any have been created yet.",
-        "operationId": "faction_taxonomy_factions_taxonomy_get",
+        "summary": "List Subfactions",
+        "description": "Every created subfaction, optionally filtered to one faction.\n\nDistinct from GET /taxonomy: that publishes the *allowed* subfaction names\n(from the constant); this lists the rows actually created in the DB (with ids).",
+        "operationId": "list_subfactions_api_v1_subfactions_get",
+        "parameters": [
+          {
+            "name": "faction_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Faction Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "type": "object",
-                  "title": "Response Faction Taxonomy Factions Taxonomy Get"
+                  "$ref": "#/components/schemas/Page_Subfaction_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
           }
         }
-      }
-    },
-    "/subfactions": {
+      },
       "post": {
         "tags": [
           "catalog"
         ],
         "summary": "Create Subfaction",
-        "operationId": "create_subfaction_subfactions_post",
+        "operationId": "create_subfaction_api_v1_subfactions_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Subfaction_Create"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -843,21 +986,45 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
+        }
       }
     },
-    "/subfactions/{subfaction_id}": {
+    "/api/v1/taxonomy": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Faction Taxonomy",
+        "description": "The allowed subfactions under each faction (for building dropdowns).\n\nSourced from the `FACTION_SUBFACTIONS` map, not the DB \u2014 these are the values\n`create_subfaction` will accept, whether or not any have been created yet.\n\nDeliberately *not* under `/factions/...`: it's static reference data, not a\nfaction resource, and `/factions/taxonomy` would collide with a future\n`GET /factions/{faction_id}` (both claim the same path slot). See ROADMAP R12.",
+        "operationId": "faction_taxonomy_api_v1_taxonomy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object",
+                  "title": "Response Faction Taxonomy Api V1 Taxonomy Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/subfactions/{subfaction_id}": {
       "delete": {
         "tags": [
           "catalog"
         ],
         "summary": "Delete Subfaction",
-        "operationId": "delete_subfaction_subfactions__subfaction_id__delete",
+        "operationId": "delete_subfaction_api_v1_subfactions__subfaction_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -892,45 +1059,27 @@
         }
       }
     },
-    "/weapons": {
-      "get": {
-        "tags": [
-          "catalog"
-        ],
-        "summary": "List Weapons",
-        "operationId": "list_weapons_weapons_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Weapon_Read"
-                  },
-                  "type": "array",
-                  "title": "Response List Weapons Weapons Get"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/api/v1/weapons": {
       "post": {
         "tags": [
           "catalog"
         ],
         "summary": "Create Weapon",
-        "operationId": "create_weapon_weapons_post",
+        "operationId": "create_weapon_api_v1_weapons_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Weapon_Create"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -953,21 +1102,70 @@
               }
             }
           }
-        },
-        "security": [
+        }
+      },
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List Weapons",
+        "operationId": "list_weapons_api_v1_weapons_get",
+        "parameters": [
           {
-            "OAuth2PasswordBearer": []
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
-        ]
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Weapon_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
-    "/weapons/{weapon_id}": {
+    "/api/v1/weapons/{weapon_id}": {
       "patch": {
         "tags": [
           "catalog"
         ],
         "summary": "Update Weapon",
-        "operationId": "update_weapon_weapons__weapon_id__patch",
+        "operationId": "update_weapon_api_v1_weapons__weapon_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1023,7 +1221,7 @@
           "catalog"
         ],
         "summary": "Delete Weapon",
-        "operationId": "delete_weapon_weapons__weapon_id__delete",
+        "operationId": "delete_weapon_api_v1_weapons__weapon_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1058,45 +1256,27 @@
         }
       }
     },
-    "/abilities": {
-      "get": {
-        "tags": [
-          "catalog"
-        ],
-        "summary": "List Abilities",
-        "operationId": "list_abilities_abilities_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Ability_Read"
-                  },
-                  "type": "array",
-                  "title": "Response List Abilities Abilities Get"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/api/v1/abilities": {
       "post": {
         "tags": [
           "catalog"
         ],
         "summary": "Create Ability",
-        "operationId": "create_ability_abilities_post",
+        "operationId": "create_ability_api_v1_abilities_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Ability_Create"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1119,21 +1299,70 @@
               }
             }
           }
-        },
-        "security": [
+        }
+      },
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List Abilities",
+        "operationId": "list_abilities_api_v1_abilities_get",
+        "parameters": [
           {
-            "OAuth2PasswordBearer": []
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
-        ]
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Ability_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
-    "/abilities/{ability_id}": {
+    "/api/v1/abilities/{ability_id}": {
       "patch": {
         "tags": [
           "catalog"
         ],
         "summary": "Update Ability",
-        "operationId": "update_ability_abilities__ability_id__patch",
+        "operationId": "update_ability_api_v1_abilities__ability_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1189,7 +1418,7 @@
           "catalog"
         ],
         "summary": "Delete Ability",
-        "operationId": "delete_ability_abilities__ability_id__delete",
+        "operationId": "delete_ability_api_v1_abilities__ability_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1224,13 +1453,13 @@
         }
       }
     },
-    "/me/inventory": {
+    "/api/v1/me/inventory": {
       "get": {
         "tags": [
           "inventory"
         ],
         "summary": "List Inventory",
-        "operationId": "list_inventory_me_inventory_get",
+        "operationId": "list_inventory_api_v1_me_inventory_get",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1252,6 +1481,29 @@
               ],
               "title": "Q"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -1260,11 +1512,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserUnit_Read"
-                  },
-                  "title": "Response List Inventory Me Inventory Get"
+                  "$ref": "#/components/schemas/Page_UserUnit_Read_"
                 }
               }
             }
@@ -1286,7 +1534,7 @@
           "inventory"
         ],
         "summary": "Add Unit",
-        "operationId": "add_unit_me_inventory_post",
+        "operationId": "add_unit_api_v1_me_inventory_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1326,13 +1574,13 @@
         }
       }
     },
-    "/me/inventory/{unit_id}": {
+    "/api/v1/me/inventory/{unit_id}": {
       "patch": {
         "tags": [
           "inventory"
         ],
         "summary": "Set Amount",
-        "operationId": "set_amount_me_inventory__unit_id__patch",
+        "operationId": "set_amount_api_v1_me_inventory__unit_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1388,7 +1636,7 @@
           "inventory"
         ],
         "summary": "Remove Unit",
-        "operationId": "remove_unit_me_inventory__unit_id__delete",
+        "operationId": "remove_unit_api_v1_me_inventory__unit_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1423,50 +1671,27 @@
         }
       }
     },
-    "/me/armies": {
-      "get": {
-        "tags": [
-          "armies"
-        ],
-        "summary": "List Armies",
-        "operationId": "list_armies_me_armies_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Army_Read"
-                  },
-                  "type": "array",
-                  "title": "Response List Armies Me Armies Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ]
-      },
+    "/api/v1/me/armies": {
       "post": {
         "tags": [
           "armies"
         ],
         "summary": "Create Army",
-        "operationId": "create_army_me_armies_post",
+        "operationId": "create_army_api_v1_me_armies_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Army_Create"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -1489,21 +1714,75 @@
               }
             }
           }
-        },
+        }
+      },
+      "get": {
+        "tags": [
+          "armies"
+        ],
+        "summary": "List Armies",
+        "operationId": "list_armies_api_v1_me_armies_get",
         "security": [
           {
             "OAuth2PasswordBearer": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_Army_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
-    "/me/armies/{army_id}": {
+    "/api/v1/me/armies/{army_id}": {
       "get": {
         "tags": [
           "armies"
         ],
         "summary": "Get Army",
-        "operationId": "get_army_me_armies__army_id__get",
+        "operationId": "get_army_api_v1_me_armies__army_id__get",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1549,7 +1828,7 @@
           "armies"
         ],
         "summary": "Update Army",
-        "operationId": "update_army_me_armies__army_id__patch",
+        "operationId": "update_army_api_v1_me_armies__army_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1605,7 +1884,7 @@
           "armies"
         ],
         "summary": "Delete Army",
-        "operationId": "delete_army_me_armies__army_id__delete",
+        "operationId": "delete_army_api_v1_me_armies__army_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1640,13 +1919,13 @@
         }
       }
     },
-    "/me/armies/{army_id}/shortfall": {
+    "/api/v1/me/armies/{army_id}/shortfall": {
       "get": {
         "tags": [
           "armies"
         ],
         "summary": "Shortfall",
-        "operationId": "shortfall_me_armies__army_id__shortfall_get",
+        "operationId": "shortfall_api_v1_me_armies__army_id__shortfall_get",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1674,7 +1953,7 @@
                   "items": {
                     "$ref": "#/components/schemas/Shortfall_Read"
                   },
-                  "title": "Response Shortfall Me Armies  Army Id  Shortfall Get"
+                  "title": "Response Shortfall Api V1 Me Armies  Army Id  Shortfall Get"
                 }
               }
             }
@@ -1692,13 +1971,13 @@
         }
       }
     },
-    "/me/armies/{army_id}/validate": {
+    "/api/v1/me/armies/{army_id}/validate": {
       "get": {
         "tags": [
           "armies"
         ],
         "summary": "Validate",
-        "operationId": "validate_me_armies__army_id__validate_get",
+        "operationId": "validate_api_v1_me_armies__army_id__validate_get",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1740,13 +2019,13 @@
         }
       }
     },
-    "/me/armies/{army_id}/units": {
+    "/api/v1/me/armies/{army_id}/units": {
       "post": {
         "tags": [
           "armies"
         ],
         "summary": "Add Unit",
-        "operationId": "add_unit_me_armies__army_id__units_post",
+        "operationId": "add_unit_api_v1_me_armies__army_id__units_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1798,13 +2077,13 @@
         }
       }
     },
-    "/me/armies/{army_id}/units/{unit_id}": {
+    "/api/v1/me/armies/{army_id}/units/{unit_id}": {
       "patch": {
         "tags": [
           "armies"
         ],
         "summary": "Set Amount",
-        "operationId": "set_amount_me_armies__army_id__units__unit_id__patch",
+        "operationId": "set_amount_api_v1_me_armies__army_id__units__unit_id__patch",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -1870,7 +2149,7 @@
           "armies"
         ],
         "summary": "Remove Unit",
-        "operationId": "remove_unit_me_armies__army_id__units__unit_id__delete",
+        "operationId": "remove_unit_api_v1_me_armies__army_id__units__unit_id__delete",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -2262,7 +2541,7 @@
         "type": "object",
         "title": "Army_Update"
       },
-      "Body_login_auth_login_post": {
+      "Body_login_api_v1_auth_login_post": {
         "properties": {
           "grant_type": {
             "anyOf": [
@@ -2319,7 +2598,7 @@
           "username",
           "password"
         ],
-        "title": "Body_login_auth_login_post"
+        "title": "Body_login_api_v1_auth_login_post"
       },
       "FactionName": {
         "type": "string",
@@ -2404,6 +2683,223 @@
         ],
         "title": "InventoryAdd"
       },
+      "Page_Ability_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Ability_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Ability_Read]"
+      },
+      "Page_Army_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Army_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Army_Read]"
+      },
+      "Page_Faction_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Faction_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Faction_Read]"
+      },
+      "Page_Subfaction_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Subfaction_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Subfaction_ListRead]"
+      },
+      "Page_Unit_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Unit_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Unit_Read]"
+      },
+      "Page_UserUnit_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserUnit_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[UserUnit_Read]"
+      },
+      "Page_Weapon_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Weapon_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[Weapon_Read]"
+      },
       "Register_Create": {
         "properties": {
           "username": {
@@ -2477,6 +2973,31 @@
         ],
         "title": "Subfaction_Create"
       },
+      "Subfaction_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "faction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faction Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "faction_id",
+          "name"
+        ],
+        "title": "Subfaction_ListRead"
+      },
       "Subfaction_Read": {
         "properties": {
           "id": {
@@ -2513,6 +3034,30 @@
           "access_token"
         ],
         "title": "Token"
+      },
+      "UnitFacets": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_faction": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "format": "uuid"
+            },
+            "type": "object",
+            "title": "By Faction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "by_faction"
+        ],
+        "title": "UnitFacets"
       },
       "Unit_Create": {
         "properties": {
@@ -3268,7 +3813,7 @@
         "flows": {
           "password": {
             "scopes": {},
-            "tokenUrl": "auth/login"
+            "tokenUrl": "api/v1/auth/login"
           }
         }
       }

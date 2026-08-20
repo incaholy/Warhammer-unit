@@ -32,6 +32,14 @@ jobs:
       - name: Check import contracts
         run: lint-imports
 
+      # The checked-in openapi.json is the source of truth for the frontend's
+      # generated types, so it must not drift from the app (ROADMAP R8).
+      - name: Check openapi.json is fresh
+        run: |
+          python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json', 'w'), indent=2)"
+          git diff --exit-code openapi.json \
+            || { echo "::error::openapi.json is stale — run 'make openapi' and commit it"; exit 1; }
+
       # Default tier: in-memory SQLite (see tests/conftest.py), no DB service or
       # DATABASE_URL/SECRET_KEY needed. Fast; runs on every push/PR.
       - name: Test (SQLite)
