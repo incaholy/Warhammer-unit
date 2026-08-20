@@ -14,9 +14,12 @@ load_dotenv()
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# `disable_existing_loggers=False` so running a migration in-process (the R6
+# Postgres parity test tier builds its schema this way) doesn't disable the app's
+# own loggers — Alembic's default would silence app logging for the rest of the
+# process, which broke the observability tests.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
