@@ -31,10 +31,16 @@ from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_army import ArmyValidationError
 from app.core.services.service_inventory import InventoryValidationError
 from app.core.services.service_unit import UnitValidationError
+from app.observability import REQUEST_ID_HEADER, install_observability
 
 app = FastAPI(title="Warhammer Unit Backend")
 
 logger = logging.getLogger("app")
+
+# Request ID + structured JSON logging + optional Sentry (ROADMAP R7). Installed
+# early so every request — including error responses below — carries an
+# X-Request-ID that ties the user's report to its log line and Sentry event.
+install_observability(app)
 
 # CORS fallback for a cross-origin frontend. The primary path is same-origin via
 # a proxy (SPEC "Frontend integration"), so this only matters when the frontend is
@@ -53,18 +59,47 @@ if _origins:
 # --- service exception -> HTTP mapping (keeps routers thin) ---
 
 
+def _error_response(
+    request: Request,
+    *,
+    status: int,
+    detail: str,
+    code: ErrorCode,
+    field: str | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    # The one place an error body is built: {detail, code, field?} plus the
+    # request_id (the correlation key — also on the X-Request-ID response header,
+    # set here too so the header is present even on the catch-all 500, whose
+    # handler runs outside the request-ID middleware).
+    body: dict[str, object] = {"detail": detail, "code": code}
+    if field is not None:
+        body["field"] = field
+    rid = getattr(request.state, "request_id", None)
+    if rid:
+        body["request_id"] = rid
+    response = JSONResponse(status_code=status, content=body, headers=headers)
+    if rid:
+        response.headers[REQUEST_ID_HEADER] = rid
+    return response
+
+
 def _service_error(request: Request, exc: Exception) -> JSONResponse:
     # Each service error carries a semantic `code` / `message` / optional `field`;
     # the API layer maps code -> HTTP status (app/api/errors.py). Registered per
     # concrete class below (there is no shared base) — never a blanket
     # ValueError/LookupError handler, which would catch library exceptions and
     # leak their messages.
-    body = {"detail": exc.message, "code": exc.code}
-    if exc.field is not None:
-        body["field"] = exc.field
     # 401s carry the auth challenge header, per the OAuth2 bearer convention.
     headers = {"WWW-Authenticate": "Bearer"} if exc.code == ErrorCode.UNAUTHORIZED else None
-    return JSONResponse(status_code=CODE_STATUS[exc.code], content=body, headers=headers)
+    return _error_response(
+        request,
+        status=CODE_STATUS[exc.code],
+        detail=exc.message,
+        code=exc.code,
+        field=exc.field,
+        headers=headers,
+    )
 
 
 # One handler, registered per concrete class (no shared base to catch through).
@@ -92,10 +127,13 @@ def _request_validation_error(request: Request, exc: RequestValidationError) -> 
     # loc is like ("body", "email") or ("path", "unit_id"); drop the location
     # prefix to get the field name (dotted for a nested body field).
     field = ".".join(str(p) for p in first.get("loc", ())[1:]) or None
-    body = {"detail": first.get("msg", "invalid request"), "code": ErrorCode.REQUEST_VALIDATION}
-    if field:
-        body["field"] = field
-    return JSONResponse(status_code=CODE_STATUS[ErrorCode.REQUEST_VALIDATION], content=body)
+    return _error_response(
+        request,
+        status=CODE_STATUS[ErrorCode.REQUEST_VALIDATION],
+        detail=first.get("msg", "invalid request"),
+        code=ErrorCode.REQUEST_VALIDATION,
+        field=field,
+    )
 
 
 # Backstop for DB-constraint violations that slip past the service-layer guards
@@ -104,9 +142,11 @@ def _request_validation_error(request: Request, exc: RequestValidationError) -> 
 @app.exception_handler(IntegrityError)
 def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
     logger.warning("integrity error on %s %s", request.method, request.url.path, exc_info=exc)
-    return JSONResponse(
-        status_code=CODE_STATUS[ErrorCode.CONFLICT],
-        content={"detail": "conflict with an existing resource", "code": ErrorCode.CONFLICT},
+    return _error_response(
+        request,
+        status=CODE_STATUS[ErrorCode.CONFLICT],
+        detail="conflict with an existing resource",
+        code=ErrorCode.CONFLICT,
     )
 
 
@@ -119,9 +159,11 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
 @app.exception_handler(Exception)
 def _unhandled(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(
-        status_code=CODE_STATUS[ErrorCode.INTERNAL],
-        content={"detail": "internal server error", "code": ErrorCode.INTERNAL},
+    return _error_response(
+        request,
+        status=CODE_STATUS[ErrorCode.INTERNAL],
+        detail="internal server error",
+        code=ErrorCode.INTERNAL,
     )
 
 
