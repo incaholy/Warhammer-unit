@@ -31,17 +31,20 @@ def test_logging_filter_injects_the_current_request_id():
     assert record.request_id == "rid-under-test"
 
 
-def test_unhandled_500_logs_the_traceback(client, monkeypatch):
+def test_unhandled_500_logs_the_traceback(session, monkeypatch):
     # The 500 handler is sync, so FastAPI runs it in a worker thread where
     # sys.exc_info() is empty; the traceback must be captured via exc_info=exc,
     # not logger.exception(). Assert the emitted JSON log line actually carries it.
-    # `client` sets up the get_session override; use a raise-safe client so the
-    # 500 response (and its log line) come back instead of re-raising.
+    #
+    # Self-contained: set the get_session override and use a raise-safe client in
+    # a `with` block (the proven pattern) so the request reliably runs against the
+    # test session and returns the 500 response instead of hitting the real engine.
     import io
     import logging
 
     from conftest import PrefixTestClient
 
+    from app.core.db.connection import get_session
     from app.core.services import service_unit
     from app.main import app
 
@@ -50,15 +53,17 @@ def test_unhandled_500_logs_the_traceback(client, monkeypatch):
 
     monkeypatch.setattr(service_unit.UnitService, "get_unit", boom)
 
+    app.dependency_overrides[get_session] = lambda: session
     buf = io.StringIO()
     handler = logging.getLogger("app").handlers[0]
     original = handler.stream
     handler.setStream(buf)
     try:
-        safe = PrefixTestClient(app, raise_server_exceptions=False)
-        safe.get("/units/11111111-1111-1111-1111-111111111111")
+        with PrefixTestClient(app, raise_server_exceptions=False) as safe:
+            safe.get("/units/11111111-1111-1111-1111-111111111111")
     finally:
         handler.setStream(original)
+        app.dependency_overrides.clear()
 
     log = buf.getvalue()
     assert "Traceback" in log and "RuntimeError: kaboom-secret" in log
