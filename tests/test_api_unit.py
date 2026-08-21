@@ -177,6 +177,31 @@ def test_update_unit(admin_client, make_faction):
     assert resp.json()["points"] == 120
 
 
+def test_update_unit_explicit_null_on_required_field_returns_400(admin_client, make_faction):
+    # A PATCH with an explicit null on a NOT NULL column must be a clean 400
+    # (UnitValidationError) — not the IntegrityError-backstop 409, which would
+    # report a malformed input as "conflict with an existing resource".
+    f = make_faction()
+    unit = admin_client.post("/units", json=_unit_payload(f.id)).json()
+
+    resp = admin_client.patch(f"/units/{unit['id']}", json={"unit_name": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "unit_name"
+
+    resp = admin_client.patch(f"/units/{unit['id']}", json={"faction_id": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "faction_id"
+
+
+def test_update_unit_explicit_null_on_nullable_field_clears_it(admin_client, make_faction):
+    # The mirror case: a nullable column may still be cleared with an explicit null.
+    f = make_faction()
+    unit = admin_client.post("/units", json=_unit_payload(f.id) | {"invulnerable_save": 4}).json()
+    resp = admin_client.patch(f"/units/{unit['id']}", json={"invulnerable_save": None})
+    assert resp.status_code == 200
+    assert resp.json()["invulnerable_save"] is None
+
+
 def test_delete_unit(admin_client, make_faction):
     f = make_faction()
     unit = admin_client.post("/units", json=_unit_payload(f.id)).json()

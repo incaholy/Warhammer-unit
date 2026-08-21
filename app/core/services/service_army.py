@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
 from app.core.errors import ErrorCode
 from app.core.services.errors import ConflictError, NotFoundError
@@ -62,7 +63,9 @@ class ArmyService:
     _UPDATABLE = {"name", "description", "faction_id", "subfaction_id", "points_limit"}
     # Of those, the ones backed by NOT NULL columns — an explicit null must be
     # rejected, not written. The rest may be cleared with an explicit null.
-    _NOT_NULLABLE = {"name", "faction_id"}
+    # Derived from the mapped table rather than hand-listed, so a new NOT NULL
+    # column can't be forgotten here.
+    _NOT_NULLABLE = not_nullable_fields(Army, _UPDATABLE)
 
     def __init__(self, session: Session):
         self.session = session

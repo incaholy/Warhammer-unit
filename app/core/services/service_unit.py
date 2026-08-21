@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models import (
     FACTION_SUBFACTIONS,
     Ability,
@@ -70,8 +71,26 @@ class UnitService:
     }
     _ABILITY_UPDATABLE = {"name", "description"}
 
+    # Of the updatable fields above, the ones backed by NOT NULL columns — an
+    # explicit null must be rejected, not written. Derived from the mapped tables
+    # rather than hand-listed, so a new NOT NULL column can't be forgotten here.
+    _NOT_NULLABLE = not_nullable_fields(Unit, _UPDATABLE)
+    _WEAPON_NOT_NULLABLE = not_nullable_fields(Weapon, _WEAPON_UPDATABLE)
+    _ABILITY_NOT_NULLABLE = not_nullable_fields(Ability, _ABILITY_UPDATABLE)
+
     def __init__(self, session: Session):
         self.session = session
+
+    def _reject_nulls(self, fields: dict, not_nullable: frozenset[str]) -> None:
+        # A PATCH that explicitly sends null for a NOT NULL column survives
+        # `exclude_unset`, slips past the existence guards (they only act on
+        # non-null values), and would hit a DB IntegrityError — surfacing as a
+        # misleading 409 via the IntegrityError backstop. Reject it as a clean
+        # 400 up front. Sorted so a PATCH with several nulls always names the
+        # same field, rather than whichever the dict happened to yield first.
+        for field in sorted(fields):
+            if field in not_nullable and fields[field] is None:
+                raise UnitValidationError(field, "cannot be null")
 
     def create_unit(
         self,
@@ -173,6 +192,7 @@ class UnitService:
         unknown = set(fields) - self._UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        self._reject_nulls(fields, self._NOT_NULLABLE)
         if fields.get("faction_id") is not None and (self.session.get(Faction, fields["faction_id"]) is None):
             raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
@@ -248,6 +268,7 @@ class UnitService:
         unknown = set(fields) - self._WEAPON_UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        self._reject_nulls(fields, self._WEAPON_NOT_NULLABLE)
         if "category" in fields and fields["category"] not in ("range", "melee"):
             raise UnitValidationError("category", "must be 'range' or 'melee'")
         for key, value in fields.items():
@@ -286,6 +307,7 @@ class UnitService:
         unknown = set(fields) - self._ABILITY_UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        self._reject_nulls(fields, self._ABILITY_NOT_NULLABLE)
         for key, value in fields.items():
             setattr(ability, key, value)
         self.session.add(ability)

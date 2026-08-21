@@ -242,6 +242,36 @@ def test_update_weapon_bad_category_returns_400(admin_client):
     assert resp.json()["field"] == "category"
 
 
+def test_update_weapon_explicit_null_on_required_field_returns_400(admin_client):
+    # Same guard as units/armies: an explicit null on a NOT NULL column is a 400,
+    # not the IntegrityError-backstop 409.
+    w = _make_weapon(admin_client)
+
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"name": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "name"
+
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"strength": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "strength"
+
+
+def test_update_weapon_explicit_null_on_nullable_field_clears_it(admin_client):
+    # range_inches is nullable (a melee weapon has none), so null still clears it.
+    w = _make_weapon(admin_client)
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"range_inches": None})
+    assert resp.status_code == 200
+    assert resp.json()["range_inches"] is None
+
+
+def test_update_ability_explicit_null_on_required_field_returns_400(admin_client):
+    a = admin_client.post("/abilities", json={"name": "Oath", "description": "reroll"}).json()
+    for field in ("name", "description"):
+        resp = admin_client.patch(f"/abilities/{a['id']}", json={field: None})
+        assert resp.status_code == 400
+        assert resp.json()["field"] == field
+
+
 def test_update_weapon_missing_returns_404(admin_client):
     resp = admin_client.patch(f"/weapons/{uuid.uuid4()}", json={"strength": 5})
     assert resp.status_code == 404
