@@ -56,19 +56,18 @@ maps them to HTTP in one place (`app/main.py`). The reason this matters more tha
 you add a second entry point (a CLI, a scheduled job, a queue consumer), business logic that raises
 `HTTPException` has to be rewritten, and business logic that raises `NotFoundError` just works.
 
-**Status: Partial.** The rule is followed nearly everywhere, but two things keep it from **Holds**:
+**Status: ✅ Holds (R11).** Both things that kept this Partial are gone:
 
-- **Nothing enforces it.** There is no import-contract linter, no architecture test, and CI runs only
-  `pytest`. A service could import from `app/api/` tomorrow and all 225 tests would stay green. By
-  the definition above, a convention maintained by discipline is Partial. See
-  [ROADMAP R11](ROADMAP.md#r11-enforce-the-layering-rule).
-- **There is one real violation.** `app/core/security.py` imports from FastAPI and raises
-  `HTTPException` (`:88`, `:111`), and `app/core/services/service_auth.py:13` imports it. So the
-  service layer transitively depends on an HTTP-coupled module, and `tests/test_security.py:42`
-  pins that behavior in place by asserting `HTTPException` is raised. Auth is the usual place this
-  leaks, because token decoding sits awkwardly between transport and domain. The fix is to decide
-  which half of `security.py` is domain logic (hashing, token encode and decode) and which half is an
-  API dependency (`get_current_user` turning a failure into a 401), and split it along that line.
+- **It is enforced, not remembered.** `.importlinter` declares two contracts and CI runs
+  `lint-imports` alongside `pytest`: a `layers` contract (`app.api` > `app.core.services` >
+  `app.core.db`, so a lower layer may not import a higher one) and a `forbidden` contract
+  (`app.core` may not import `fastapi` or `starlette`, directly or transitively). A service that
+  imports from `app/api/` tomorrow fails the build rather than passing 245 green tests.
+- **The one real violation is split.** `app/core/security.py` kept the domain half (hashing, token
+  encode and decode) and `app/api/deps.py` took the transport half (`get_current_user` /
+  `get_current_admin`, turning a decode failure into a 401 with a `WWW-Authenticate` header).
+  `app.core` is now provably free of any web-framework import — the forbidden contract is what
+  makes it provable rather than conventional.
 
 Two details worth keeping deliberately:
 
@@ -127,9 +126,13 @@ key.
 Concepts: `RequestValidationError` and `@app.exception_handler` in FastAPI, and the structure of
 Pydantic v2's `ValidationError.errors()`.
 
-**Status: Not yet.** Two incompatible shapes ship today and the frontend renders one of them as
-garbage. See [ROADMAP R2](ROADMAP.md#r2-unify-the-error-shape-and-add-a-code-enum), the
-highest-value item on the list.
+**Status: ✅ Done (R2, extended by R9).** One shape, built in one place (`_error_response` in
+`app/main.py`): `{detail, code, field?, request_id, errors: [{code, field, detail}]}`. `ErrorCode`
+lives in `app/core/errors.py` — below both layers, so a service error can carry a `code` without the
+core importing the API — and `app/api/errors.py` owns the single `CODE_STATUS` lookup, so a code and
+its status can never disagree. FastAPI's raw 422 array is reshaped by a `RequestValidationError`
+handler into the same shape, and R9 made `errors[]` uniform on *every* error body (one element for
+most failures, all of them for a multi-field 422), with the top-level fields mirroring `errors[0]`.
 
 ### 2.3 Pagination, sort, and filter are conventions, not per-endpoint features
 
@@ -148,10 +151,14 @@ table gets linearly slower and can skip or repeat rows when data changes between
 keyset is stable but cannot jump to an arbitrary page. For a mostly-static catalog, offset is
 defensible. Decide once, write it down, apply everywhere.
 
-**Status: Not yet.** Not Partial: no endpoint currently satisfies this section. All three rules are
-unmet. One of nine list endpoints paginates at all; that one reports its total in an `X-Total-Count`
-header rather than the body; and no server-side aggregate exists, which is what pushed the counting
-into the client in the first place. See [ROADMAP R4](ROADMAP.md#r4-make-pagination-a-convention).
+**Status: ✅ Done (R4).** All three rules hold. Every one of the seven collections returns
+`Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
+`app/api/pagination.py`, with a documented offset-based choice and a `limit` capped at 200. The total
+travels in the body and `X-Total-Count` is gone, which fixes SPEC.md BUG1 structurally rather than by
+configuration. Every ordering carries an `id` tiebreaker so a page boundary can't repeat or skip a row.
+The aggregate gap was specifically the **per-faction count** — `count_units` and `points_total` were
+already server-side — and `GET /units/facets` now returns it as one `GROUP BY`, which is what let the
+frontend drop its `limit=1000` count-in-the-client hack.
 
 ### 2.4 Failures are traceable end to end
 
@@ -238,8 +245,10 @@ commit expires the identity map and forces a re-read of a row you just wrote.
 
 Concepts: the unit of work pattern, `Session.flush()` versus `Session.commit()`, session-per-request.
 
-**Status: Not yet.** Services own the commits today (27 call sites), and the test fixture is built
-around that. See [ROADMAP R3](ROADMAP.md#r3-move-the-transaction-boundary-into-get_session).
+**Status: ✅ Done (R3).** The 27 service-level commits are now 27 `flush()` calls — services own no
+commit at all — and the boundary sits in `get_session` (`app/core/db/connection.py`), which commits
+once on success and rolls back on any exception. The test fixture moved with it, which is the half
+that usually gets missed: leaving it behind would keep the suite green while asserting the old shape.
 
 ---
 
