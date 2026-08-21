@@ -46,6 +46,13 @@ install_observability(app)
 # a proxy (SPEC "Frontend integration"), so this only matters when the frontend is
 # hosted elsewhere. Allow-list from ALLOWED_ORIGINS (comma-separated); never "*".
 # Auth is a Bearer header, so credentials/cookies stay off.
+#
+# `expose_headers` is not optional here: a browser hides EVERY response header
+# from cross-origin JavaScript unless the server names it, and it fails silently —
+# `headers.get()` just returns null. SPEC.md BUG1 is exactly this bug reaching
+# production (the catalog capped at 25 units because `X-Total-Count` was invisible),
+# and it hid locally because the Vite proxy makes dev same-origin. R7's
+# X-Request-ID is a response header on the same path, so it is named below.
 _origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if _origins:
     app.add_middleware(
@@ -53,6 +60,7 @@ if _origins:
         allow_origins=_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[REQUEST_ID_HEADER],
     )
 
 
