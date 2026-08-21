@@ -353,7 +353,9 @@ build, then test.** Both repos have a linter. CI cancels superseded runs with a 
 The frontend is the model here: it runs `eslint`, `tsc -b && vite build`, and `vitest run` in CI. Both
 reference repos have no CI at all, so nothing enforces their checks on a push.
 
-**Status: Partial.** Both repos have CI, and the frontend pipeline is the right shape. Three
-exceptions: the backend has no linter or formatter of any kind, its pipeline runs only `pytest`, and
-neither repo's CI has a `concurrency` group. See
-[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter).
+**Status: ✅ Holds.** All three exceptions are closed. The backend lints and formats with `ruff`
+(R1), and its CI now runs that pair as its first steps — previously they lived only in `make check`,
+which meant they ran when someone remembered. The backend pipeline is lint → format check → import
+contracts → openapi freshness → tests (SQLite), with the Postgres parity tier as a second job; the
+frontend is `eslint` → `tsc -b && vite build` → `vitest run`. Both repos now declare a `concurrency`
+group keyed on workflow+ref, cancelling superseded PR runs while keeping every run on `main`.
