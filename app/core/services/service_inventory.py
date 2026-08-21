@@ -11,11 +11,11 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import Unit, User, UserUnit
-from app.core.errors import ErrorCode
+from app.core.errors import CodedError, ErrorCode
 from app.core.services.errors import ConflictError, NotFoundError
 
 
-class InventoryValidationError(ValueError):
+class InventoryValidationError(CodedError, ValueError):
     """Bad inventory input."""
 
     code = ErrorCode.VALIDATION

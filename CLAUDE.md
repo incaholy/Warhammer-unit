@@ -29,12 +29,12 @@ pytest                               # run tests (once tests/ exists)
   `app/core/services/errors.py` — `NotFoundError` (→404) and `ConflictError` for
   duplicates (→409). Each service defines its own `*ValidationError(ValueError)`
   in its own module (→400, with a `field`; e.g. `UnitValidationError` in
-  `service_unit.py`). There is no shared base: every error inherits the builtin it
-  maps to (`LookupError`/`ValueError`) and carries its own `code` (`ErrorCode`,
-  from `app/core/errors.py`), `message`, and `field`. `app/main.py` registers a
-  handler per concrete error class — **add a new service `*ValidationError` to the
-  `_SERVICE_ERRORS` tuple there** or it falls through to a generic 500. Never
-  raise `HTTPException` in a service.
+  `service_unit.py`). Every error inherits **two** bases: `CodedError` (the marker
+  base in `app/core/errors.py`) and the builtin it maps to (`LookupError`/
+  `ValueError`), and carries its own `code` (`ErrorCode`), `message`, and `field`.
+  `app/main.py` registers **one** handler, against `CodedError`, so a new error
+  class is mapped to its status automatically — there is no registry to update.
+  Never raise `HTTPException` in a service.
 - Schema changes go through `models.py` + an Alembic migration, never raw SQL.
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `armor_save`, `wounds`, `leadership`,

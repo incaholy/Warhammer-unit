@@ -14,11 +14,11 @@ from sqlmodel import Session, select
 
 from app.core.db.columns import not_nullable_fields
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
-from app.core.errors import ErrorCode
+from app.core.errors import CodedError, ErrorCode
 from app.core.services.errors import ConflictError, NotFoundError
 
 
-class ArmyValidationError(ValueError):
+class ArmyValidationError(CodedError, ValueError):
     """Bad army/roster input."""
 
     code = ErrorCode.VALIDATION

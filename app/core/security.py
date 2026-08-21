@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from app.core.errors import ErrorCode
+from app.core.errors import CodedError, ErrorCode
 
 load_dotenv()
 
@@ -81,12 +81,12 @@ def decode_token(token: str) -> str:
 # ------------------------------ auth errors ----------------------------
 # Coded like the service errors: they carry a `code` (+ message, and `field=None`
 # for the shared handler), so the API layer maps them by `code` — no HTTPException,
-# no status->code reverse lookup. Registered in `app/main.py`'s `_SERVICE_ERRORS`.
+# no status->code reverse lookup. Mapped by `app/main.py`'s `CodedError` handler.
 # Framework-free value types, so they stay in the domain module even though the
 # dependencies that raise them now live in `app/api/deps.py`.
 
 
-class UnauthorizedError(Exception):
+class UnauthorizedError(CodedError):
     """Missing or invalid credentials. → 401 (the handler adds `WWW-Authenticate`)."""
 
     code = ErrorCode.UNAUTHORIZED
@@ -97,7 +97,7 @@ class UnauthorizedError(Exception):
         self.message = message
 
 
-class ForbiddenError(Exception):
+class ForbiddenError(CodedError):
     """Authenticated but not permitted. → 403."""
 
     code = ErrorCode.FORBIDDEN

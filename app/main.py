@@ -25,12 +25,7 @@ from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
-from app.core.errors import ErrorCode
-from app.core.security import ForbiddenError, UnauthorizedError
-from app.core.services.errors import ConflictError, NotFoundError
-from app.core.services.service_army import ArmyValidationError
-from app.core.services.service_inventory import InventoryValidationError
-from app.core.services.service_unit import UnitValidationError
+from app.core.errors import CodedError, ErrorCode
 from app.observability import REQUEST_ID_HEADER, install_observability
 
 app = FastAPI(title="Warhammer Unit Backend")
@@ -98,12 +93,11 @@ def _error_response(
     return response
 
 
-def _service_error(request: Request, exc: Exception) -> JSONResponse:
+def _service_error(request: Request, exc: CodedError) -> JSONResponse:
     # Each service error carries a semantic `code` / `message` / optional `field`;
-    # the API layer maps code -> HTTP status (app/api/errors.py). Registered per
-    # concrete class below (there is no shared base) — never a blanket
-    # ValueError/LookupError handler, which would catch library exceptions and
-    # leak their messages.
+    # the API layer maps code -> HTTP status (app/api/errors.py). Registered once
+    # against `CodedError` below — never a blanket ValueError/LookupError handler,
+    # which would catch library exceptions and leak their messages.
     # 401s carry the auth challenge header, per the OAuth2 bearer convention.
     headers = {"WWW-Authenticate": "Bearer"} if exc.code == ErrorCode.UNAUTHORIZED else None
     return _error_response(
@@ -116,19 +110,13 @@ def _service_error(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-# One handler, registered per concrete class (no shared base to catch through).
-# Add a new coded error here so it maps to its status instead of a generic 500.
-_SERVICE_ERRORS = (
-    NotFoundError,
-    ConflictError,
-    UnauthorizedError,
-    ForbiddenError,
-    UnitValidationError,
-    ArmyValidationError,
-    InventoryValidationError,
-)
-for _service_exc in _SERVICE_ERRORS:
-    app.add_exception_handler(_service_exc, _service_error)
+# ONE registration covers the whole family: Starlette resolves a handler by walking
+# the exception's MRO, so every `CodedError` subclass lands here — including one
+# added tomorrow. This replaced a hand-maintained tuple of concrete classes, where
+# forgetting an entry silently turned a well-formed 400 into a generic 500, and
+# only on the path that raised it. `CodedError` is our own marker base rather than
+# a builtin, so this can never swallow a library `ValueError`/`LookupError`.
+app.add_exception_handler(CodedError, _service_error)
 
 
 # Reshape FastAPI's default 422 (a raw error *array*) into the one error shape.

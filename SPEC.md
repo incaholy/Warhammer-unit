@@ -566,15 +566,18 @@ every service error comes back in one shape — `{"detail", "code", "field"?,
 every failure at once — all bad fields of a `422` in one response — with the top
 level mirroring `errors[0]` (ROADMAP R9, option C).
 
-**There is no shared base class.** Each error **inherits the builtin it maps to**
-and **carries its own** `code` (`ErrorCode`), `message`, and optional `field`.
+**Every error inherits two bases.** `CodedError` — a marker base in
+`app/core/errors.py` that adds no behaviour — plus **the builtin it maps to**, and
+each **carries its own** `code` (`ErrorCode`), `message`, and optional `field`.
 Keeping them subclasses of the builtins (`LookupError`/`ValueError`) lets
-service-level tests `pytest.raises(LookupError / ValueError)`.
+service-level tests `pytest.raises(LookupError / ValueError)`; the marker base
+lets the API layer catch the whole family in one registration without ever
+catching a builtin.
 
 **Cross-cutting errors** live in `app/core/services/errors.py`:
 
-- `NotFoundError(LookupError)` — a row doesn't exist. `code = NOT_FOUND` → **404**.
-- `ConflictError(ValueError)` — a uniqueness clash (duplicate `username`/`email`,
+- `NotFoundError(CodedError, LookupError)` — a row doesn't exist. `code = NOT_FOUND` → **404**.
+- `ConflictError(CodedError, ValueError)` — a uniqueness clash (duplicate `username`/`email`,
   duplicate faction name, duplicate subfaction-for-faction). `code = CONFLICT` →
   **409**.
 
@@ -620,17 +623,20 @@ This split keeps the service layer HTTP-agnostic: a service raises
 
 ### API-layer handlers (`app/main.py`)
 
-Because there is **no shared base to catch through**, one handler function is
-registered **per concrete error class** via a `_SERVICE_ERRORS` tuple
-(`NotFoundError`, `ConflictError`, and each `*ValidationError`). It builds the
-body `{"detail": message, "code": code, "field"?: field}` and sets the status
-from `CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
+One handler function is registered **once**, against the `CodedError` marker base.
+Starlette resolves a handler by walking the raised exception's MRO, so every coded
+error lands there — including one added tomorrow. It builds the body
+`{"detail": message, "code": code, "field"?: field}` and sets the status from
+`CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
 `{data, meta}` envelope** (intentionally deferred; see roadmap R9).
 
-> **Adding a new service `*ValidationError`?** Register it in `_SERVICE_ERRORS`
-> in `app/main.py`, or it falls through to the generic 500 handler.
+> **Adding a new service `*ValidationError`?** Inherit `CodedError` (alongside
+> `ValueError`) and it is mapped automatically. This replaced a hand-maintained
+> `_SERVICE_ERRORS` tuple, where a forgotten entry silently became a 500 —
+> `tests/test_errors.py` now fails if any class carrying an `ErrorCode` skips the
+> base.
 
-Registration is deliberately **per concrete class, never a blanket
+Registration is deliberately against **our own marker base, never a blanket
 `ValueError`/`LookupError` handler**: those builtins are raised throughout the
 stdlib and third-party libs, so catching them would swallow library exceptions and
 leak their messages, and a `TypeError` (almost always a bug) would be mislabelled
@@ -657,7 +663,7 @@ an `IntegrityError` backstop returns a generic **409** (`code = CONFLICT`).
 403), raised by `get_current_user` / `get_current_admin` (and login) instead of a
 bare `HTTPException`. The bearer scheme uses `auto_error=False` so a missing token
 reaches us as `None` and we raise the coded error rather than FastAPI's uncoded
-401. They register in `_SERVICE_ERRORS` alongside the service errors.
+401. They inherit `CodedError` too, so the same single handler maps them.
 
 **Request validation is reshaped too.** A `RequestValidationError` handler in
 `app/main.py` turns FastAPI's default 422 *array* into the one shape, using a

@@ -3,23 +3,88 @@
 import uuid
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from app.core.errors import ErrorCode
+from app.core.errors import CodedError, ErrorCode
+from app.core.security import ForbiddenError, UnauthorizedError
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
 )
+from app.core.services.service_army import ArmyValidationError
+from app.core.services.service_inventory import InventoryValidationError
 from app.core.services.service_unit import UnitService, UnitValidationError
 
 
 def test_builtin_inheritance():
-    # There is no shared base: each error inherits the builtin it maps to, so
-    # service-level tests can `pytest.raises(ValueError / LookupError)`. The API
-    # layer registers a handler per concrete class (app/main.py) rather than
-    # catching a shared base or the builtins (which would swallow library errors).
+    # Each error still inherits the builtin it maps to, so service-level tests can
+    # `pytest.raises(ValueError / LookupError)`. The API layer catches the
+    # `CodedError` marker base instead of the builtins, which would swallow library
+    # errors and leak their messages.
     assert issubclass(NotFoundError, LookupError)
     assert issubclass(ConflictError, ValueError)
     assert issubclass(UnitValidationError, ValueError)
+
+
+def test_every_coded_error_inherits_the_marker_base():
+    # The API layer registers ONE handler, for CodedError. An error that carries a
+    # `code` but skips the base would fall through to the catch-all and become a
+    # generic 500 — silently, and only on the path that raises it. This is that
+    # guard: it walks the live class tree rather than a hand-written list, so a new
+    # error class is covered here the moment it exists.
+    known = {
+        NotFoundError,
+        ConflictError,
+        UnauthorizedError,
+        ForbiddenError,
+        UnitValidationError,
+        ArmyValidationError,
+        InventoryValidationError,
+    }
+    for cls in known:
+        assert issubclass(cls, CodedError), f"{cls.__name__} does not inherit CodedError"
+
+    def walk(cls):
+        for sub in cls.__subclasses__():
+            yield sub
+            yield from walk(sub)
+
+    coded_but_unrooted = [
+        cls
+        for cls in walk(Exception)
+        if cls.__module__.startswith("app.")
+        and isinstance(getattr(cls, "code", None), ErrorCode)
+        and not issubclass(cls, CodedError)
+    ]
+    assert coded_but_unrooted == []
+
+
+def test_a_new_coded_error_is_mapped_without_touching_main():
+    # The point of the marker base: an error class that main.py has never heard of
+    # still maps to its status, because Starlette resolves handlers by walking the
+    # exception's MRO. Under the old per-class tuple this returned 500.
+    from app.main import _service_error
+
+    class BrandNewError(CodedError, ValueError):
+        code = ErrorCode.CONFLICT
+
+        def __init__(self):
+            super().__init__("invented in a test")
+            self.message = "invented in a test"
+            self.field = "somewhere"
+
+    probe = FastAPI()
+    probe.add_exception_handler(CodedError, _service_error)
+
+    @probe.get("/boom")
+    def boom():
+        raise BrandNewError()
+
+    resp = TestClient(probe, raise_server_exceptions=False).get("/boom")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "CONFLICT"
+    assert resp.json()["field"] == "somewhere"
 
 
 def test_validation_error_carries_field_and_code():

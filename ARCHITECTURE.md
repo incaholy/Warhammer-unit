@@ -73,9 +73,11 @@ you add a second entry point (a CLI, a scheduled job, a queue consumer), busines
 Two details worth keeping deliberately:
 
 - **The typed error hierarchy subclasses the builtin it replaces**
-  (`NotFoundError(ServiceError, LookupError)`). That is what let the error migration happen
+  (`NotFoundError(CodedError, LookupError)`). That is what let the error migration happen
   incrementally instead of as one breaking change, and it is better factored than the reference's
-  *service* errors, which hardcode a status code per class with no shared base. Scope that credit,
+  *service* errors, which hardcode a status code per class. The second base, `CodedError`, is a
+  marker that carries no behaviour and exists so the API layer registers one handler for the family
+  rather than a per-class tuple a new error can fall off. Scope that credit,
   though: the reference's *API* layer has something this codebase does not, a central `ErrorCode`
   enum plus a code-to-status lookup table so the two can never disagree
   (`attention-api/app/api/errors.py`). That is the piece §2.2 asks you to build, and it is worth

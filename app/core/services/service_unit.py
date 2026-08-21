@@ -23,14 +23,14 @@ from app.core.db.models import (
     UserUnit,
     Weapon,
 )
-from app.core.errors import ErrorCode
+from app.core.errors import CodedError, ErrorCode
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
 )
 
 
-class UnitValidationError(ValueError):
+class UnitValidationError(CodedError, ValueError):
     """Bad catalog input (units, factions, subfactions, weapons)."""
 
     code = ErrorCode.VALIDATION
