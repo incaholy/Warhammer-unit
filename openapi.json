@@ -246,6 +246,11 @@
         ],
         "summary": "List Units",
         "operationId": "list_units_api_v1_units_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "faction_id",
@@ -298,6 +303,18 @@
               "title": "Q"
             },
             "description": "case-insensitive name search"
+          },
+          {
+            "name": "owned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "only units in the caller's inventory",
+              "default": false,
+              "title": "Owned"
+            },
+            "description": "only units in the caller's inventory"
           },
           {
             "name": "limit",
@@ -354,6 +371,11 @@
         ],
         "summary": "Unit Facets",
         "operationId": "unit_facets_api_v1_units_facets_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "subfaction_id",
@@ -389,6 +411,18 @@
               "title": "Q"
             },
             "description": "case-insensitive name search"
+          },
+          {
+            "name": "owned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "only units in the caller's inventory",
+              "default": false,
+              "title": "Owned"
+            },
+            "description": "only units in the caller's inventory"
           }
         ],
         "responses": {

@@ -38,6 +38,30 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme),
+    session: Session = Depends(get_session),
+) -> User | None:
+    """The caller, if there is one. Never raises.
+
+    For endpoints that are public but behave differently for a signed-in user —
+    the catalog is browsable signed-out, and `GET /units?owned=true` needs to know
+    whose inventory to filter by. A bad or expired token is treated as anonymous
+    rather than as an error: the endpoint is public, so the request is still valid;
+    it is the caller's job to notice they are not signed in.
+
+    Endpoints that *require* the parameter to mean something must check for None
+    themselves and raise, rather than silently ignoring it.
+    """
+    if token is None:
+        return None
+    try:
+        user_id = UUID(decode_token(token))
+    except ValueError:
+        return None
+    return session.get(User, user_id)
+
+
 def get_current_admin(user: User = Depends(get_current_user)) -> User:
     if not user.is_admin:
         raise ForbiddenError()

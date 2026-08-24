@@ -143,11 +143,18 @@ class UnitService:
         faction_id: UUID | None,
         subfaction_id: UUID | None,
         q: str | None,
+        owned_by: UUID | None = None,
     ):
-        """Apply the shared `list_units`/`count_units` filters to a statement.
+        """Apply the shared `list_units`/`count_units`/`faction_facets` filters.
 
         `faction_id`/`subfaction_id` are exact matches; `q` is a
-        case-insensitive substring match on the unit name.
+        case-insensitive substring match on the unit name; `owned_by` restricts to
+        units in that user's inventory.
+
+        Every caller filters through here on purpose: the page, its total, and the
+        per-faction facets are then built from the same predicate, so they cannot
+        disagree. Filtering a page client-side is what made the catalog's "N of M"
+        compare a filtered page against an unfiltered total.
         """
         if faction_id is not None:
             statement = statement.where(Unit.faction_id == faction_id)
@@ -155,6 +162,15 @@ class UnitService:
             statement = statement.where(Unit.subfaction_id == subfaction_id)
         if q:
             statement = statement.where(Unit.unit_name.ilike(f"%{q}%"))
+        if owned_by is not None:
+            # EXISTS rather than a JOIN: it cannot change row cardinality, so the
+            # count stays a count of units even if a user ever holds more than one
+            # inventory row for the same unit.
+            statement = statement.where(
+                select(UserUnit.id)
+                .where(UserUnit.owner_user_id == owned_by, UserUnit.unit_id == Unit.id)
+                .exists()
+            )
         return statement
 
     def list_units(
@@ -162,11 +178,12 @@ class UnitService:
         faction_id: UUID | None = None,
         subfaction_id: UUID | None = None,
         q: str | None = None,
+        owned_by: UUID | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Unit]:
         """A page of catalog units, filtered and ordered by name (stable paging)."""
-        statement = self._apply_unit_filters(select(Unit), faction_id, subfaction_id, q)
+        statement = self._apply_unit_filters(select(Unit), faction_id, subfaction_id, q, owned_by)
         # Eager-load weapons/abilities so serializing the page doesn't lazy-load
         # them per unit (the N+1). selectinload batches each with one WHERE-IN.
         statement = (
@@ -182,9 +199,12 @@ class UnitService:
         faction_id: UUID | None = None,
         subfaction_id: UUID | None = None,
         q: str | None = None,
+        owned_by: UUID | None = None,
     ) -> int:
         """Total units matching the same filters as `list_units` (ignores paging)."""
-        statement = self._apply_unit_filters(select(func.count(Unit.id)), faction_id, subfaction_id, q)
+        statement = self._apply_unit_filters(
+            select(func.count(Unit.id)), faction_id, subfaction_id, q, owned_by
+        )
         return self.session.exec(statement).one()
 
     def update_unit(self, unit_id: UUID, **fields) -> Unit:
@@ -394,14 +414,21 @@ class UnitService:
         return self.session.exec(statement).one()
 
     def faction_facets(
-        self, subfaction_id: UUID | None = None, q: str | None = None
+        self,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
+        owned_by: UUID | None = None,
     ) -> tuple[int, dict[UUID, int]]:
         """Per-faction unit counts for the current filter, in one GROUP BY — the
         server-side aggregate the catalog rail needs (so the client never has to
         download the catalog to count it). Shares `list_units`' filters, minus
-        `faction_id` (the column it groups by). Returns (total, {faction_id: n})."""
+        `faction_id` (the column it groups by). Returns (total, {faction_id: n}).
+
+        `owned_by` is passed through for the same reason it exists on the list: a
+        filtered list beside an unfiltered rail reads as more broken than no filter
+        at all."""
         statement = self._apply_unit_filters(
-            select(Unit.faction_id, func.count(Unit.id)), None, subfaction_id, q
+            select(Unit.faction_id, func.count(Unit.id)), None, subfaction_id, q, owned_by
         ).group_by(Unit.faction_id)
         by_faction = {faction_id: count for faction_id, count in self.session.exec(statement).all()}
         return sum(by_faction.values()), by_faction
