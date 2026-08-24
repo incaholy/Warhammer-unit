@@ -4,14 +4,14 @@
 OAuth2 password form (`username` may be a username or email) and returns a JWT.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import EmailStr
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.user import User_Read
 from app.core.db.connection import get_session
-from app.core.security import create_access_token
+from app.core.security import UnauthorizedError, create_access_token
 from app.core.services.service_auth import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -37,12 +37,8 @@ def get_auth_service(session: Session = Depends(get_session)) -> AuthService:
     return AuthService(session)
 
 
-@router.post(
-    "/register", response_model=User_Read, status_code=status.HTTP_201_CREATED
-)
-def register(
-    payload: Register_Create, service: AuthService = Depends(get_auth_service)
-) -> User_Read:
+@router.post("/register", response_model=User_Read, status_code=status.HTTP_201_CREATED)
+def register(payload: Register_Create, service: AuthService = Depends(get_auth_service)) -> User_Read:
     return service.register(payload.username, payload.email, payload.password)
 
 
@@ -53,9 +49,5 @@ def login(
 ) -> Token:
     user = service.authenticate(form.username, form.password)
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise UnauthorizedError("incorrect username or password")
     return Token(access_token=create_access_token(str(user.id)))

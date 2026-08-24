@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs: pushing twice to an open PR shouldn't leave the first
+# run burning a runner to report on a commit nobody is waiting for. Keyed per
+# workflow+ref, and `cancel-in-progress` is deliberately off for main, where the
+# result is a record of what that commit did rather than a fast signal.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -27,7 +35,71 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
-      # Tests run against in-memory SQLite (see tests/conftest.py), so no
-      # database service or DATABASE_URL/SECRET_KEY is needed here.
-      - name: Test
+      # Lint and format, same two commands as `make check` — in CI so they run on
+      # every push rather than when someone remembers to run the Makefile target.
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      # Architecture contracts: the layering rule (API -> service -> DB) and
+      # "app.core imports no web framework", enforced from .importlinter (R11).
+      - name: Check import contracts
+        run: lint-imports
+
+      # The checked-in openapi.json is the source of truth for the frontend's
+      # generated types, so it must not drift from the app (ROADMAP R8).
+      - name: Check openapi.json is fresh
+        run: |
+          python -c "import json; from app.main import app; json.dump(app.openapi(), open('openapi.json', 'w'), indent=2)"
+          git diff --exit-code openapi.json \
+            || { echo "::error::openapi.json is stale — run 'make openapi' and commit it"; exit 1; }
+
+      # Default tier: in-memory SQLite (see tests/conftest.py), no DB service or
+      # DATABASE_URL/SECRET_KEY needed. Fast; runs on every push/PR.
+      - name: Test (SQLite)
+        run: pytest
+
+  # Parity tier (ROADMAP R6): the same suite against Postgres, with the schema
+  # built by running the real migrations — catches what SQLite silently allows
+  # (length limits, tz-aware timestamps, native UUID/JSON) and proves the
+  # migrations apply. Runs alongside the fast tier, not instead of it.
+  parity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: warhammer
+          POSTGRES_PASSWORD: warhammer
+          POSTGRES_DB: warhammer_unit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Test (Postgres parity, migration-built schema)
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg2://warhammer:warhammer@localhost:5432/warhammer_unit_test
         run: pytest

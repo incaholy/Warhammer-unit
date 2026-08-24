@@ -5,15 +5,29 @@ input, per SPEC.md conventions.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import delete as sa_delete, func
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models import Army, ArmyUnit, Faction, Subfaction, Unit, User, UserUnit
-from app.core.services.errors import ArmyValidationError, NotFoundError
+from app.core.errors import CodedError, ErrorCode
+from app.core.services.errors import ConflictError, NotFoundError
+
+
+class ArmyValidationError(CodedError, ValueError):
+    """Bad army/roster input."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
 
 
 @dataclass
@@ -33,14 +47,14 @@ class ValidationIssue:
 
     kind: str  # "over_points" | "wrong_faction" | "wrong_subfaction"
     detail: str
-    unit: Optional[Unit] = None  # the offending unit, when applicable
+    unit: Unit | None = None  # the offending unit, when applicable
 
 
 @dataclass
 class ValidationReport:
     ok: bool
     points_total: int
-    points_limit: Optional[int]
+    points_limit: int | None
     issues: list[ValidationIssue]
 
 
@@ -49,7 +63,9 @@ class ArmyService:
     _UPDATABLE = {"name", "description", "faction_id", "subfaction_id", "points_limit"}
     # Of those, the ones backed by NOT NULL columns — an explicit null must be
     # rejected, not written. The rest may be cleared with an explicit null.
-    _NOT_NULLABLE = {"name", "faction_id"}
+    # Derived from the mapped table rather than hand-listed, so a new NOT NULL
+    # column can't be forgotten here.
+    _NOT_NULLABLE = not_nullable_fields(Army, _UPDATABLE)
 
     def __init__(self, session: Session):
         self.session = session
@@ -61,9 +77,9 @@ class ArmyService:
         user_id: UUID,
         name: str,
         faction_id: UUID,
-        subfaction_id: Optional[UUID] = None,
-        description: Optional[str] = None,
-        points_limit: Optional[int] = None,
+        subfaction_id: UUID | None = None,
+        description: str | None = None,
+        points_limit: int | None = None,
     ) -> Army:
         if self.session.get(User, user_id) is None:
             raise NotFoundError(f"user {user_id} not found")
@@ -81,7 +97,7 @@ class ArmyService:
             points_limit=points_limit,
         )
         self.session.add(army)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(army)
         return army
 
@@ -91,22 +107,25 @@ class ArmyService:
             raise NotFoundError(f"army {army_id} not found")
         return army
 
-    def list_armies(self, user_id: UUID) -> list[Army]:
+    def list_armies(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[Army]:
         # Eager-load the units subtree (units -> unit -> weapons/abilities) so
         # serializing each Army_Read doesn't lazy-load it per army (the N+1).
         statement = (
             select(Army)
             .where(Army.owner_user_id == user_id)
             .options(
-                selectinload(Army.units)
-                .selectinload(ArmyUnit.unit)
-                .selectinload(Unit.weapons),
-                selectinload(Army.units)
-                .selectinload(ArmyUnit.unit)
-                .selectinload(Unit.abilities),
+                selectinload(Army.units).selectinload(ArmyUnit.unit).selectinload(Unit.weapons),
+                selectinload(Army.units).selectinload(ArmyUnit.unit).selectinload(Unit.abilities),
             )
+            .order_by(Army.created_at, Army.id)  # id breaks created_at ties -> stable paging
+            .offset(offset)
+            .limit(limit)
         )
         return list(self.session.exec(statement).all())
+
+    def count_armies(self, user_id: UUID) -> int:
+        statement = select(func.count(Army.id)).where(Army.owner_user_id == user_id)
+        return self.session.exec(statement).one()
 
     def delete_army(self, army_id: UUID) -> None:
         army = self.get_army(army_id)
@@ -114,7 +133,7 @@ class ArmyService:
         # their (NOT NULL) army_id. The DB FK also cascades; this is explicit.
         self.session.execute(sa_delete(ArmyUnit).where(ArmyUnit.army_id == army_id))
         self.session.delete(army)
-        self.session.commit()
+        self.session.flush()
 
     def update_army(self, army_id: UUID, **fields) -> Army:
         army = self.get_army(army_id)
@@ -128,9 +147,7 @@ class ArmyService:
         for field in sorted(fields):
             if field in self._NOT_NULLABLE and fields[field] is None:
                 raise ArmyValidationError(field, "cannot be null")
-        if fields.get("faction_id") is not None and (
-            self.session.get(Faction, fields["faction_id"]) is None
-        ):
+        if fields.get("faction_id") is not None and (self.session.get(Faction, fields["faction_id"]) is None):
             raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
             self.session.get(Subfaction, fields["subfaction_id"]) is None
@@ -140,43 +157,39 @@ class ArmyService:
         for key, value in fields.items():
             setattr(army, key, value)
         self.session.add(army)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(army)
         return army
 
     # -------------------------- units in an army --------------------------
 
-    def add_unit(
-        self, army_id: UUID, unit_id: UUID, amount: int = 1
-    ) -> tuple[ArmyUnit, bool]:
-        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
-        without re-querying the army's units."""
+    def add_unit(self, army_id: UUID, unit_id: UUID, amount: int = 1) -> ArmyUnit:
+        """Add a unit to the army — **create-only**. If the unit is already in the
+        army, raise `ConflictError` (→ 409) rather than incrementing; change the
+        quantity with `set_amount` (PATCH), which sets an absolute value and is
+        idempotent. An incrementing add is not retry-safe — a timeout+retry would
+        double-apply. See ROADMAP R12."""
         if amount < 1:
             raise ArmyValidationError("amount", "must be >= 1")
         self._require_army(army_id)
         self._require_unit(unit_id)
-        entry = self._find_entry(army_id, unit_id)
-        created = entry is None
-        if created:
-            entry = ArmyUnit(army_id=army_id, unit_id=unit_id, amount=amount)
-            self.session.add(entry)
-        else:
-            entry.amount += amount  # upsert: increment
-        self.session.commit()
+        if self._find_entry(army_id, unit_id) is not None:
+            raise ConflictError(f"unit {unit_id} is already in army {army_id}")
+        entry = ArmyUnit(army_id=army_id, unit_id=unit_id, amount=amount)
+        self.session.add(entry)
+        self.session.flush()
         self.session.refresh(entry)
-        return entry, created
+        return entry
 
     def set_amount(self, army_id: UUID, unit_id: UUID, amount: int) -> ArmyUnit:
         if amount < 1:
-            raise ArmyValidationError(
-                "amount", "must be >= 1 (use remove_unit to remove)"
-            )
+            raise ArmyValidationError("amount", "must be >= 1 (use remove_unit to remove)")
         entry = self._find_entry(army_id, unit_id)
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         entry.amount = amount
         self.session.add(entry)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry
 
@@ -185,12 +198,10 @@ class ArmyService:
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in army {army_id}")
         self.session.delete(entry)
-        self.session.commit()
+        self.session.flush()
 
     def list_army_units(self, army_id: UUID) -> list[ArmyUnit]:
-        return list(
-            self.session.exec(select(ArmyUnit).where(ArmyUnit.army_id == army_id)).all()
-        )
+        return list(self.session.exec(select(ArmyUnit).where(ArmyUnit.army_id == army_id)).all())
 
     def shortfall(self, army_id: UUID) -> list[Shortfall]:
         army = self.get_army(army_id)
@@ -201,9 +212,7 @@ class ArmyService:
             ).all()
         }
         rows: list[Shortfall] = []
-        for entry in self.session.exec(
-            select(ArmyUnit).where(ArmyUnit.army_id == army_id)
-        ).all():
+        for entry in self.session.exec(select(ArmyUnit).where(ArmyUnit.army_id == army_id)).all():
             have = owned.get(entry.unit_id, 0)
             need = max(0, entry.amount - have)
             if need > 0:
@@ -235,9 +244,7 @@ class ArmyService:
         army = self.get_army(army_id)
         issues: list[ValidationIssue] = []
         total = 0
-        for entry in self.session.exec(
-            select(ArmyUnit).where(ArmyUnit.army_id == army_id)
-        ).all():
+        for entry in self.session.exec(select(ArmyUnit).where(ArmyUnit.army_id == army_id)).all():
             unit = self._unit_or_404(entry.unit_id)
             total += entry.amount * unit.points
             if unit.faction_id != army.faction_id:
@@ -248,10 +255,7 @@ class ArmyService:
                         unit=unit,
                     )
                 )
-            if (
-                unit.subfaction_id is not None
-                and unit.subfaction_id != army.subfaction_id
-            ):
+            if unit.subfaction_id is not None and unit.subfaction_id != army.subfaction_id:
                 issues.append(
                     ValidationIssue(
                         kind="wrong_subfaction",
@@ -291,9 +295,7 @@ class ArmyService:
             raise NotFoundError(f"unit {unit_id} not found")
         return unit
 
-    def _find_entry(self, army_id: UUID, unit_id: UUID) -> Optional[ArmyUnit]:
+    def _find_entry(self, army_id: UUID, unit_id: UUID) -> ArmyUnit | None:
         return self.session.exec(
-            select(ArmyUnit).where(
-                ArmyUnit.army_id == army_id, ArmyUnit.unit_id == unit_id
-            )
+            select(ArmyUnit).where(ArmyUnit.army_id == army_id, ArmyUnit.unit_id == unit_id)
         ).first()

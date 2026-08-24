@@ -1,33 +1,32 @@
-"""Password hashing, JWT tokens, and the auth dependencies.
+"""Password hashing, JWT tokens, and the coded auth errors.
 
 Config comes from the environment (loaded from `.env`):
   SECRET_KEY                   — JWT signing key. REQUIRED unless APP_ENV=dev.
   APP_ENV                      — "dev" (default) enables a throwaway key; any
                                  other value requires a real SECRET_KEY.
   ACCESS_TOKEN_EXPIRE_MINUTES  — token lifetime (default 2880 = 2 days)
+
+Deliberately free of any web-framework import: the FastAPI auth dependencies
+(`get_current_user`, the bearer scheme) live in `app/api/deps.py`, so the
+service layer can hash passwords and mint tokens without depending on transport.
+The `app.core` layer must not import `fastapi` — enforced by `.importlinter`.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlmodel import Session
 
-from app.core.db.connection import get_session
-from app.core.db.models import User
+from app.core.errors import CodedError, ErrorCode
 
 load_dotenv()
 
 _DEV_SECRET = "dev-secret-change-me"
 
 
-def _resolve_secret_key(app_env: str, secret_key: Optional[str]) -> str:
+def _resolve_secret_key(app_env: str, secret_key: str | None) -> str:
     """The JWT signing key. A throwaway default is allowed only in dev; any other
     environment must set `SECRET_KEY`, so a prod deploy can't silently ship a
     publicly-known key (which would make admin tokens forgeable)."""
@@ -46,10 +45,10 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "2880"))
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
 # ------------------------------ passwords ------------------------------
+
 
 def hash_password(plain: str) -> str:
     return _pwd.hash(plain)
@@ -61,10 +60,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 # ------------------------------- tokens --------------------------------
 
+
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-    )
+    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({"sub": subject, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -80,35 +78,31 @@ def decode_token(token: str) -> str:
     return subject
 
 
-# ---------------------------- dependencies -----------------------------
-
-def _unauthorized() -> HTTPException:
-    # Built fresh per raise (not a shared module-level instance): each raise gets
-    # its own traceback, with no cross-request mutable state on one global object.
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+# ------------------------------ auth errors ----------------------------
+# Coded like the service errors: they carry a `code` (+ message, and `field=None`
+# for the shared handler), so the API layer maps them by `code` — no HTTPException,
+# no status->code reverse lookup. Mapped by `app/main.py`'s `CodedError` handler.
+# Framework-free value types, so they stay in the domain module even though the
+# dependencies that raise them now live in `app/api/deps.py`.
 
 
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    session: Session = Depends(get_session),
-) -> User:
-    try:
-        user_id = UUID(decode_token(token))
-    except ValueError:
-        raise _unauthorized()
-    user = session.get(User, user_id)
-    if user is None:
-        raise _unauthorized()
-    return user
+class UnauthorizedError(CodedError):
+    """Missing or invalid credentials. → 401 (the handler adds `WWW-Authenticate`)."""
+
+    code = ErrorCode.UNAUTHORIZED
+    field = None
+
+    def __init__(self, message: str = "could not validate credentials"):
+        super().__init__(message)
+        self.message = message
 
 
-def get_current_admin(user: User = Depends(get_current_user)) -> User:
-    if not user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="admin only"
-        )
-    return user
+class ForbiddenError(CodedError):
+    """Authenticated but not permitted. → 403."""
+
+    code = ErrorCode.FORBIDDEN
+    field = None
+
+    def __init__(self, message: str = "admin only"):
+        super().__init__(message)
+        self.message = message

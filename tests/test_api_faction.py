@@ -22,7 +22,9 @@ def test_list_factions_is_public(client, make_faction):
     make_faction()
     resp = client.get("/factions")  # no auth required for reads
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    body = resp.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
 
 
 def test_create_faction_requires_admin(auth_client):
@@ -43,47 +45,37 @@ def test_create_faction_unknown_name_returns_422(admin_client):
 
 def test_list_factions_with_subfactions(admin_client):
     faction = admin_client.post("/factions", json={"name": "Space Marines"}).json()
-    admin_client.post(
-        "/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"}
-    )
+    admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"})
     resp = admin_client.get("/factions")
     assert resp.status_code == 200
-    listing = resp.json()
-    assert len(listing) == 1
-    assert [s["name"] for s in listing[0]["subfactions"]] == ["Ultramarines"]
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert [s["name"] for s in items[0]["subfactions"]] == ["Ultramarines"]
 
 
 def test_create_subfaction(admin_client):
     faction = admin_client.post("/factions", json={"name": "Space Marines"}).json()
-    resp = admin_client.post(
-        "/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"}
-    )
+    resp = admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"})
     assert resp.status_code == 201
     assert resp.json()["name"] == "Ultramarines"
 
 
 def test_create_subfaction_unknown_faction_returns_404(admin_client):
-    resp = admin_client.post(
-        "/subfactions", json={"faction_id": str(uuid.uuid4()), "name": "X"}
-    )
+    resp = admin_client.post("/subfactions", json={"faction_id": str(uuid.uuid4()), "name": "X"})
     assert resp.status_code == 404
 
 
 def test_create_subfaction_duplicate_returns_409(admin_client):
     faction = admin_client.post("/factions", json={"name": "Chaos"}).json()
     admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"})
-    resp = admin_client.post(
-        "/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"}
-    )
+    resp = admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Death Guard"})
     assert resp.status_code == 409  # duplicate = conflict
 
 
 def test_create_subfaction_wrong_faction_returns_400(admin_client):
     # Ultramarines is a Space Marines chapter, not a Xenos army.
     faction = admin_client.post("/factions", json={"name": "Xenos"}).json()
-    resp = admin_client.post(
-        "/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"}
-    )
+    resp = admin_client.post("/subfactions", json={"faction_id": faction["id"], "name": "Ultramarines"})
     assert resp.status_code == 400
     assert resp.json()["field"] == "name"  # typed error surfaces the field
 
@@ -92,9 +84,14 @@ def test_create_weapon(admin_client):
     resp = admin_client.post(
         "/weapons",
         json={
-            "name": "Bolt rifle", "category": "range", "attacks": "2",
-            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
-            "damage": "1", "range_inches": 24,
+            "name": "Bolt rifle",
+            "category": "range",
+            "attacks": "2",
+            "weapon_skill": 3,
+            "strength": 4,
+            "armor_piercing": 1,
+            "damage": "1",
+            "range_inches": 24,
         },
     )
     assert resp.status_code == 201
@@ -108,17 +105,20 @@ def test_create_weapon_invalid_category_returns_400(admin_client):
     resp = admin_client.post(
         "/weapons",
         json={
-            "name": "Bad", "category": "psychic", "attacks": "1",
-            "weapon_skill": 3, "strength": 4, "armor_piercing": 0, "damage": "1",
+            "name": "Bad",
+            "category": "psychic",
+            "attacks": "1",
+            "weapon_skill": 3,
+            "strength": 4,
+            "armor_piercing": 0,
+            "damage": "1",
         },
     )
     assert resp.status_code == 400
 
 
 def test_create_ability(admin_client):
-    resp = admin_client.post(
-        "/abilities", json={"name": "Oath of Moment", "description": "reroll"}
-    )
+    resp = admin_client.post("/abilities", json={"name": "Oath of Moment", "description": "reroll"})
     assert resp.status_code == 201
     assert resp.json()["name"] == "Oath of Moment"
 
@@ -127,25 +127,30 @@ def test_list_weapons_is_public(client, admin_client):
     admin_client.post(
         "/weapons",
         json={
-            "name": "Bolt rifle", "category": "range", "attacks": "2",
-            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
-            "damage": "1", "range_inches": 24,
+            "name": "Bolt rifle",
+            "category": "range",
+            "attacks": "2",
+            "weapon_skill": 3,
+            "strength": 4,
+            "armor_piercing": 1,
+            "damage": "1",
+            "range_inches": 24,
         },
     )
     resp = client.get("/weapons")  # public read
     assert resp.status_code == 200
-    assert [w["name"] for w in resp.json()] == ["Bolt rifle"]
+    assert [w["name"] for w in resp.json()["items"]] == ["Bolt rifle"]
 
 
 def test_list_abilities_is_public(client, admin_client):
     admin_client.post("/abilities", json={"name": "Oath", "description": "reroll"})
     resp = client.get("/abilities")  # public read
     assert resp.status_code == 200
-    assert [a["name"] for a in resp.json()] == ["Oath"]
+    assert [a["name"] for a in resp.json()["items"]] == ["Oath"]
 
 
 def test_faction_taxonomy(client):
-    resp = client.get("/factions/taxonomy")
+    resp = client.get("/taxonomy")
     assert resp.status_code == 200
     body = resp.json()
     assert set(body) == {"Imperium", "Xenos", "Chaos", "Space Marines"}
@@ -155,9 +160,7 @@ def test_faction_taxonomy(client):
 
 def _make_subfaction(admin_client, faction="Space Marines", name="Ultramarines"):
     f = admin_client.post("/factions", json={"name": faction}).json()
-    return admin_client.post(
-        "/subfactions", json={"faction_id": f["id"], "name": name}
-    ).json()
+    return admin_client.post("/subfactions", json={"faction_id": f["id"], "name": name}).json()
 
 
 def test_delete_subfaction(admin_client):
@@ -183,13 +186,44 @@ def test_delete_subfaction_requires_admin(auth_client):
     assert resp.status_code == 403
 
 
+def test_list_subfactions(admin_client, client):
+    _make_subfaction(admin_client, faction="Space Marines", name="Ultramarines")
+    _make_subfaction(admin_client, faction="Xenos", name="Necrons")
+
+    # public read (no admin), mirroring GET /factions
+    resp = client.get("/subfactions")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert {row["name"] for row in items} == {"Ultramarines", "Necrons"}
+    # each row carries its parent faction_id (the flat list would be ambiguous without it)
+    assert all("faction_id" in row for row in items)
+
+
+def test_list_subfactions_filtered_by_faction(admin_client):
+    sm = admin_client.post("/factions", json={"name": "Space Marines"}).json()
+    xn = admin_client.post("/factions", json={"name": "Xenos"}).json()
+    admin_client.post("/subfactions", json={"faction_id": sm["id"], "name": "Ultramarines"})
+    admin_client.post("/subfactions", json={"faction_id": xn["id"], "name": "Necrons"})
+
+    resp = admin_client.get("/subfactions", params={"faction_id": sm["id"]})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [row["name"] for row in items] == ["Ultramarines"]
+    assert items[0]["faction_id"] == sm["id"]
+
+
 def _make_weapon(admin_client, name="Bolt rifle"):
     return admin_client.post(
         "/weapons",
         json={
-            "name": name, "category": "range", "attacks": "2",
-            "weapon_skill": 3, "strength": 4, "armor_piercing": 1,
-            "damage": "1", "range_inches": 24,
+            "name": name,
+            "category": "range",
+            "attacks": "2",
+            "weapon_skill": 3,
+            "strength": 4,
+            "armor_piercing": 1,
+            "damage": "1",
+            "range_inches": 24,
         },
     ).json()
 
@@ -208,6 +242,36 @@ def test_update_weapon_bad_category_returns_400(admin_client):
     assert resp.json()["field"] == "category"
 
 
+def test_update_weapon_explicit_null_on_required_field_returns_400(admin_client):
+    # Same guard as units/armies: an explicit null on a NOT NULL column is a 400,
+    # not the IntegrityError-backstop 409.
+    w = _make_weapon(admin_client)
+
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"name": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "name"
+
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"strength": None})
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "strength"
+
+
+def test_update_weapon_explicit_null_on_nullable_field_clears_it(admin_client):
+    # range_inches is nullable (a melee weapon has none), so null still clears it.
+    w = _make_weapon(admin_client)
+    resp = admin_client.patch(f"/weapons/{w['id']}", json={"range_inches": None})
+    assert resp.status_code == 200
+    assert resp.json()["range_inches"] is None
+
+
+def test_update_ability_explicit_null_on_required_field_returns_400(admin_client):
+    a = admin_client.post("/abilities", json={"name": "Oath", "description": "reroll"}).json()
+    for field in ("name", "description"):
+        resp = admin_client.patch(f"/abilities/{a['id']}", json={field: None})
+        assert resp.status_code == 400
+        assert resp.json()["field"] == field
+
+
 def test_update_weapon_missing_returns_404(admin_client):
     resp = admin_client.patch(f"/weapons/{uuid.uuid4()}", json={"strength": 5})
     assert resp.status_code == 404
@@ -222,15 +286,13 @@ def test_delete_weapon(admin_client):
     w = _make_weapon(admin_client)
     resp = admin_client.delete(f"/weapons/{w['id']}")
     assert resp.status_code == 204
-    assert admin_client.get("/weapons").json() == []
+    assert admin_client.get("/weapons").json()["items"] == []
 
 
 def test_update_and_delete_ability(admin_client):
-    a = admin_client.post(
-        "/abilities", json={"name": "Oath", "description": "old"}
-    ).json()
+    a = admin_client.post("/abilities", json={"name": "Oath", "description": "old"}).json()
     patched = admin_client.patch(f"/abilities/{a['id']}", json={"description": "new"})
     assert patched.status_code == 200
     assert patched.json()["description"] == "new"
     assert admin_client.delete(f"/abilities/{a['id']}").status_code == 204
-    assert admin_client.get("/abilities").json() == []
+    assert admin_client.get("/abilities").json()["items"] == []

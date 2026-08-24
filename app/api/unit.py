@@ -4,14 +4,16 @@ Catalog writes are admin/seed in principle; gating is deferred until auth
 (SPEC.md "Authentication & authorization").
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
+from app.api.deps import get_current_admin, get_current_user_optional
+from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
-from app.core.security import get_current_admin
+from app.core.db.models import User
+from app.core.security import UnauthorizedError
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(prefix="/units", tags=["units"])
@@ -22,7 +24,7 @@ class Weapon_Read(SQLModel):
     name: str
     category: str
     keywords: list[str]
-    range_inches: Optional[int]
+    range_inches: int | None
     attacks: str
     weapon_skill: int
     strength: int
@@ -40,12 +42,12 @@ class Unit_Read(SQLModel):
     id: UUID
     unit_name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID]
+    subfaction_id: UUID | None
     movement: int
     toughness: int
     armor_save: int
     wounds: int
-    invulnerable_save: Optional[int]
+    invulnerable_save: int | None
     leadership: int
     objective_control: int
     points: int
@@ -64,24 +66,32 @@ class Unit_Create(SQLModel):
     leadership: int
     objective_control: int
     points: int
-    invulnerable_save: Optional[int] = None
-    subfaction_id: Optional[UUID] = None
-    keywords: Optional[list[str]] = None
+    invulnerable_save: int | None = None
+    subfaction_id: UUID | None = None
+    keywords: list[str] | None = None
 
 
 class Unit_Update(SQLModel):
-    unit_name: Optional[str] = None
-    faction_id: Optional[UUID] = None
-    subfaction_id: Optional[UUID] = None
-    movement: Optional[int] = None
-    toughness: Optional[int] = None
-    armor_save: Optional[int] = None
-    wounds: Optional[int] = None
-    invulnerable_save: Optional[int] = None
-    leadership: Optional[int] = None
-    objective_control: Optional[int] = None
-    points: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    unit_name: str | None = None
+    faction_id: UUID | None = None
+    subfaction_id: UUID | None = None
+    movement: int | None = None
+    toughness: int | None = None
+    armor_save: int | None = None
+    wounds: int | None = None
+    invulnerable_save: int | None = None
+    leadership: int | None = None
+    objective_control: int | None = None
+    points: int | None = None
+    keywords: list[str] | None = None
+
+
+class UnitFacets(SQLModel):
+    # Per-faction unit counts for the current filter, computed server-side in one
+    # GROUP BY (see UnitService.faction_facets). `total` is the count across all
+    # factions for the same filter. Replaces the client's download-and-count hack.
+    total: int
+    by_faction: dict[UUID, int]
 
 
 class WeaponLink(SQLModel):
@@ -102,39 +112,70 @@ def get_unit_service(session: Session = Depends(get_session)) -> UnitService:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_unit(
-    payload: Unit_Create, service: UnitService = Depends(get_unit_service)
-) -> Unit_Read:
+def create_unit(payload: Unit_Create, service: UnitService = Depends(get_unit_service)) -> Unit_Read:
     return service.create_unit(**payload.model_dump())
 
 
-@router.get("", response_model=list[Unit_Read])
+def _owner_for(owned: bool, user: User | None) -> UUID | None:
+    """Whose inventory to filter by, or None for the whole catalog.
+
+    The catalog is public, so `user` may be None — but `owned=true` from an
+    anonymous caller cannot mean anything, and silently ignoring it would return
+    the full catalog while the client believes it is showing an owned-only view.
+    A parameter the server ignores is the worst outcome available, so it 401s.
+    """
+    if not owned:
+        return None
+    if user is None:
+        raise UnauthorizedError("owned=true requires a signed-in user")
+    return user.id
+
+
+@router.get("", response_model=Page[Unit_Read])
 def list_units(
-    response: Response,
-    faction_id: Optional[UUID] = None,
-    subfaction_id: Optional[UUID] = None,
-    q: Optional[str] = Query(default=None, description="case-insensitive name search"),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    faction_id: UUID | None = None,
+    subfaction_id: UUID | None = None,
+    q: str | None = Query(default=None, description="case-insensitive name search"),
+    owned: bool = Query(default=False, description="only units in the caller's inventory"),
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Unit_Read]:
-    # Total across the filter (ignoring paging) so the catalog can show "N of M".
-    response.headers["X-Total-Count"] = str(
-        service.count_units(faction_id=faction_id, subfaction_id=subfaction_id, q=q)
-    )
-    return service.list_units(
+    user: User | None = Depends(get_current_user_optional),
+) -> Page[Unit_Read]:
+    # `owned` filters server-side on purpose. Narrowing a page client-side hides
+    # owned units that fall on other pages and makes every derived count wrong:
+    # filtering and pagination have to happen on the same side.
+    owned_by = _owner_for(owned, user)
+    items = service.list_units(
         faction_id=faction_id,
         subfaction_id=subfaction_id,
         q=q,
-        limit=limit,
-        offset=offset,
+        owned_by=owned_by,
+        limit=page.limit,
+        offset=page.offset,
     )
+    total = service.count_units(faction_id=faction_id, subfaction_id=subfaction_id, q=q, owned_by=owned_by)
+    return paginate(items, total, page)
+
+
+@router.get("/facets", response_model=UnitFacets)
+def unit_facets(
+    subfaction_id: UUID | None = None,
+    q: str | None = Query(default=None, description="case-insensitive name search"),
+    owned: bool = Query(default=False, description="only units in the caller's inventory"),
+    service: UnitService = Depends(get_unit_service),
+    user: User | None = Depends(get_current_user_optional),
+) -> UnitFacets:
+    # Declared before `/{unit_id}` so the literal path wins over the UUID param.
+    # Takes `owned` for the same reason the list does: a filtered list beside an
+    # unfiltered rail reads as more broken than no filter at all.
+    total, by_faction = service.faction_facets(
+        subfaction_id=subfaction_id, q=q, owned_by=_owner_for(owned, user)
+    )
+    return UnitFacets(total=total, by_faction=by_faction)
 
 
 @router.get("/{unit_id}", response_model=Unit_Read)
-def get_unit(
-    unit_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Unit_Read:
+def get_unit(unit_id: UUID, service: UnitService = Depends(get_unit_service)) -> Unit_Read:
     return service.get_unit(unit_id)
 
 
@@ -156,9 +197,7 @@ def update_unit(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_unit(
-    unit_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_unit(unit_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_unit(unit_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

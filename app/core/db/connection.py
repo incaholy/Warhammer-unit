@@ -25,18 +25,22 @@ def get_engine() -> Engine:
 
 
 def get_session() -> Iterator[Session]:
-    """Yield a Session, rolling it back on error and closing it afterwards.
+    """Yield a Session that is the request's unit of work: commit on success,
+    roll back on error, close always.
 
-    This is the FastAPI dependency shape (`Depends(get_session)`). If the
-    request handler raises, the session is rolled back so a half-finished unit
-    of work is never left pending — anything not already `commit()`-ed is
-    discarded. On success the service's own `commit()` has already persisted the
-    work. The session is closed either way. Scripts that want a session directly
-    can use `Session(get_engine())`.
+    This is the FastAPI dependency shape (`Depends(get_session)`) and the
+    *single* transaction boundary. Services do their writes and `flush()` (so the
+    DB assigns keys and constraint errors surface *during* the request, where the
+    handlers can map them), but never `commit()` — this commits once, after the
+    handler returns successfully. If the handler raises, the whole unit of work is
+    rolled back, so a multi-step route can't leave a partial write behind. The
+    session is closed either way. Scripts wanting a session directly can use
+    `Session(get_engine())` and commit themselves.
     """
     session = Session(get_engine())
     try:
         yield session
+        session.commit()
     except Exception:
         session.rollback()
         raise

@@ -56,26 +56,27 @@ maps them to HTTP in one place (`app/main.py`). The reason this matters more tha
 you add a second entry point (a CLI, a scheduled job, a queue consumer), business logic that raises
 `HTTPException` has to be rewritten, and business logic that raises `NotFoundError` just works.
 
-**Status: Partial.** The rule is followed nearly everywhere, but two things keep it from **Holds**:
+**Status: ✅ Holds (R11).** Both things that kept this Partial are gone:
 
-- **Nothing enforces it.** There is no import-contract linter, no architecture test, and CI runs only
-  `pytest`. A service could import from `app/api/` tomorrow and all 225 tests would stay green. By
-  the definition above, a convention maintained by discipline is Partial. See
-  [ROADMAP R11](ROADMAP.md#r11-enforce-the-layering-rule).
-- **There is one real violation.** `app/core/security.py` imports from FastAPI and raises
-  `HTTPException` (`:88`, `:111`), and `app/core/services/service_auth.py:13` imports it. So the
-  service layer transitively depends on an HTTP-coupled module, and `tests/test_security.py:42`
-  pins that behavior in place by asserting `HTTPException` is raised. Auth is the usual place this
-  leaks, because token decoding sits awkwardly between transport and domain. The fix is to decide
-  which half of `security.py` is domain logic (hashing, token encode and decode) and which half is an
-  API dependency (`get_current_user` turning a failure into a 401), and split it along that line.
+- **It is enforced, not remembered.** `.importlinter` declares two contracts and CI runs
+  `lint-imports` alongside `pytest`: a `layers` contract (`app.api` > `app.core.services` >
+  `app.core.db`, so a lower layer may not import a higher one) and a `forbidden` contract
+  (`app.core` may not import `fastapi` or `starlette`, directly or transitively). A service that
+  imports from `app/api/` tomorrow fails the build rather than passing 245 green tests.
+- **The one real violation is split.** `app/core/security.py` kept the domain half (hashing, token
+  encode and decode) and `app/api/deps.py` took the transport half (`get_current_user` /
+  `get_current_admin`, turning a decode failure into a 401 with a `WWW-Authenticate` header).
+  `app.core` is now provably free of any web-framework import — the forbidden contract is what
+  makes it provable rather than conventional.
 
 Two details worth keeping deliberately:
 
 - **The typed error hierarchy subclasses the builtin it replaces**
-  (`NotFoundError(ServiceError, LookupError)`). That is what let the error migration happen
+  (`NotFoundError(CodedError, LookupError)`). That is what let the error migration happen
   incrementally instead of as one breaking change, and it is better factored than the reference's
-  *service* errors, which hardcode a status code per class with no shared base. Scope that credit,
+  *service* errors, which hardcode a status code per class. The second base, `CodedError`, is a
+  marker that carries no behaviour and exists so the API layer registers one handler for the family
+  rather than a per-class tuple a new error can fall off. Scope that credit,
   though: the reference's *API* layer has something this codebase does not, a central `ErrorCode`
   enum plus a code-to-status lookup table so the two can never disagree
   (`attention-api/app/api/errors.py`). That is the piece §2.2 asks you to build, and it is worth
@@ -100,9 +101,9 @@ balancers and uptime monitors want a path that outlives any API version.
 Without a version prefix there is no way to ship a breaking change without breaking every deployed
 client at the same instant. The prefix costs one router mount now and a migration later.
 
-**Status: Not yet.** Routers mount at the root (`app/main.py:94`). See
-[ROADMAP R5](ROADMAP.md#r5-add-the-apiv1-prefix). `DEPLOY-GCP.md:155` already requires a parent prefix
-for the Firebase rewrite, so this lands with that work.
+**Status: ✅ Done (R5).** Every resource router mounts under a `/api/v1` parent in `app/main.py`;
+`GET /health` stays unversioned at the root. The frontend bakes the prefix into `API_PREFIX` in
+`src/api/client.ts`, and the Firebase rewrite's `/api/**` already covers `/api/v1/**`.
 
 ### 2.2 One error shape, with stable codes
 
@@ -125,9 +126,13 @@ key.
 Concepts: `RequestValidationError` and `@app.exception_handler` in FastAPI, and the structure of
 Pydantic v2's `ValidationError.errors()`.
 
-**Status: Not yet.** Two incompatible shapes ship today and the frontend renders one of them as
-garbage. See [ROADMAP R2](ROADMAP.md#r2-unify-the-error-shape-and-add-a-code-enum), the
-highest-value item on the list.
+**Status: ✅ Done (R2, extended by R9).** One shape, built in one place (`_error_response` in
+`app/main.py`): `{detail, code, field?, request_id, errors: [{code, field, detail}]}`. `ErrorCode`
+lives in `app/core/errors.py` — below both layers, so a service error can carry a `code` without the
+core importing the API — and `app/api/errors.py` owns the single `CODE_STATUS` lookup, so a code and
+its status can never disagree. FastAPI's raw 422 array is reshaped by a `RequestValidationError`
+handler into the same shape, and R9 made `errors[]` uniform on *every* error body (one element for
+most failures, all of them for a multi-field 422), with the top-level fields mirroring `errors[0]`.
 
 ### 2.3 Pagination, sort, and filter are conventions, not per-endpoint features
 
@@ -146,10 +151,14 @@ table gets linearly slower and can skip or repeat rows when data changes between
 keyset is stable but cannot jump to an arbitrary page. For a mostly-static catalog, offset is
 defensible. Decide once, write it down, apply everywhere.
 
-**Status: Not yet.** Not Partial: no endpoint currently satisfies this section. All three rules are
-unmet. One of nine list endpoints paginates at all; that one reports its total in an `X-Total-Count`
-header rather than the body; and no server-side aggregate exists, which is what pushed the counting
-into the client in the first place. See [ROADMAP R4](ROADMAP.md#r4-make-pagination-a-convention).
+**Status: ✅ Done (R4).** All three rules hold. Every one of the seven collections returns
+`Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
+`app/api/pagination.py`, with a documented offset-based choice and a `limit` capped at 200. The total
+travels in the body and `X-Total-Count` is gone, which fixes SPEC.md BUG1 structurally rather than by
+configuration. Every ordering carries an `id` tiebreaker so a page boundary can't repeat or skip a row.
+The aggregate gap was specifically the **per-faction count** — `count_units` and `points_total` were
+already server-side — and `GET /units/facets` now returns it as one `GROUP BY`, which is what let the
+frontend drop its `limit=1000` count-in-the-client hack.
 
 ### 2.4 Failures are traceable end to end
 
@@ -168,11 +177,12 @@ piece of work rather than three tickets.
 
 Concepts: ASGI middleware, `request.state`, structured logging, log correlation.
 
-**Status: Not yet.** One third is in place: `app/main.py:78-83` catches unhandled exceptions, logs the
-traceback, and returns a generic body so internals never leak. There is no request ID, no logging
-configuration of any kind, and `sentry-sdk` is pinned in `requirements.txt:41` but never imported or
-initialized, so it ships in the image and does nothing. This is `SPEC.md`'s M5 item; see
-[ROADMAP R7](ROADMAP.md#r7-land-observability-request-id-structured-logs-error-reporting).
+**Status: ✅ Done (R7).** All three pieces, wired together in `app/observability.py`
+(`install_observability`): a middleware generates or echoes an `X-Request-ID` and stashes it in a
+context variable; a logging filter puts that ID on every JSON log line (`configure_logging`); and the
+same ID goes into every error body and the response header. Sentry is initialized only when
+`SENTRY_DSN` is set (a true no-op locally and in tests) and tags each event with the request ID. The
+unhandled-exception handler still returns a sanitized body.
 
 ### 2.5 Resource and verb semantics
 
@@ -201,15 +211,15 @@ CRUD coverage is uneven across the catalog resources. See
 
 ### 2.6 Response envelope
 
-**Status: Undecided.** The reference wraps every response in `{data, errors, meta}` so that
-pagination metadata, multiple errors, and the trace ID have a defined home. It is a real improvement
-and it is also the most invasive change available: it touches every route, every response model, and
-every frontend call site.
-
-The decision is deliberately left open rather than defaulted into, because 2.2, 2.3 and 2.4 deliver
-most of the value on their own. If it is adopted, it should be adopted in one migration and before
-the API has more consumers. A half-enveloped API is worse than either end state. See
-[ROADMAP R9](ROADMAP.md#r9-decide-on-the-response-envelope).
+**Status: ✅ Decided — no full envelope (R9, option C).** The reference wraps every response in
+`{data, errors, meta}` so pagination metadata, multiple errors, and the trace ID have a defined home.
+But §2.2 (error shape + code), §2.3 (pagination total in the body), and §2.4 (request ID) already
+deliver all three on their own, so the full envelope — the most invasive change available (every
+route, every response model, every frontend call site, and now the generated types) — would buy only
+structural uniformity. The one functional gap it also closed, **multiple validation errors in one
+response**, was closed directly instead: every error body carries a uniform `errors[]` array (see
+§2.2 / `docs/api/conventions.md`), with the top level mirroring `errors[0]` for back-compat. Success
+responses stay bare. See [ROADMAP R9](ROADMAP.md#r9-decide-on-the-response-envelope).
 
 ---
 
@@ -235,8 +245,10 @@ commit expires the identity map and forces a re-read of a row you just wrote.
 
 Concepts: the unit of work pattern, `Session.flush()` versus `Session.commit()`, session-per-request.
 
-**Status: Not yet.** Services own the commits today (27 call sites), and the test fixture is built
-around that. See [ROADMAP R3](ROADMAP.md#r3-move-the-transaction-boundary-into-get_session).
+**Status: ✅ Done (R3).** The 27 service-level commits are now 27 `flush()` calls — services own no
+commit at all — and the boundary sits in `get_session` (`app/core/db/connection.py`), which commits
+once on success and rolls back on any exception. The test fixture moved with it, which is the half
+that usually gets missed: leaving it behind would keep the suite green while asserting the old shape.
 
 ---
 
@@ -252,9 +264,10 @@ around that. See [ROADMAP R3](ROADMAP.md#r3-move-the-transaction-boundary-into-g
   time rather than in review.
 - Stat and column names match the datasheet terms in `models.py`.
 
-**Status: Partial.** The first two hold. No test runs a migration: the suite builds its schema with
-`SQLModel.metadata.create_all()`, which reads the models and bypasses Alembic entirely. See
-[ROADMAP R6](ROADMAP.md#r6-add-a-postgres-parity-tier-driven-by-migrations).
+**Status: ✅ Done (R6).** The parity tier builds its schema by running `alembic upgrade head`, and
+`tests/test_migrations.py` autogenerates a diff against the models and fails on any difference — so
+model/migration drift is caught in CI, not at deploy time. The fast SQLite tier still uses
+`create_all` for speed.
 
 ---
 
@@ -280,12 +293,13 @@ scraper into a fetch half and a parse half, then testing the parse half against 
 the test path. The seam itself should eventually be covered too, by a fake fetch rather than by
 hitting the live site.
 
-**Status: Partial.** The fast tier is in good shape. The parity tier does not exist in a meaningful
-sense: `make docker-test` boots a Postgres container and sets `DATABASE_URL`, but
-`tests/conftest.py:31` hardcodes `create_engine("sqlite://")` and never reads that variable, so the
-containerized run executes the whole suite on in-memory SQLite and passes without proving anything.
-That is the more dangerous state to be in, because it looks like coverage. See
-[ROADMAP R6](ROADMAP.md#r6-add-a-postgres-parity-tier-driven-by-migrations).
+**Status: ✅ Done (R6).** Both tiers exist. `tests/conftest.py` selects the backend: with
+`TEST_DATABASE_URL` set it runs the whole suite against Postgres on a schema built by the real
+migrations; unset, it uses the fast in-memory SQLite tier. A dedicated variable (not `DATABASE_URL`)
+keeps a plain `pytest` from ever touching a developer's database. CI runs both jobs — the fast SQLite
+tier and the Postgres parity tier (a `postgres:16` service) — on every push, and `make docker-test`
+runs the parity tier in a container. The external-dependency seam (a fake fetch for the scraper)
+remains the one open piece.
 
 ---
 
@@ -304,12 +318,12 @@ That is the more dangerous state to be in, because it looks like coverage. See
   other docs. It is the only doc a new reader is guaranteed to open.
 - Docs change in the same PR as the code that changes them.
 
-**Status: Partial.** `openapi.json` is checked in, regenerable, and currently fresh, which is ahead of
-the reference. Four exceptions: nothing verifies that freshness, the frontend still hand-maintains
-`src/api/types.ts`, there is no `docs/` directory at all (so no `conventions.md`), and `SPEC.md` is
-89KB in one file while `README.md` is two lines. See
-[ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types) and
-[R10](ROADMAP.md#r10-write-a-readme).
+**Status: Mostly done (R8, R10).** `openapi.json` is checked in and now **CI-verified fresh**; the
+frontend's types are **generated from it** (`npm run gen:api` → `src/api/schema.d.ts`, re-exported by
+`types.ts`), not hand-maintained; `docs/api/conventions.md` is the cross-repo contract; and `README.md`
+is a real front door (R10). One piece remains: `SPEC.md` is still an 89KB monolith — splitting it into
+audience-scoped docs is the outstanding work. See
+[ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
 
 ---
 
@@ -331,12 +345,12 @@ the reference. Four exceptions: nothing verifies that freshness, the frontend st
   component. Ad hoc utility strings copy-pasted between components are what this avoids.
 - **TypeScript runs in `strict` mode.**
 
-**Status: Partial.** The client, query layer, and styling are all true in the code today and are the
-strongest work in either repo, but none of them is enforced: no lint rule stops a second `fetch` call
-site or an inline `useQuery` from appearing, so they are conventions rather than guarantees. Types
-are hand-maintained, `strict` is off, and the client asserts rather than validates. See
-[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter) and
-[R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
+**Status: Partial.** The client, query layer, and styling are the strongest work in either repo.
+`strict` is on (R1), the client **validates** the error boundary with zod rather than asserting (R2),
+and types are **generated** from `openapi.json` rather than hand-maintained (R8). What remains is
+enforcement: no lint rule stops a second `fetch` call site or an inline `useQuery` from appearing, so
+those stay conventions rather than guarantees. See
+[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter).
 
 ---
 
@@ -348,7 +362,9 @@ build, then test.** Both repos have a linter. CI cancels superseded runs with a 
 The frontend is the model here: it runs `eslint`, `tsc -b && vite build`, and `vitest run` in CI. Both
 reference repos have no CI at all, so nothing enforces their checks on a push.
 
-**Status: Partial.** Both repos have CI, and the frontend pipeline is the right shape. Three
-exceptions: the backend has no linter or formatter of any kind, its pipeline runs only `pytest`, and
-neither repo's CI has a `concurrency` group. See
-[ROADMAP R1](ROADMAP.md#r1-turn-on-typescript-strict-and-add-a-python-linter).
+**Status: ✅ Holds.** All three exceptions are closed. The backend lints and formats with `ruff`
+(R1), and its CI now runs that pair as its first steps — previously they lived only in `make check`,
+which meant they ran when someone remembered. The backend pipeline is lint → format check → import
+contracts → openapi freshness → tests (SQLite), with the Postgres parity tier as a second job; the
+frontend is `eslint` → `tsc -b && vite build` → `vitest run`. Both repos now declare a `concurrency`
+group keyed on workflow+ref, cancelling superseded PR runs while keeping every run on `main`.

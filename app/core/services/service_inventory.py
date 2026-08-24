@@ -4,51 +4,60 @@ Session-injected. `NotFoundError` for not-found, `InventoryValidationError` for
 bad amounts, per SPEC.md conventions.
 """
 
-from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db.models import Unit, User, UserUnit
-from app.core.services.errors import InventoryValidationError, NotFoundError
+from app.core.errors import CodedError, ErrorCode
+from app.core.services.errors import ConflictError, NotFoundError
+
+
+class InventoryValidationError(CodedError, ValueError):
+    """Bad inventory input."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
 
 
 class InventoryService:
     def __init__(self, session: Session):
         self.session = session
 
-    def add_unit(
-        self, user_id: UUID, unit_id: UUID, amount: int = 1
-    ) -> tuple[UserUnit, bool]:
-        """Upsert; returns `(entry, created)` so the API can pick 201 vs 200
-        without re-querying the inventory."""
+    def add_unit(self, user_id: UUID, unit_id: UUID, amount: int = 1) -> UserUnit:
+        """Add a unit to the inventory — **create-only**. If it's already owned,
+        raise `ConflictError` (→ 409) rather than incrementing; change the quantity
+        with `set_amount` (PATCH), which sets an absolute value and is idempotent.
+        An incrementing add is not retry-safe — a timeout+retry would double-apply.
+        See ROADMAP R12."""
         if amount < 1:
             raise InventoryValidationError("amount", "must be >= 1")
         self._require_user(user_id)
         self._require_unit(unit_id)
-        entry = self._find_entry(user_id, unit_id)
-        created = entry is None
-        if created:
-            entry = UserUnit(owner_user_id=user_id, unit_id=unit_id, amount=amount)
-            self.session.add(entry)
-        else:
-            entry.amount += amount  # upsert: increment
-        self.session.commit()
+        if self._find_entry(user_id, unit_id) is not None:
+            raise ConflictError(f"unit {unit_id} is already in {user_id}'s inventory")
+        entry = UserUnit(owner_user_id=user_id, unit_id=unit_id, amount=amount)
+        self.session.add(entry)
+        self.session.flush()
         self.session.refresh(entry)
-        return entry, created
+        return entry
 
     def set_amount(self, user_id: UUID, unit_id: UUID, amount: int) -> UserUnit:
         if amount < 1:
-            raise InventoryValidationError(
-                "amount", "must be >= 1 (use remove_unit to remove)"
-            )
+            raise InventoryValidationError("amount", "must be >= 1 (use remove_unit to remove)")
         entry = self._find_entry(user_id, unit_id)
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         entry.amount = amount
         self.session.add(entry)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(entry)
         return entry
 
@@ -57,23 +66,38 @@ class InventoryService:
         if entry is None:
             raise NotFoundError(f"unit {unit_id} is not in {user_id}'s inventory")
         self.session.delete(entry)
-        self.session.commit()
+        self.session.flush()
 
     def list_inventory(
-        self, user_id: UUID, q: Optional[str] = None
+        self, user_id: UUID, q: str | None = None, limit: int = 50, offset: int = 0
     ) -> list[UserUnit]:
-        statement = select(UserUnit).where(UserUnit.owner_user_id == user_id)
+        statement = self._apply_inventory_filter(select(UserUnit), user_id, q)
+        # Eager-load each entry's unit and that unit's weapons/abilities so
+        # serialization doesn't lazy-load them per row (the N+1).
+        statement = (
+            statement.options(
+                selectinload(UserUnit.unit).selectinload(Unit.weapons),
+                selectinload(UserUnit.unit).selectinload(Unit.abilities),
+            )
+            .order_by(UserUnit.unit_id, UserUnit.id)  # id breaks ties -> stable paging
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(self.session.exec(statement).all())
+
+    def count_inventory(self, user_id: UUID, q: str | None = None) -> int:
+        statement = self._apply_inventory_filter(select(func.count(UserUnit.unit_id)), user_id, q)
+        return self.session.exec(statement).one()
+
+    def _apply_inventory_filter(self, statement, user_id: UUID, q: str | None):
+        """Shared filter for `list_inventory`/`count_inventory` so page and total
+        always agree: owned by `user_id`, optional case-insensitive name search."""
+        statement = statement.where(UserUnit.owner_user_id == user_id)
         if q:
             statement = statement.join(Unit, UserUnit.unit_id == Unit.id).where(
                 Unit.unit_name.ilike(f"%{q}%")
             )
-        # Eager-load each entry's unit and that unit's weapons/abilities so
-        # serialization doesn't lazy-load them per row (the N+1).
-        statement = statement.options(
-            selectinload(UserUnit.unit).selectinload(Unit.weapons),
-            selectinload(UserUnit.unit).selectinload(Unit.abilities),
-        )
-        return list(self.session.exec(statement).all())
+        return statement
 
     # ------------------------------ helpers ------------------------------
 
@@ -85,9 +109,7 @@ class InventoryService:
         if self.session.get(Unit, unit_id) is None:
             raise NotFoundError(f"unit {unit_id} not found")
 
-    def _find_entry(self, user_id: UUID, unit_id: UUID) -> Optional[UserUnit]:
+    def _find_entry(self, user_id: UUID, unit_id: UUID) -> UserUnit | None:
         return self.session.exec(
-            select(UserUnit).where(
-                UserUnit.owner_user_id == user_id, UserUnit.unit_id == unit_id
-            )
+            select(UserUnit).where(UserUnit.owner_user_id == user_id, UserUnit.unit_id == unit_id)
         ).first()

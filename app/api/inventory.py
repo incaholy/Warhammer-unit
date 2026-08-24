@@ -4,16 +4,16 @@ Identity comes from the JWT (`get_current_user`), not a path param, so a user
 can only ever touch their own inventory.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Field, Session, SQLModel
 
+from app.api.deps import get_current_user
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
 from app.core.db.models import User
-from app.core.security import get_current_user
 from app.core.services.service_inventory import InventoryService
 
 router = APIRouter(prefix="/me/inventory", tags=["inventory"])
@@ -39,29 +39,27 @@ def get_inventory_service(
     return InventoryService(session)
 
 
-@router.get("", response_model=list[UserUnit_Read])
+@router.get("", response_model=Page[UserUnit_Read])
 def list_inventory(
-    q: Optional[str] = Query(default=None),
+    q: str | None = Query(default=None),
+    page: PageParams = Depends(),
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
-) -> list[UserUnit_Read]:
-    return service.list_inventory(current_user.id, q)
+) -> Page[UserUnit_Read]:
+    items = service.list_inventory(current_user.id, q, limit=page.limit, offset=page.offset)
+    total = service.count_inventory(current_user.id, q)
+    return paginate(items, total, page)
 
 
 @router.post("", response_model=UserUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
     payload: InventoryAdd,
-    response: Response,
     current_user: User = Depends(get_current_user),
     service: InventoryService = Depends(get_inventory_service),
 ) -> UserUnit_Read:
-    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    entry, created = service.add_unit(
-        current_user.id, payload.unit_id, payload.amount
-    )
-    if not created:
-        response.status_code = status.HTTP_200_OK
-    return entry
+    # Create-only: 201 on success, 409 if the unit is already owned — change the
+    # quantity via PATCH (idempotent / retry-safe). See ROADMAP R12.
+    return service.add_unit(current_user.id, payload.unit_id, payload.amount)
 
 
 @router.patch("/{unit_id}", response_model=UserUnit_Read)

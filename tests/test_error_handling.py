@@ -9,7 +9,7 @@ re-raises server exceptions instead of surfacing the response.
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
+from conftest import PrefixTestClient
 from sqlalchemy.exc import IntegrityError
 
 from app.core.db.connection import get_session
@@ -20,7 +20,7 @@ from app.main import app
 @pytest.fixture(name="safe_client")
 def safe_client_fixture(session):
     app.dependency_overrides[get_session] = lambda: session
-    with TestClient(app, raise_server_exceptions=False) as c:
+    with PrefixTestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -36,7 +36,11 @@ def test_unexpected_error_returns_generic_500(safe_client, monkeypatch):
     resp = safe_client.get(f"/units/{uuid.uuid4()}")
 
     assert resp.status_code == 500
-    assert resp.json() == {"detail": "internal server error"}
+    body = resp.json()
+    assert body["detail"] == "internal server error"
+    assert body["code"] == "INTERNAL"
+    # the correlation id is in the body and on the header even on the catch-all 500
+    assert body["request_id"] == resp.headers["X-Request-ID"]
     assert secret not in resp.text  # the raw exception message must not leak
 
 
@@ -53,5 +57,21 @@ def test_integrity_error_maps_to_generic_409(safe_client, monkeypatch):
     resp = safe_client.get(f"/units/{uuid.uuid4()}")
 
     assert resp.status_code == 409
-    assert resp.json() == {"detail": "conflict with an existing resource"}
+    body = resp.json()
+    assert body["detail"] == "conflict with an existing resource"
+    assert body["code"] == "CONFLICT"
+    assert body["request_id"] == resp.headers["X-Request-ID"]
     assert "UNIQUE constraint" not in resp.text  # DB internals must not leak
+
+
+def test_request_validation_reshaped_to_one_shape(safe_client):
+    # A malformed path param triggers FastAPI's RequestValidationError. It must
+    # come back as our one error shape (a *string* detail + code + field), not the
+    # default error *array* that stringifies to "[object Object]" on the client.
+    resp = safe_client.get("/units/not-a-uuid")
+
+    assert resp.status_code == 422
+    body = resp.json()
+    assert isinstance(body["detail"], str)  # not a list — the R2 bug
+    assert body["code"] == "REQUEST_VALIDATION"
+    assert body["field"] == "unit_id"

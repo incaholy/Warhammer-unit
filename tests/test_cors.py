@@ -15,10 +15,25 @@ def test_cors_allows_configured_origin(monkeypatch):
 
     importlib.reload(main)
     try:
-        resp = TestClient(main.app).get(
-            "/health", headers={"Origin": "http://localhost:5173"}
-        )
+        resp = TestClient(main.app).get("/health", headers={"Origin": "http://localhost:5173"})
         assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    finally:
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        importlib.reload(main)
+
+
+def test_cors_exposes_the_request_id_header(monkeypatch):
+    # Without `expose_headers`, a browser hides X-Request-ID from cross-origin JS
+    # and `headers.get()` silently returns null — the same mechanism as SPEC.md
+    # BUG1, which capped the deployed catalog at 25 units via X-Total-Count.
+    monkeypatch.setenv("ALLOWED_ORIGINS", "http://localhost:5173")
+    import app.main as main
+
+    importlib.reload(main)
+    try:
+        resp = TestClient(main.app).get("/health", headers={"Origin": "http://localhost:5173"})
+        exposed = resp.headers.get("access-control-expose-headers", "")
+        assert main.REQUEST_ID_HEADER.lower() in exposed.lower()
     finally:
         monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
         importlib.reload(main)
@@ -29,7 +44,5 @@ def test_cors_absent_when_unset(monkeypatch):
     import app.main as main
 
     importlib.reload(main)
-    resp = TestClient(main.app).get(
-        "/health", headers={"Origin": "http://evil.example"}
-    )
+    resp = TestClient(main.app).get("/health", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in resp.headers
