@@ -9,7 +9,7 @@ domain half in `app.core.security`. Turning a decode failure into a 401 with a
 
 from uuid import UUID
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.security import OAuth2PasswordBearer
 from sqlmodel import Session
 
@@ -60,6 +60,34 @@ def get_current_user_optional(
     except ValueError:
         return None
     return session.get(User, user_id)
+
+
+def get_owned_by(
+    owned: bool = Query(default=False, description="only units in the caller's inventory"),
+    user: User | None = Depends(get_current_user_optional),
+) -> UUID | None:
+    """Whose inventory to filter a catalog listing by, or None for everything.
+
+    The catalog is public, so `user` may be None — but `owned=true` from an
+    anonymous caller cannot mean anything, and silently ignoring it would return
+    the full catalog while the client believes it is showing an owned-only view.
+    A parameter the server ignores is the worst outcome available, so it 401s.
+
+    This is a dependency rather than a helper the endpoint calls, so that the
+    three things a caller-aware endpoint needs — the `owned` query parameter, the
+    optional caller, and the resolution between them — arrive together. Taking
+    the dependency IS calling it, so an endpoint cannot declare the parameter and
+    forget to apply it, which would accept `owned` and ignore it: the exact
+    failure this function exists to prevent, one level up.
+
+    FastAPI surfaces a dependency's own query parameters in the OpenAPI document,
+    so `owned` stays part of the published contract.
+    """
+    if not owned:
+        return None
+    if user is None:
+        raise UnauthorizedError("owned=true requires a signed-in user")
+    return user.id
 
 
 def get_current_admin(user: User = Depends(get_current_user)) -> User:

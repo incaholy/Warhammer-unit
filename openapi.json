@@ -305,18 +305,6 @@
             "description": "case-insensitive name search"
           },
           {
-            "name": "owned",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "only units in the caller's inventory",
-              "default": false,
-              "title": "Owned"
-            },
-            "description": "only units in the caller's inventory"
-          },
-          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -338,6 +326,18 @@
               "default": 0,
               "title": "Offset"
             }
+          },
+          {
+            "name": "owned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "only units in the caller's inventory",
+              "default": false,
+              "title": "Owned"
+            },
+            "description": "only units in the caller's inventory"
           }
         ],
         "responses": {

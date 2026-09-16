@@ -6,6 +6,7 @@ other pages and made "N of M" compare a filtered page against an unfiltered tota
 """
 
 from app.core.db.models import UserUnit
+from app.main import app
 
 
 def _own(session, user, unit, amount=1):
@@ -76,3 +77,20 @@ def test_owned_composes_with_the_other_filters(auth_client, session, make_unit, 
 
     body = auth_client.get("/units?owned=true&q=two").json()
     assert [u["unit_name"] for u in body["items"]] == ["Alpha Two"]
+
+
+def test_owned_stays_in_the_published_contract():
+    """`owned` is declared by a dependency, not by the endpoint signature.
+
+    FastAPI surfaces a dependency's own query parameters, so the contract is
+    unchanged — but that is the one thing this refactor could silently break, and
+    the frontend generates its types from this document. If `owned` ever vanishes
+    from here, the client stops sending a filter the server still honours and the
+    catalog quietly shows everything.
+    """
+    doc = app.openapi()
+    for path in ("/api/v1/units", "/api/v1/units/facets"):
+        params = {p["name"]: p for p in doc["paths"][path]["get"]["parameters"]}
+        assert "owned" in params, f"{path} no longer declares `owned`"
+        assert params["owned"]["schema"]["type"] == "boolean"
+        assert params["owned"]["in"] == "query"

@@ -9,11 +9,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
-from app.api.deps import get_current_admin, get_current_user_optional
+from app.api.deps import get_current_admin, get_owned_by
 from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
-from app.core.db.models import User
-from app.core.security import UnauthorizedError
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(prefix="/units", tags=["units"])
@@ -116,35 +114,19 @@ def create_unit(payload: Unit_Create, service: UnitService = Depends(get_unit_se
     return service.create_unit(**payload.model_dump())
 
 
-def _owner_for(owned: bool, user: User | None) -> UUID | None:
-    """Whose inventory to filter by, or None for the whole catalog.
-
-    The catalog is public, so `user` may be None — but `owned=true` from an
-    anonymous caller cannot mean anything, and silently ignoring it would return
-    the full catalog while the client believes it is showing an owned-only view.
-    A parameter the server ignores is the worst outcome available, so it 401s.
-    """
-    if not owned:
-        return None
-    if user is None:
-        raise UnauthorizedError("owned=true requires a signed-in user")
-    return user.id
-
-
 @router.get("", response_model=Page[Unit_Read])
 def list_units(
     faction_id: UUID | None = None,
     subfaction_id: UUID | None = None,
     q: str | None = Query(default=None, description="case-insensitive name search"),
-    owned: bool = Query(default=False, description="only units in the caller's inventory"),
     page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-    user: User | None = Depends(get_current_user_optional),
+    owned_by: UUID | None = Depends(get_owned_by),
 ) -> Page[Unit_Read]:
     # `owned` filters server-side on purpose. Narrowing a page client-side hides
     # owned units that fall on other pages and makes every derived count wrong:
-    # filtering and pagination have to happen on the same side.
-    owned_by = _owner_for(owned, user)
+    # filtering and pagination have to happen on the same side. The `owned` query
+    # parameter is declared by `get_owned_by`, which also resolves the caller.
     items = service.list_units(
         faction_id=faction_id,
         subfaction_id=subfaction_id,
@@ -161,16 +143,13 @@ def list_units(
 def unit_facets(
     subfaction_id: UUID | None = None,
     q: str | None = Query(default=None, description="case-insensitive name search"),
-    owned: bool = Query(default=False, description="only units in the caller's inventory"),
     service: UnitService = Depends(get_unit_service),
-    user: User | None = Depends(get_current_user_optional),
+    owned_by: UUID | None = Depends(get_owned_by),
 ) -> UnitFacets:
     # Declared before `/{unit_id}` so the literal path wins over the UUID param.
     # Takes `owned` for the same reason the list does: a filtered list beside an
     # unfiltered rail reads as more broken than no filter at all.
-    total, by_faction = service.faction_facets(
-        subfaction_id=subfaction_id, q=q, owned_by=_owner_for(owned, user)
-    )
+    total, by_faction = service.faction_facets(subfaction_id=subfaction_id, q=q, owned_by=owned_by)
     return UnitFacets(total=total, by_faction=by_faction)
 
 
