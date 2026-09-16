@@ -27,7 +27,14 @@ half — the rules a schema can't express.
   `/me/*` (e.g. `/me/armies`); a user can only ever address their own data, and a
   stranger's id reveals nothing (missing/Forbidden reads as `404`).
 - **Admin** actions (catalog writes) require an admin user; a non-admin gets `403`.
-- A missing/invalid token gets `401` with a `WWW-Authenticate: Bearer` header.
+- On an **authenticated** route, a missing/invalid token gets `401` with a
+  `WWW-Authenticate: Bearer` header.
+- **Public routes treat a token as optional.** The catalog (`/units`, `/factions`)
+  is browsable signed-out. A token sent to a public route is used when valid and
+  **ignored when missing, invalid, or expired** — the request still succeeds as
+  anonymous, since a public route never needed it. The one place a public route
+  behaves differently for a signed-in caller is the `owned` filter (see Pagination),
+  which is the only case where an absent identity turns into a `401`.
 
 ## Errors
 
@@ -83,8 +90,27 @@ never a header (a header is invisible to cross-origin JS unless CORS exposes it)
   values are `422`.
 - Ordering is stable: each list sorts by a natural key **plus the primary-key `id`
   as a tiebreaker**, so paging never skips or repeats a row across page boundaries.
-- Filters (where supported) travel as their own query params (`q` for name search,
-  `faction_id`, etc.) and `total` respects them.
+- Filters travel as their own query params (`q` for name search, `faction_id`,
+  etc.), and **`total` respects every one of them**. The page and its total are built
+  from the same predicate, so they cannot disagree. The facets aggregate shares that
+  predicate too, minus `faction_id` — the column it groups by (see below).
+- **`owned=true`** restricts `GET /api/v1/units` **and** `GET /api/v1/units/facets`
+  to units in the **caller's** inventory. It's the only caller-relative filter on a
+  public route — the same URL returns different results per user — and it's on
+  both endpoints on purpose, so a filtered list never sits beside an unfiltered
+  rail. Filtering happens on the server because paging does: a client that filtered
+  one page would hide owned units on other pages and report a filtered page against
+  an unfiltered total.
+  - **Anonymous + `owned=true` is a `401`**, not an ignored parameter. Silently
+    returning the whole catalog while the client renders an owned-only view is the
+    worst outcome available. (An invalid or expired token counts as anonymous here,
+    so it `401`s too.)
+- **Query parameters an endpoint doesn't declare are ignored**, not rejected: FastAPI
+  drops them, and they have no effect. So `GET /api/v1/units/facets?faction_id=…` is
+  the whole-catalog breakdown, because a faction filter on a per-faction count is
+  circular. Check `openapi.json` for what each route accepts. This is deliberately a
+  different case from `owned`: an **unrecognised** parameter is ignored, but a
+  **recognised** one the server can't honour fails loudly.
 - **Server-side aggregates, not client counting.** `GET /api/v1/units/facets`
   returns `{ total, by_faction: { <faction_id>: count } }` for the current filter
   (one SQL `GROUP BY`) — so a client never downloads a collection to count it.
@@ -103,7 +129,8 @@ map — those return complete results.
 ## Where these come from
 
 Auth · errors ([ROADMAP R2]) · pagination ([R4]) · versioning ([R5]) ·
-observability ([R7]). This document is the durable home the ROADMAP items pointed
+observability ([R7]) · the `owned` filter (frontend ROADMAP F10, which moved it
+server-side). This document is the durable home the ROADMAP items pointed
 to; when a convention changes, it changes here in the same PR as the code.
 
 [ROADMAP R2]: ../../ROADMAP.md
