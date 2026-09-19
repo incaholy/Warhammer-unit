@@ -99,6 +99,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      # The command-line migration path, which pytest never exercises: conftest has
+      # already imported the models, so a broken `env.py` (one that registers no
+      # tables) passes the suite. `alembic check` fails if the migrated schema and
+      # the models autogenerate sees disagree -- including when it sees none at all.
+      - name: Check migrations match the models (alembic check)
+        env:
+          DATABASE_URL: postgresql+psycopg2://warhammer:warhammer@localhost:5432/warhammer_unit_test
+        run: |
+          alembic upgrade head
+          alembic check
+
       - name: Test (Postgres parity, migration-built schema)
         env:
           TEST_DATABASE_URL: postgresql+psycopg2://warhammer:warhammer@localhost:5432/warhammer_unit_test
