@@ -532,35 +532,47 @@ rather than churning the route now.
 # Kill Team
 
 The design lives in [KILLTEAM.md](KILLTEAM.md); this is the build order. Built as a
-thin slice: K1–K4 for one or two kill teams first, then K5 widens to the rest.
+thin slice: K1–K5 for one or two kill teams first, then K6 widens to the rest.
 Frontend views (warhammer_web) follow each step.
 
 Kill Team is kept separate from the 40k army list builder: `/kill-team` vs
 `/army-list` (see KILLTEAM.md → "Separation from the 40k army list builder").
 
-## K1. Data pipeline
+Models come first: the design has already been checked against a real team
+(Raveners), so the tables are known well enough to build, and the migration stays
+changeable until `fire-team` merges, since nothing is deployed against it.
 
-**Status: Next** — needs saved HTML for one or two kill teams and the universal
+## K1. Catalog models
+
+**Status: Next** — can start now; needs no scraped data.
+
+The `kt_*` catalog tables from KILLTEAM.md and their migration, with test factories
+and model tests (relationships, the roster-limit columns). Treated as a draft: a
+column the K2 fixtures show is wrong is fixed and the migration regenerated.
+
+## K2. Data pipeline
+
+**Status: Planned** — needs saved HTML for one or two kill teams and the universal
 equipment page, in `tests/fixtures/`.
 
-Kill Team scraper and seed, same two-stage shape as the 40k pipeline.
+Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the
+K1 tables. Confirms the K1 columns against real pages.
 
-## K2. Catalog
+## K3. Catalog routes
 
-**Status: Planned.** The `kt_*` tables and read-only routes under
-`/api/v1/kill-team`. Columns are confirmed against the K1 fixtures before the
-migration is written.
+**Status: Planned.** Read-only routes under `/api/v1/kill-team` (factions, kill
+teams, operatives), public read and admin write like the 40k catalog.
 
-## K3. Roster
+## K4. Roster
 
 **Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
 
-## K4. Game tracker
+## K5. Game tracker
 
 **Status: Planned.** Games created from a roster: turning points, CP, VP, and each
 operative's wounds, order and activation, with undo.
 
-## K5. Widen to every kill team
+## K6. Widen to every kill team
 
 **Status: Planned.** Add the remaining kill teams to the scraper and fix the parser
 gaps they expose.

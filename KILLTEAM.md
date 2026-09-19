@@ -33,7 +33,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 12 | Finding a kill team | A flat **Kill Team faction** list (`KTFaction`), e.g. Tyranids → Raveners. No Imperium / Chaos / Xenos level, and no link to the 40k `Faction` → `Subfaction` lookup | The army name is what people look for; the 40k lookup puts the army on different levels (Tyranids is a subfaction, Space Marines a faction) and would tie the two games' faction lists together |
 | 13 | Team rules | Rules belong to the **kill team** (`KillTeamRule`), not the faction | Two kill teams in the same faction can have different rules |
 
-Build order and status are tracked in ROADMAP.md (K1–K5), not here.
+Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
 ## Separation from the 40k army list builder
 
@@ -81,13 +81,15 @@ divided by path:
   pattern from `scripts/seed_datasheets.py`.
 - `make scrape-kt`, `make seed-kt`.
 
-**First input needed:** saved HTML for one or two kill teams and the universal
-equipment page.
+**Input needed:** saved HTML for one or two kill teams and the universal equipment
+page. The catalog tables are built before this (models first), and the pipeline fills
+them.
 
 ## Catalog
 
-Provisional tables — **columns are confirmed against the fixtures before any
-migration**. Checked so far against: Raveners.
+Provisional tables — the migration is a **draft until `fire-team` merges**: a column
+the saved pages show is wrong is fixed and the migration regenerated. Checked so far
+against: Raveners.
 
 | Table | Holds |
 |---|---|
