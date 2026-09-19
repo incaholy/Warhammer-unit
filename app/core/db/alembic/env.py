@@ -6,6 +6,13 @@ from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
+# Imported for its side effect: defining the model classes registers their tables on
+# SQLModel.metadata, which is what autogenerate compares the database against. It
+# looks unused, and `ruff check --fix` deleted it once (3c670cf) -- after which
+# autogenerate saw zero tables and proposed dropping every one. `alembic check` in
+# CI now fails if that happens again.
+from app.core.db import models  # noqa: F401
+
 # Load .env before any DATABASE_URL lookup below (imports above read no env).
 load_dotenv()
 
