@@ -4,6 +4,11 @@ Backend for storing Warhammer 40k unit datasheets. FastAPI + SQLModel +
 PostgreSQL + Alembic. Full architecture and roadmap are in SPEC.md — read it
 before making structural changes.
 
+The Kill Team part (a game tracker) is designed in KILLTEAM.md — read it before
+working on any Kill Team code, and update it when a design decision changes. It is
+kept separate from the 40k army list builder: `/kill-team` vs `/army-list`. Its
+build order and status are the K entries in ROADMAP.md.
+
 ## Commands
 
 ```bash

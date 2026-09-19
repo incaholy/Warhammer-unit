@@ -526,3 +526,41 @@ worth its own change.
 
 **Deferred (by its own guidance).** Left as-is; fold into the next catalog-routes pass (R8 territory)
 rather than churning the route now.
+
+---
+
+# Kill Team
+
+The design lives in [KILLTEAM.md](KILLTEAM.md); this is the build order. Built as a
+thin slice: K1–K4 for one or two kill teams first, then K5 widens to the rest.
+Frontend views (warhammer_web) follow each step.
+
+Kill Team is kept separate from the 40k army list builder: `/kill-team` vs
+`/army-list` (see KILLTEAM.md → "Separation from the 40k army list builder").
+
+## K1. Data pipeline
+
+**Status: Next** — needs saved HTML for one or two kill teams and the universal
+equipment page, in `tests/fixtures/`.
+
+Kill Team scraper and seed, same two-stage shape as the 40k pipeline.
+
+## K2. Catalog
+
+**Status: Planned.** The `kt_*` tables and read-only routes under
+`/api/v1/kill-team`. Columns are confirmed against the K1 fixtures before the
+migration is written.
+
+## K3. Roster
+
+**Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
+
+## K4. Game tracker
+
+**Status: Planned.** Games created from a roster: turning points, CP, VP, and each
+operative's wounds, order and activation, with undo.
+
+## K5. Widen to every kill team
+
+**Status: Planned.** Add the remaining kill teams to the scraper and fix the parser
+gaps they expose.
