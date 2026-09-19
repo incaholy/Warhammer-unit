@@ -20,6 +20,7 @@ from sqlmodel import Session, SQLModel, create_engine
 # Importing the models registers every table on SQLModel.metadata.
 from app.core.db.connection import get_session
 from app.core.db.models import Army, Faction, Subfaction, Unit, User
+from app.core.db.models_killteam import KillTeam, KillTeamRule, KTFaction
 from app.core.security import create_access_token
 from app.main import app
 
@@ -276,5 +277,50 @@ def make_army(session, make_user, make_faction):
         session.commit()
         session.refresh(army)
         return army
+
+    return _make
+
+
+# ---- Kill Team catalog (KILLTEAM.md) ----
+
+
+@pytest.fixture
+def make_kt_faction(session):
+    def _make(name=None):
+        faction = KTFaction(name=name or f"KT Faction {next(_counter)}")
+        session.add(faction)
+        session.commit()
+        session.refresh(faction)
+        return faction
+
+    return _make
+
+
+@pytest.fixture
+def make_kill_team(session, make_kt_faction):
+    def _make(faction=None, **overrides):
+        faction = faction or make_kt_faction()
+        data = dict(name=f"Kill Team {next(_counter)}", operative_count=5)
+        data.update(overrides)
+        kill_team = KillTeam(faction_id=faction.id, **data)
+        session.add(kill_team)
+        session.commit()
+        session.refresh(kill_team)
+        return kill_team
+
+    return _make
+
+
+@pytest.fixture
+def make_kill_team_rule(session, make_kill_team):
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
+        data = dict(name=f"Rule {next(_counter)}", description="A team-wide rule.")
+        data.update(overrides)
+        rule = KillTeamRule(kill_team_id=kill_team.id, **data)
+        session.add(rule)
+        session.commit()
+        session.refresh(rule)
+        return rule
 
     return _make
