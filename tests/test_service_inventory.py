@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from app.core.db.models import Army
+from app.core.services.errors import ConflictError
 from app.core.services.service_inventory import InventoryService
 
 
@@ -12,19 +13,19 @@ def test_add_unit_to_inventory(session, make_user, make_unit):
     user = make_user()
     unit = make_unit()
     svc = InventoryService(session)
-    entry, created = svc.add_unit(user.id, unit.id, amount=3)
+    entry = svc.add_unit(user.id, unit.id, amount=3)
     assert entry.amount == 3
-    assert created is True
 
 
-def test_add_unit_twice_increments_amount(session, make_user, make_unit):
+def test_add_unit_twice_conflicts(session, make_user, make_unit):
+    # Create-only: re-adding an owned unit is a conflict, not an increment (which
+    # would not be retry-safe). Change the owned amount via set_amount.
     user = make_user()
     unit = make_unit()
     svc = InventoryService(session)
     svc.add_unit(user.id, unit.id, amount=1)
-    entry, created = svc.add_unit(user.id, unit.id, amount=2)
-    assert entry.amount == 3  # upsert increments
-    assert created is False  # second add hits the existing row
+    with pytest.raises(ConflictError):
+        svc.add_unit(user.id, unit.id, amount=2)
 
 
 def test_add_unit_unknown_user_raises_lookup_error(session, make_unit):
@@ -78,9 +79,7 @@ def test_add_unit_unknown_unit_raises_lookup_error(session, make_user):
         svc.add_unit(user.id, uuid.uuid4(), amount=1)
 
 
-def test_removing_inventory_entry_leaves_armies_untouched(
-    session, make_user, make_faction, make_unit
-):
+def test_removing_inventory_entry_leaves_armies_untouched(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()
@@ -97,7 +96,7 @@ def test_removing_inventory_entry_leaves_armies_untouched(
 
 
 def test_add_unit_below_one_raises(session, make_user, make_unit):
-    from app.core.services.errors import InventoryValidationError
+    from app.core.services.service_inventory import InventoryValidationError
 
     user = make_user()
     unit = make_unit()

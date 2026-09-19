@@ -9,9 +9,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel
 
+from app.api.deps import get_current_admin, get_current_user
 from app.core.db.connection import get_session
 from app.core.db.models import User
-from app.core.security import get_current_admin, get_current_user
 from app.core.services.service_user import UserService
 
 router = APIRouter(tags=["users"])

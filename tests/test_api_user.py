@@ -38,9 +38,7 @@ def test_promote_missing_user_returns_404(admin_client):
 
 def test_cannot_demote_last_admin_returns_409(admin_client):
     # admin_client is the only admin; demoting it would lock everyone out.
-    resp = admin_client.patch(
-        f"/users/{admin_client.user.id}", json={"is_admin": False}
-    )
+    resp = admin_client.patch(f"/users/{admin_client.user.id}", json={"is_admin": False})
     assert resp.status_code == 409
 
 

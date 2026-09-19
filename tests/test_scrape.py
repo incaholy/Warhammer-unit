@@ -80,7 +80,8 @@ def test_parse_extracts_abilities_scoped_to_the_section():
 
 def test_parse_extracts_points_and_keywords():
     unit = next(
-        u for u in parse_datasheets(FIXTURE, "Space Marines")["units"]
+        u
+        for u in parse_datasheets(FIXTURE, "Space Marines")["units"]
         if u["unit_name"] == "Test Marine Squad"
     )
     # minimum size (5 models = 80), NOT the 160 max nor the 15 enhancement

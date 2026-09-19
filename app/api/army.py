@@ -6,16 +6,16 @@ belongs to the current user — so a stranger's `army_id` reveals nothing.
 """
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Field, Session, SQLModel
 
+from app.api.deps import get_current_user
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
 from app.core.db.models import Army, User
-from app.core.security import get_current_user
 from app.core.services.errors import NotFoundError
 from app.core.services.service_army import ArmyService
 
@@ -31,9 +31,9 @@ class Army_Read(SQLModel):
     id: UUID
     name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID]
-    description: Optional[str]
-    points_limit: Optional[int]
+    subfaction_id: UUID | None
+    description: str | None
+    points_limit: int | None
     created_at: datetime
     points_total: int = 0  # computed; set by the route
     units: list[ArmyUnit_Read] = []
@@ -42,17 +42,17 @@ class Army_Read(SQLModel):
 class Army_Create(SQLModel):
     name: str
     faction_id: UUID
-    subfaction_id: Optional[UUID] = None
-    description: Optional[str] = None
-    points_limit: Optional[int] = None
+    subfaction_id: UUID | None = None
+    description: str | None = None
+    points_limit: int | None = None
 
 
 class Army_Update(SQLModel):
-    name: Optional[str] = None
-    faction_id: Optional[UUID] = None
-    subfaction_id: Optional[UUID] = None
-    description: Optional[str] = None
-    points_limit: Optional[int] = None
+    name: str | None = None
+    faction_id: UUID | None = None
+    subfaction_id: UUID | None = None
+    description: str | None = None
+    points_limit: int | None = None
 
 
 class ArmyUnitAdd(SQLModel):
@@ -74,13 +74,13 @@ class Shortfall_Read(SQLModel):
 class ValidationIssue_Read(SQLModel):
     kind: str
     detail: str
-    unit: Optional[Unit_Read] = None
+    unit: Unit_Read | None = None
 
 
 class Validation_Read(SQLModel):
     ok: bool
     points_total: int
-    points_limit: Optional[int]
+    points_limit: int | None
     issues: list[ValidationIssue_Read]
 
 
@@ -109,6 +109,7 @@ def _army_read(service: ArmyService, army: Army) -> Army_Read:
 
 # ------------------------------ armies ------------------------------
 
+
 @router.post("", response_model=Army_Read, status_code=status.HTTP_201_CREATED)
 def create_army(
     payload: Army_Create,
@@ -126,12 +127,16 @@ def create_army(
     return _army_read(service, army)
 
 
-@router.get("", response_model=list[Army_Read])
+@router.get("", response_model=Page[Army_Read])
 def list_armies(
+    page: PageParams = Depends(),
     current_user: User = Depends(get_current_user),
     service: ArmyService = Depends(get_army_service),
-) -> list[Army_Read]:
-    return [_army_read(service, army) for army in service.list_armies(current_user.id)]
+) -> Page[Army_Read]:
+    armies = service.list_armies(current_user.id, limit=page.limit, offset=page.offset)
+    items = [_army_read(service, army) for army in armies]
+    total = service.count_armies(current_user.id)
+    return paginate(items, total, page)
 
 
 @router.get("/{army_id}", response_model=Army_Read)
@@ -179,20 +184,16 @@ def validate(
 
 # -------------------------- units in an army --------------------------
 
-@router.post(
-    "/{army_id}/units", response_model=ArmyUnit_Read, status_code=status.HTTP_201_CREATED
-)
+
+@router.post("/{army_id}/units", response_model=ArmyUnit_Read, status_code=status.HTTP_201_CREATED)
 def add_unit(
     payload: ArmyUnitAdd,
-    response: Response,
     army: Army = Depends(get_owned_army),
     service: ArmyService = Depends(get_army_service),
 ) -> ArmyUnit_Read:
-    # Upsert: 201 when creating the row, 200 when incrementing an existing one.
-    entry, created = service.add_unit(army.id, payload.unit_id, payload.amount)
-    if not created:
-        response.status_code = status.HTTP_200_OK
-    return entry
+    # Create-only: 201 on success, 409 if the unit is already in the army — change
+    # the quantity via PATCH (idempotent / retry-safe). See ROADMAP R12.
+    return service.add_unit(army.id, payload.unit_id, payload.amount)
 
 
 @router.patch("/{army_id}/units/{unit_id}", response_model=ArmyUnit_Read)
@@ -205,9 +206,7 @@ def set_amount(
     return service.set_amount(army.id, unit_id, payload.amount)
 
 
-@router.delete(
-    "/{army_id}/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/{army_id}/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_unit(
     unit_id: UUID,
     army: Army = Depends(get_owned_army),

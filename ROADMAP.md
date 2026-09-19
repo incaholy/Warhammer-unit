@@ -68,6 +68,15 @@ Add a `concurrency` group to both, and commit a frontend `.env.example`.
 
 **Satisfies:** §2.2. **This is the highest-value item on the list.**
 
+**Status: ✅ Done (2026-08).** Backend — every error source returns
+`{detail, code, field?}` with a stable `ErrorCode` (service, auth,
+request-validation, integrity, and unhandled), status derived from code via a
+single `CODE_STATUS` map. Frontend — the API client validates the error body with
+zod (the `as` cast is gone) and carries `code`; `ArmyView` branches on it instead
+of collapsing to "not found"; a shared `messageForError` helper centralizes
+user-facing messages. Out of scope (larger follow-up): validating *success*
+response bodies (`as T`) with per-endpoint schemas — R2 was the error shape only.
+
 **What is missing.** The API emits two mutually incompatible error shapes. Probed against the running
 app:
 
@@ -413,6 +422,16 @@ document is indistinguishable from no rule.
 
 **Satisfies:** §2.5.
 
+**Status: ✅ Done (2026-08).** (1) `POST` add-unit is now create-only on both
+inventory and army — a repeat is a `409 CONFLICT`, not a silent increment;
+quantity changes go through the idempotent `PATCH`. Frontend `CatalogView`
+disables the add control ("Added") for units already in the target. (2) The
+taxonomy moved out of the `/factions` id namespace to `GET /taxonomy` (no future
+collision with `GET /factions/{id}`; frontend follows). (3) Catalog CRUD policy
+settled and `GET /subfactions` added so subfactions are enumerable — see the
+table below. (4) Subfaction non-nesting left as-is, deferred to the next
+catalog-routes pass by its own guidance.
+
 The routing is in good shape overall: plural collection nouns, correct verb and status-code
 semantics, nesting that reflects real hierarchy, `/me/*` scoping that keeps user ids out of paths,
 and membership rows addressed by their natural key rather than an exposed surrogate. Four things
@@ -482,6 +501,20 @@ Decide the set deliberately. "These are admin-managed reference data, so create 
 perfectly good answer, as long as it is applied to all four and written down in
 `docs/api/conventions.md` (R8).
 
+**Resolved (deliberate policy).** Two tiers, split by whether the entity is editable content or
+canonical taxonomy:
+
+| Resource | Verbs | Rationale |
+|---|---|---|
+| Weapons, Abilities, Units | full CRUD | rich, correctable content |
+| Subfactions | create · list · delete | thin reference rows; no in-place edit — recreate instead |
+| Factions | create · list | canonical `FactionName` enum; not renamed or deleted (units reference them) |
+
+The one gap this closed in code: added `GET /subfactions` (optional `?faction_id=` filter) so created
+subfactions are enumerable — the sharpest case above. No `PATCH` on subfactions or factions, and no
+`DELETE` on factions, by design. The formal write-down lands in `docs/api/conventions.md` when R8 runs;
+this table is the interim record.
+
 ### Subfactions do not nest, but weapons do
 
 `POST /subfactions` is top-level with `faction_id` in the body, while `POST /units/{unit_id}/weapons`
@@ -490,3 +523,6 @@ subfaction is the one that reads oddly, since a subfaction cannot exist without 
 
 Lowest priority of the four. Worth folding into whichever pass touches the catalog routes next, not
 worth its own change.
+
+**Deferred (by its own guidance).** Left as-is; fold into the next catalog-routes pass (R8 territory)
+rather than churning the route now.

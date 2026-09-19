@@ -4,13 +4,13 @@ Session-injected. Raises `NotFoundError` for not-found, `ConflictError` for
 duplicates, and `UnitValidationError` for bad input, per SPEC.md conventions.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models import (
     FACTION_SUBFACTIONS,
     Ability,
@@ -23,28 +23,74 @@ from app.core.db.models import (
     UserUnit,
     Weapon,
 )
+from app.core.errors import CodedError, ErrorCode
 from app.core.services.errors import (
     ConflictError,
     NotFoundError,
-    UnitValidationError,
 )
+
+
+class UnitValidationError(CodedError, ValueError):
+    """Bad catalog input (units, factions, subfactions, weapons)."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
 
 
 class UnitService:
     # Fields a PATCH may set on a unit.
     _UPDATABLE = {
-        "unit_name", "faction_id", "subfaction_id", "movement", "toughness",
-        "armor_save", "wounds", "invulnerable_save", "leadership",
-        "objective_control", "points", "keywords",
+        "unit_name",
+        "faction_id",
+        "subfaction_id",
+        "movement",
+        "toughness",
+        "armor_save",
+        "wounds",
+        "invulnerable_save",
+        "leadership",
+        "objective_control",
+        "points",
+        "keywords",
     }
     _WEAPON_UPDATABLE = {
-        "name", "category", "attacks", "weapon_skill", "strength",
-        "armor_piercing", "damage", "range_inches", "keywords",
+        "name",
+        "category",
+        "attacks",
+        "weapon_skill",
+        "strength",
+        "armor_piercing",
+        "damage",
+        "range_inches",
+        "keywords",
     }
     _ABILITY_UPDATABLE = {"name", "description"}
 
+    # Of the updatable fields above, the ones backed by NOT NULL columns — an
+    # explicit null must be rejected, not written. Derived from the mapped tables
+    # rather than hand-listed, so a new NOT NULL column can't be forgotten here.
+    _NOT_NULLABLE = not_nullable_fields(Unit, _UPDATABLE)
+    _WEAPON_NOT_NULLABLE = not_nullable_fields(Weapon, _WEAPON_UPDATABLE)
+    _ABILITY_NOT_NULLABLE = not_nullable_fields(Ability, _ABILITY_UPDATABLE)
+
     def __init__(self, session: Session):
         self.session = session
+
+    def _reject_nulls(self, fields: dict, not_nullable: frozenset[str]) -> None:
+        # A PATCH that explicitly sends null for a NOT NULL column survives
+        # `exclude_unset`, slips past the existence guards (they only act on
+        # non-null values), and would hit a DB IntegrityError — surfacing as a
+        # misleading 409 via the IntegrityError backstop. Reject it as a clean
+        # 400 up front. Sorted so a PATCH with several nulls always names the
+        # same field, rather than whichever the dict happened to yield first.
+        for field in sorted(fields):
+            if field in not_nullable and fields[field] is None:
+                raise UnitValidationError(field, "cannot be null")
 
     def create_unit(
         self,
@@ -57,9 +103,9 @@ class UnitService:
         leadership: int,
         objective_control: int,
         points: int,
-        invulnerable_save: Optional[int] = None,
-        subfaction_id: Optional[UUID] = None,
-        keywords: Optional[list[str]] = None,
+        invulnerable_save: int | None = None,
+        subfaction_id: UUID | None = None,
+        keywords: list[str] | None = None,
     ) -> Unit:
         if self.session.get(Faction, faction_id) is None:
             raise NotFoundError(f"faction {faction_id} not found")
@@ -81,7 +127,7 @@ class UnitService:
             keywords=keywords or [],
         )
         self.session.add(unit)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(unit)
         return unit
 
@@ -94,14 +140,21 @@ class UnitService:
     def _apply_unit_filters(
         self,
         statement,
-        faction_id: Optional[UUID],
-        subfaction_id: Optional[UUID],
-        q: Optional[str],
+        faction_id: UUID | None,
+        subfaction_id: UUID | None,
+        q: str | None,
+        owned_by: UUID | None = None,
     ):
-        """Apply the shared `list_units`/`count_units` filters to a statement.
+        """Apply the shared `list_units`/`count_units`/`faction_facets` filters.
 
         `faction_id`/`subfaction_id` are exact matches; `q` is a
-        case-insensitive substring match on the unit name.
+        case-insensitive substring match on the unit name; `owned_by` restricts to
+        units in that user's inventory.
+
+        Every caller filters through here on purpose: the page, its total, and the
+        per-faction facets are then built from the same predicate, so they cannot
+        disagree. Filtering a page client-side is what made the catalog's "N of M"
+        compare a filtered page against an unfiltered total.
         """
         if faction_id is not None:
             statement = statement.where(Unit.faction_id == faction_id)
@@ -109,27 +162,33 @@ class UnitService:
             statement = statement.where(Unit.subfaction_id == subfaction_id)
         if q:
             statement = statement.where(Unit.unit_name.ilike(f"%{q}%"))
+        if owned_by is not None:
+            # EXISTS rather than a JOIN: it cannot change row cardinality, so the
+            # count stays a count of units even if a user ever holds more than one
+            # inventory row for the same unit.
+            statement = statement.where(
+                select(UserUnit.id)
+                .where(UserUnit.owner_user_id == owned_by, UserUnit.unit_id == Unit.id)
+                .exists()
+            )
         return statement
 
     def list_units(
         self,
-        faction_id: Optional[UUID] = None,
-        subfaction_id: Optional[UUID] = None,
-        q: Optional[str] = None,
+        faction_id: UUID | None = None,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
+        owned_by: UUID | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Unit]:
         """A page of catalog units, filtered and ordered by name (stable paging)."""
-        statement = self._apply_unit_filters(
-            select(Unit), faction_id, subfaction_id, q
-        )
+        statement = self._apply_unit_filters(select(Unit), faction_id, subfaction_id, q, owned_by)
         # Eager-load weapons/abilities so serializing the page doesn't lazy-load
         # them per unit (the N+1). selectinload batches each with one WHERE-IN.
         statement = (
-            statement.options(
-                selectinload(Unit.weapons), selectinload(Unit.abilities)
-            )
-            .order_by(Unit.unit_name)
+            statement.options(selectinload(Unit.weapons), selectinload(Unit.abilities))
+            .order_by(Unit.unit_name, Unit.id)  # id breaks ties -> total order for stable paging
             .offset(offset)
             .limit(limit)
         )
@@ -137,13 +196,14 @@ class UnitService:
 
     def count_units(
         self,
-        faction_id: Optional[UUID] = None,
-        subfaction_id: Optional[UUID] = None,
-        q: Optional[str] = None,
+        faction_id: UUID | None = None,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
+        owned_by: UUID | None = None,
     ) -> int:
         """Total units matching the same filters as `list_units` (ignores paging)."""
         statement = self._apply_unit_filters(
-            select(func.count(Unit.id)), faction_id, subfaction_id, q
+            select(func.count(Unit.id)), faction_id, subfaction_id, q, owned_by
         )
         return self.session.exec(statement).one()
 
@@ -152,9 +212,8 @@ class UnitService:
         unknown = set(fields) - self._UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
-        if fields.get("faction_id") is not None and (
-            self.session.get(Faction, fields["faction_id"]) is None
-        ):
+        self._reject_nulls(fields, self._NOT_NULLABLE)
+        if fields.get("faction_id") is not None and (self.session.get(Faction, fields["faction_id"]) is None):
             raise NotFoundError(f"faction {fields['faction_id']} not found")
         if fields.get("subfaction_id") is not None and (
             self.session.get(Subfaction, fields["subfaction_id"]) is None
@@ -164,7 +223,7 @@ class UnitService:
         for key, value in fields.items():
             setattr(unit, key, value)
         self.session.add(unit)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(unit)
         return unit
 
@@ -174,17 +233,13 @@ class UnitService:
         # that's in any army or inventory would raise a raw IntegrityError (500).
         # Guard it into a clean ConflictError (409) instead.
         if self._unit_is_referenced(unit_id):
-            raise ConflictError(
-                f"unit {unit_id} is in use by an army or inventory"
-            )
+            raise ConflictError(f"unit {unit_id} is in use by an army or inventory")
         self.session.delete(unit)
-        self.session.commit()
+        self.session.flush()
 
     def _unit_is_referenced(self, unit_id: UUID) -> bool:
         for model in (ArmyUnit, UserUnit):
-            hit = self.session.exec(
-                select(model).where(model.unit_id == unit_id).limit(1)
-            ).first()
+            hit = self.session.exec(select(model).where(model.unit_id == unit_id).limit(1)).first()
             if hit is not None:
                 return True
         return False
@@ -198,8 +253,8 @@ class UnitService:
         strength: int,
         armor_piercing: int,
         damage: str,
-        range_inches: Optional[int] = None,
-        keywords: Optional[list[str]] = None,
+        range_inches: int | None = None,
+        keywords: list[str] | None = None,
     ) -> Weapon:
         if category not in ("range", "melee"):
             raise UnitValidationError("category", "must be 'range' or 'melee'")
@@ -215,12 +270,16 @@ class UnitService:
             keywords=keywords or [],
         )
         self.session.add(weapon)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(weapon)
         return weapon
 
-    def list_weapons(self) -> list[Weapon]:
-        return list(self.session.exec(select(Weapon)).all())
+    def list_weapons(self, limit: int = 50, offset: int = 0) -> list[Weapon]:
+        statement = select(Weapon).order_by(Weapon.name, Weapon.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_weapons(self) -> int:
+        return self.session.exec(select(func.count(Weapon.id))).one()
 
     def update_weapon(self, weapon_id: UUID, **fields) -> Weapon:
         weapon = self.session.get(Weapon, weapon_id)
@@ -229,12 +288,13 @@ class UnitService:
         unknown = set(fields) - self._WEAPON_UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        self._reject_nulls(fields, self._WEAPON_NOT_NULLABLE)
         if "category" in fields and fields["category"] not in ("range", "melee"):
             raise UnitValidationError("category", "must be 'range' or 'melee'")
         for key, value in fields.items():
             setattr(weapon, key, value)
         self.session.add(weapon)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(weapon)
         return weapon
 
@@ -244,17 +304,21 @@ class UnitService:
             raise NotFoundError(f"weapon {weapon_id} not found")
         # unit_weapons links cascade, so no reference guard is needed.
         self.session.delete(weapon)
-        self.session.commit()
+        self.session.flush()
 
     def create_ability(self, name: str, description: str) -> Ability:
         ability = Ability(name=name, description=description)
         self.session.add(ability)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(ability)
         return ability
 
-    def list_abilities(self) -> list[Ability]:
-        return list(self.session.exec(select(Ability)).all())
+    def list_abilities(self, limit: int = 50, offset: int = 0) -> list[Ability]:
+        statement = select(Ability).order_by(Ability.name, Ability.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_abilities(self) -> int:
+        return self.session.exec(select(func.count(Ability.id))).one()
 
     def update_ability(self, ability_id: UUID, **fields) -> Ability:
         ability = self.session.get(Ability, ability_id)
@@ -263,10 +327,11 @@ class UnitService:
         unknown = set(fields) - self._ABILITY_UPDATABLE
         if unknown:
             raise UnitValidationError("fields", f"cannot update {sorted(unknown)}")
+        self._reject_nulls(fields, self._ABILITY_NOT_NULLABLE)
         for key, value in fields.items():
             setattr(ability, key, value)
         self.session.add(ability)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(ability)
         return ability
 
@@ -276,7 +341,7 @@ class UnitService:
             raise NotFoundError(f"ability {ability_id} not found")
         # unit_abilities links cascade, so no reference guard is needed.
         self.session.delete(ability)
-        self.session.commit()
+        self.session.flush()
 
     def link_weapon(self, unit_id: UUID, weapon_id: UUID) -> Unit:
         unit = self.get_unit(unit_id)
@@ -286,7 +351,7 @@ class UnitService:
         if weapon not in unit.weapons:
             unit.weapons.append(weapon)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -298,7 +363,7 @@ class UnitService:
         if ability not in unit.abilities:
             unit.abilities.append(ability)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -309,7 +374,7 @@ class UnitService:
         if weapon is not None and weapon in unit.weapons:
             unit.weapons.remove(weapon)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
@@ -320,14 +385,53 @@ class UnitService:
         if ability is not None and ability in unit.abilities:
             unit.abilities.remove(ability)
             self.session.add(unit)
-            self.session.commit()
+            self.session.flush()
             self.session.refresh(unit)
         return unit
 
     # ---- factions & subfactions (catalog reference data) ----
 
-    def list_factions(self) -> list[Faction]:
-        return list(self.session.exec(select(Faction)).all())
+    def list_factions(self, limit: int = 50, offset: int = 0) -> list[Faction]:
+        statement = select(Faction).order_by(Faction.name, Faction.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_factions(self) -> int:
+        return self.session.exec(select(func.count(Faction.id))).one()
+
+    def list_subfactions(
+        self, faction_id: UUID | None = None, limit: int = 50, offset: int = 0
+    ) -> list[Subfaction]:
+        statement = select(Subfaction)
+        if faction_id is not None:
+            statement = statement.where(Subfaction.faction_id == faction_id)
+        statement = statement.order_by(Subfaction.name, Subfaction.id).offset(offset).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def count_subfactions(self, faction_id: UUID | None = None) -> int:
+        statement = select(func.count(Subfaction.id))
+        if faction_id is not None:
+            statement = statement.where(Subfaction.faction_id == faction_id)
+        return self.session.exec(statement).one()
+
+    def faction_facets(
+        self,
+        subfaction_id: UUID | None = None,
+        q: str | None = None,
+        owned_by: UUID | None = None,
+    ) -> tuple[int, dict[UUID, int]]:
+        """Per-faction unit counts for the current filter, in one GROUP BY — the
+        server-side aggregate the catalog rail needs (so the client never has to
+        download the catalog to count it). Shares `list_units`' filters, minus
+        `faction_id` (the column it groups by). Returns (total, {faction_id: n}).
+
+        `owned_by` is passed through for the same reason it exists on the list: a
+        filtered list beside an unfiltered rail reads as more broken than no filter
+        at all."""
+        statement = self._apply_unit_filters(
+            select(Unit.faction_id, func.count(Unit.id)), None, subfaction_id, q, owned_by
+        ).group_by(Unit.faction_id)
+        by_faction = {faction_id: count for faction_id, count in self.session.exec(statement).all()}
+        return sum(by_faction.values()), by_faction
 
     def create_faction(self, name: str) -> Faction:
         # Guard the direct-session path (seed scripts, etc.) the same way the
@@ -343,7 +447,7 @@ class UnitService:
             raise ConflictError(f"faction {name!r} already exists")
         faction = Faction(name=name)
         self.session.add(faction)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(faction)
         return faction
 
@@ -356,21 +460,16 @@ class UnitService:
         if name not in allowed:
             raise UnitValidationError(
                 "name",
-                f"{name!r} is not a subfaction of {faction.name} "
-                f"(allowed: {', '.join(allowed) or 'none'})",
+                f"{name!r} is not a subfaction of {faction.name} (allowed: {', '.join(allowed) or 'none'})",
             )
         clash = self.session.exec(
-            select(Subfaction).where(
-                Subfaction.faction_id == faction_id, Subfaction.name == name
-            )
+            select(Subfaction).where(Subfaction.faction_id == faction_id, Subfaction.name == name)
         ).first()
         if clash is not None:
-            raise ConflictError(
-                f"subfaction {name!r} already exists for that faction"
-            )
+            raise ConflictError(f"subfaction {name!r} already exists for that faction")
         sub = Subfaction(faction_id=faction_id, name=name)
         self.session.add(sub)
-        self.session.commit()
+        self.session.flush()
         self.session.refresh(sub)
         return sub
 
@@ -381,11 +480,9 @@ class UnitService:
         # units.subfaction_id / armies.subfaction_id reference it via RESTRICT FKs,
         # so guard the delete into a ConflictError (409) rather than a 500.
         if self._subfaction_is_referenced(subfaction_id):
-            raise ConflictError(
-                f"subfaction {subfaction_id} is in use by a unit or army"
-            )
+            raise ConflictError(f"subfaction {subfaction_id} is in use by a unit or army")
         self.session.delete(sub)
-        self.session.commit()
+        self.session.flush()
 
     def _subfaction_is_referenced(self, subfaction_id: UUID) -> bool:
         for model in (Unit, Army):

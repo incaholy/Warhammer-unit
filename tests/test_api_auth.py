@@ -64,9 +64,7 @@ def test_login_returns_token(client):
 
 def test_login_by_email(client):
     _register(client, username="max", email="max@test.io")
-    resp = client.post(
-        "/auth/login", data={"username": "max@test.io", "password": PASSWORD}
-    )
+    resp = client.post("/auth/login", data={"username": "max@test.io", "password": PASSWORD})
     assert resp.status_code == 200
 
 

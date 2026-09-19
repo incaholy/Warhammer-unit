@@ -1,62 +1,45 @@
 """Typed service exceptions.
 
-Each subclasses the builtin the API layer already maps (`LookupError` /
-`ValueError`), so the existing `app/main.py` handlers keep mapping it correctly
-even before the dedicated handler runs — the migration is incremental. See
-SPEC.md "Custom service errors".
+Cross-cutting failures raised by services: `NotFoundError` (a missing row) and
+`ConflictError` (a duplicate). Each **inherits the builtin it maps to** —
+`LookupError` / `ValueError` — so service-level tests can
+`pytest.raises(LookupError / ValueError)`, and each carries its own wire `code`
+(`ErrorCode`, from `app.core.errors`), a `message`, and an optional `field`.
 
-Naming: generic for cross-cutting failures (`NotFoundError`, `ConflictError`);
-one resource-named `*ValidationError` per service, carrying the offending
-`field`. Split a rule into its own class only when its handling diverges.
+Each also inherits `CodedError`, a marker base that carries no behaviour and
+exists only so the API layer can register one handler for the whole family
+instead of a per-class list that a new error can fall off.
+
+Validation errors are per-service: each service defines its own
+`*ValidationError(ValueError)` in its own module (e.g. `UnitValidationError` in
+`service_unit.py`), carrying `code = ErrorCode.VALIDATION` and the offending
+`field`.
+
+The API layer (`app/main.py` handlers + `app/api/errors.py`) maps `code` -> HTTP
+status, registered once against `CodedError` — never a blanket
+`ValueError`/`LookupError` handler, which would swallow library exceptions.
 """
 
-from typing import Optional
+from app.core.errors import CodedError, ErrorCode
 
 
-class ServiceError(Exception):
-    """Base for service-raised errors: an HTTP `status_code` + optional `field`."""
+class NotFoundError(CodedError, LookupError):
+    """A requested row does not exist."""
 
-    status_code = 400
+    code = ErrorCode.NOT_FOUND
 
-    def __init__(self, message: str, *, field: Optional[str] = None):
+    def __init__(self, message: str, *, field: str | None = None):
         super().__init__(message)
         self.message = message
         self.field = field
 
 
-class NotFoundError(ServiceError, LookupError):
-    """A requested row does not exist. → 404."""
+class ConflictError(CodedError, ValueError):
+    """A uniqueness clash (duplicate)."""
 
-    status_code = 404
+    code = ErrorCode.CONFLICT
 
-
-class ConflictError(ServiceError, ValueError):
-    """A uniqueness clash (duplicate). → 409."""
-
-    status_code = 409
-
-
-class ValidationError(ServiceError, ValueError):
-    """Base for per-service validation errors. → 400, carries `field`.
-
-    Constructed as `(field, message)` and rendered as ``"field: message"``.
-    """
-
-    def __init__(self, field: str, message: str):
-        super().__init__(f"{field}: {message}", field=field)
-
-
-class UserValidationError(ValidationError):
-    """Bad user/account input."""
-
-
-class UnitValidationError(ValidationError):
-    """Bad catalog input (units, factions, subfactions, weapons)."""
-
-
-class ArmyValidationError(ValidationError):
-    """Bad army/roster input."""
-
-
-class InventoryValidationError(ValidationError):
-    """Bad inventory input."""
+    def __init__(self, message: str, *, field: str | None = None):
+        super().__init__(message)
+        self.message = message
+        self.field = field

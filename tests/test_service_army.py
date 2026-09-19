@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.core.db.models import ArmyUnit, UserUnit
+from app.core.services.errors import ConflictError
 from app.core.services.service_army import ArmyService
 
 
@@ -68,19 +69,19 @@ def test_add_unit_to_army(session, make_army, make_unit):
     army = make_army()
     unit = make_unit()
     svc = ArmyService(session)
-    entry, created = svc.add_unit(army.id, unit.id, amount=2)
+    entry = svc.add_unit(army.id, unit.id, amount=2)
     assert entry.amount == 2
-    assert created is True
 
 
-def test_add_unit_twice_increments_amount(session, make_army, make_unit):
+def test_add_unit_twice_conflicts(session, make_army, make_unit):
+    # Create-only: adding a unit already in the army is a conflict, not an
+    # increment (that would not be retry-safe). Change the amount via set_amount.
     army = make_army()
     unit = make_unit()
     svc = ArmyService(session)
     svc.add_unit(army.id, unit.id, amount=2)
-    entry, created = svc.add_unit(army.id, unit.id, amount=3)
-    assert entry.amount == 5  # upsert increments
-    assert created is False  # second add hits the existing row
+    with pytest.raises(ConflictError):
+        svc.add_unit(army.id, unit.id, amount=3)
 
 
 def test_add_unit_unknown_unit_raises_lookup_error(session, make_army):
@@ -139,16 +140,14 @@ def test_add_unit_to_nonexistent_army_raises_lookup_error(session, make_unit):
         svc.add_unit(uuid.uuid4(), unit.id, amount=1)
 
 
-def test_army_may_include_a_unit_the_user_does_not_own(
-    session, make_user, make_faction, make_unit
-):
+def test_army_may_include_a_unit_the_user_does_not_own(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()
     svc = ArmyService(session)
     army = svc.create_army(user_id=user.id, name="A", faction_id=f.id)
     # the user owns none of this unit; adding it to the army is still allowed
-    entry, _ = svc.add_unit(army.id, unit.id, amount=2)
+    entry = svc.add_unit(army.id, unit.id, amount=2)
     assert entry.amount == 2
 
 
@@ -164,9 +163,7 @@ def test_delete_army_cascades_army_units(session, make_army, make_unit):
     assert remaining == 0
 
 
-def test_shortfall_empty_when_inventory_covers_the_list(
-    session, make_user, make_faction, make_unit
-):
+def test_shortfall_empty_when_inventory_covers_the_list(session, make_user, make_faction, make_unit):
     user = make_user()
     f = make_faction()
     unit = make_unit()
@@ -180,6 +177,7 @@ def test_shortfall_empty_when_inventory_covers_the_list(
 
 
 # ------------------------------ roster (points + validate) ------------------------------
+
 
 def test_create_army_with_points_limit(session, make_user, make_faction):
     user = make_user()
@@ -245,9 +243,7 @@ def test_validate_wrong_faction(session, make_user, make_faction, make_unit):
     assert any(i.kind == "wrong_faction" for i in report.issues)
 
 
-def test_validate_wrong_subfaction(
-    session, make_user, make_faction, make_subfaction, make_unit
-):
+def test_validate_wrong_subfaction(session, make_user, make_faction, make_subfaction, make_unit):
     user = make_user()
     f = make_faction()
     sub_a = make_subfaction(faction=f)
@@ -261,7 +257,7 @@ def test_validate_wrong_subfaction(
 
 
 def test_add_unit_below_one_raises(session, make_army, make_unit):
-    from app.core.services.errors import ArmyValidationError
+    from app.core.services.service_army import ArmyValidationError
 
     army = make_army()
     unit = make_unit()

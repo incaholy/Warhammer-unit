@@ -38,7 +38,7 @@ def main() -> None:
             promote(session, sys.argv[1])
     except NotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     print(f"{sys.argv[1]!r} is now an admin")
 
 

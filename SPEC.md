@@ -213,8 +213,10 @@ replaced. Both the app and Alembic (`alembic/env.py`) read the same
 Getting a session depends on the caller:
 
 - **Requests** use `get_session()` as a FastAPI dependency
-  (`Depends(get_session)`) — it yields a `Session` and closes it after the
-  request.
+  (`Depends(get_session)`) — it yields a `Session` and is the request's
+  **transaction boundary**: it commits on success, rolls back on error, and
+  closes either way. Services `flush()` but never `commit()`, so a multi-step
+  route is one unit of work that can't leave a partial write behind.
 - **Scripts / seed code** use `Session(get_engine())` directly.
 - **Tests** build their own in-memory SQLite engine and inject the session, so
   they never call `get_session()` and never need `DATABASE_URL`.
@@ -324,7 +326,13 @@ Service conventions:
 - Bad input raises `ValueError` via the typed `*ValidationError`, with a
   descriptive message. Don't raise a bare `TypeError` for bad input — the API
   layer treats an unexpected `TypeError` as a bug (→ 500), not a client error.
-- Every write method ends with `commit()` + `refresh()` and returns the model.
+- A write method ends with `flush()` + `refresh()` and returns the model — it
+  **flushes, never commits**; `get_session` owns the commit (the request
+  boundary). `flush()` still assigns keys and surfaces constraint errors during
+  the request; `refresh()` reloads the row it returns. (The `refresh()`es are
+  retained for correctness even though most are now redundant — no `updated_at`
+  is serialized and identifiers/timestamps are Python-set; trimming them cleanly
+  needs a per-method relationship check, so it's a deferred micro-optimization.)
 - Services should take a `session` argument (`ArmyService(session)`)
   rather than calling `get_session()` in `__init__`, so a multi-table operation
   (check army, check unit, write the join) shares one transaction — and so
@@ -336,7 +344,11 @@ One router module per resource; each is backed by one service and defines its
 own request/response schemas (`*_Create`, `*_Read`) so internal model fields
 aren't exposed accidentally. All ids in paths and schemas are UUIDs.
 
-Router modules (each mounted in `app/main.py` with `app.include_router(...)`):
+Every resource router mounts under a versioned `/api/v1` parent (ROADMAP R5), so
+the paths below are served at `/api/v1/…`; `GET /health` stays unversioned at the
+root. A future breaking change ships as `/api/v2` without breaking existing clients.
+
+Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 
 | Module | Backing service | Resource |
 |---|---|---|
@@ -367,7 +379,8 @@ public; catalog **writes** require an admin (**403** otherwise).
 |---|---|---|---|---|
 | POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | done |
 | GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | done |
-| GET | `/units` | list units; query params: `faction_id`, `subfaction_id`, `q` (name search), `limit` (1–200), `offset` | `UnitService.list_units` | done |
+| GET | `/units` | list units (paged: returns a `Page` envelope `{items, total, limit, offset}`); query params: `faction_id`, `subfaction_id`, `q` (name search), `limit` (1–200), `offset` | `UnitService.list_units` | done |
+| GET | `/units/facets` | per-faction unit counts for the current filter (`{total, by_faction}`), computed server-side in one `GROUP BY` | `UnitService.faction_facets` | done |
 | PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` | done |
 | DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` | done |
 | POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` | done |
@@ -446,28 +459,34 @@ Read schemas nest the hierarchy:
   unit: Unit_Read?}]}` — the `validate` report.
 
 Error mapping at the API layer (see "Custom service errors" for the typed
-hierarchy). Only messages the service author wrote (the typed `ServiceError`s)
-reach the client; any *unexpected* exception is logged server-side and returned
-as a generic body with no internals — never `str(exc)` of an arbitrary builtin:
+hierarchy). Service errors come back in one shape — `{"detail", "code",
+"field"?}` — where `code` is a stable `ErrorCode`. Only messages the service
+author wrote reach the client; any *unexpected* exception is logged server-side
+and returned as a generic body with no internals — never `str(exc)` of an
+arbitrary builtin:
 
-| Service exception | HTTP status |
-|---|---|
-| `NotFoundError` (⊂ `LookupError`) | 404 |
-| `ConflictError` (⊂ `ValueError`) — duplicate | 409 |
-| `*ValidationError` (⊂ `ValueError`) — carries `field` | 400 |
-| Pydantic validation failure | 422 (FastAPI automatic) |
-| `IntegrityError` (DB-constraint backstop) | 409 — logged, generic body |
-| any other unhandled exception | 500 — logged with traceback, generic body |
+| Source exception | `code` | HTTP status |
+|---|---|---|
+| `NotFoundError` (⊂ `LookupError`) | `NOT_FOUND` | 404 |
+| `ConflictError` (⊂ `ValueError`) — duplicate | `CONFLICT` | 409 |
+| `*ValidationError` (⊂ `ValueError`) — carries `field` | `VALIDATION` | 400 |
+| `UnauthorizedError` (auth) — adds `WWW-Authenticate` | `UNAUTHORIZED` | 401 |
+| `ForbiddenError` (auth) | `FORBIDDEN` | 403 |
+| `RequestValidationError` (Pydantic) — carries `field` | `REQUEST_VALIDATION` | 422 |
+| `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
+| any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
 
-There are deliberately **no** catch-all `ValueError`/`TypeError`/`LookupError`
-handlers: those builtins are raised throughout the stdlib and third-party libs,
-so returning their raw message would leak internals, and a `TypeError` (almost
-always a bug) would be mislabelled a client `400` instead of a server `500`.
+Handlers are registered **per concrete service-error class** (there is no shared
+base to catch through), and there are deliberately **no** catch-all
+`ValueError`/`TypeError`/`LookupError` handlers: those builtins are raised
+throughout the stdlib and third-party libs, so returning their raw message would
+leak internals, and a `TypeError` (almost always a bug) would be mislabelled a
+client `400` instead of a server `500`.
 
 ### App entry point (`app/main.py`)
 
 `app/main.py` builds the `FastAPI()` instance, mounts every router
-(`app.include_router(...)`), registers the `ServiceError` → HTTP handler, an
+(`app.include_router(...)`), registers a handler per service-error class, an
 `IntegrityError` → 409 backstop, and a catch-all handler that logs unexpected
 exceptions and returns a generic 500, and exposes a `GET /health` liveness
 check. Run locally with `uvicorn app.main:app --reload` (or `make run`).
@@ -490,13 +509,20 @@ need. **Effort: all S** unless noted.
   map, so an admin UI has no way to render a subfaction dropdown.
   *Plan:* a read route returning `{faction_name: [allowed subfactions]}` straight
   from the map (no DB) — e.g. `{"Xenos": ["Aeldari", "Necrons", …], …}`. Public.
-- **`X-Total-Count` header on `GET /units`** — the list is paged but returns no
-  total, so the catalog view can't show "showing 20 of 137."
-  *Plan:* add a `UnitService.count_units(**filters)` (a `select(func.count())`
-  with the same `where` clauses as `list_units`) and set an `X-Total-Count`
-  response header in the route. Chosen over an `{items, total}` envelope because
-  it keeps the bare-list body **non-breaking** (see "Custom service errors" for
-  the same no-envelope stance).
+- **Pagination is a convention (done, R4).** Every list endpoint returns a
+  `Page` envelope — `{items, total, limit, offset}` — via the shared `Page[T]`
+  schema and `PageParams` dependency in `app/api/pagination.py` (`limit` 1–200,
+  default 50; `offset` ≥ 0). The **total travels in the body**, not a header: an
+  earlier design set `X-Total-Count` on `GET /units`, but a response header is
+  invisible to cross-origin JS unless named in CORS `expose_headers`, so on the
+  Firebase→Cloud Run deploy the browser read no total and the catalog silently
+  fell back to `0` (see the resolved BUG1). Reversing the earlier no-envelope
+  stance was deliberate; whether to nest `Page` inside a `{data, errors, meta}`
+  response envelope is a separate, still-open decision (ARCHITECTURE §2.6 / R9).
+  Each list orders by a natural key plus the primary-key `id` as a tiebreaker, so
+  offset paging is stable across page boundaries. `GET /units/facets` adds the
+  per-faction counts the catalog rail needs as a server-side `GROUP BY`, so the
+  client no longer downloads the catalog to count it.
 
 ### Catalog administration
 
@@ -512,7 +538,7 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 - **Fix `delete_unit` (bug)** *(S)* — guard against `ArmyUnit`/`UserUnit`
   references → `ConflictError`. Today deleting an in-use unit 500s. No route change
-  (409 flows through the `ServiceError` handler).
+  (409 flows through the `ConflictError` handler).
 - **Unlink weapon/ability** *(S)* — `unlink_weapon(unit_id, weapon_id)` /
   `unlink_ability(unit_id, ability_id)` on `UnitService` (idempotent), exposed as
   `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
@@ -532,79 +558,120 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 ## Custom service errors
 
-**Implemented.** Services raise a typed hierarchy from
-`app/core/services/errors.py` instead of bare builtins, so errors carry the
-offending **field** and a **duplicate** gets its own **409** (rather than being
-lumped into 400). It is **backward-compatible**: each custom error subclasses the
-builtin it replaces (`NotFoundError(LookupError)`; the `ValueError` family), and a
-single `ServiceError` handler in `app/main.py` maps them by their `status_code` —
-chosen over the builtin `LookupError`/`ValueError` handlers because `ServiceError`
-precedes those in each subclass's MRO. The builtin handlers stay as fallbacks.
-Mirrors `attention-api`.
+**Implemented.** Services raise typed exceptions instead of bare builtins, so
+errors carry the offending **field**, a **duplicate** gets its own **409**, and
+every service error comes back in one shape — `{"detail", "code", "field"?,
+"errors"[]}` — with a stable, machine-readable **`code`** the frontend branches on
+(instead of parsing status or message text). The uniform **`errors`** array lists
+every failure at once — all bad fields of a `422` in one response — with the top
+level mirroring `errors[0]` (ROADMAP R9, option C).
 
-Two families.
+**Every error inherits two bases.** `CodedError` — a marker base in
+`app/core/errors.py` that adds no behaviour — plus **the builtin it maps to**, and
+each **carries its own** `code` (`ErrorCode`), `message`, and optional `field`.
+Keeping them subclasses of the builtins (`LookupError`/`ValueError`) lets
+service-level tests `pytest.raises(LookupError / ValueError)`; the marker base
+lets the API layer catch the whole family in one registration without ever
+catching a builtin.
 
-**Shared errors** — cross-cutting, carry `message`, an optional `field`, and a
-`status_code`:
+**Cross-cutting errors** live in `app/core/services/errors.py`:
 
-- `NotFoundError(LookupError)` — a row doesn't exist. **→ 404** (already, via the
-  existing `LookupError` handler, since it subclasses it).
-- `ConflictError(ValueError)` — a uniqueness clash: duplicate `username`/`email`,
-  duplicate faction name, duplicate subfaction-for-faction. Wants **→ 409**; needs
-  its own handler to get 409, else falls back to 400 (it's a `ValueError`).
+- `NotFoundError(CodedError, LookupError)` — a row doesn't exist. `code = NOT_FOUND` → **404**.
+- `ConflictError(CodedError, ValueError)` — a uniqueness clash (duplicate `username`/`email`,
+  duplicate faction name, duplicate subfaction-for-faction). `code = CONFLICT` →
+  **409**.
 
 (Ownership on `/me/armies/{id}` intentionally stays a **404** through
 `get_owned_army` to hide existence rather than a 403, so there's no
 `ForbiddenError` in the hierarchy today — add one if a case ever needs to reveal
 "exists but not yours.")
 
-**Per-service validation errors** — one `ValueError` subclass per service,
-constructed as `(field, message)`, rendering `"{field}: {message}"` and exposing
-`.field`. They map to **400** (bad request), and their handler adds the offending
-`field` to the response body. We keep them at **400**, not 422: 422 is reserved
-for FastAPI's *request-shape* validation (a malformed body), whereas these are
-semantically-invalid-but-well-formed requests (a business rule failed).
+**Per-service validation errors** — each service defines its own
+`*ValidationError(ValueError)` **in its own module** (not in `errors.py`), each
+carrying `code = VALIDATION` and constructed as `(field, message)` (rendering
+`"{field}: {message}"`, exposing `.field`). They map to **400**:
 
-- `UserValidationError` — registration/account rules (empty/oversized fields).
-- `UnitValidationError` — catalog input across `UnitService` (unknown updatable
-  field; `category` not `range`/`melee`; a faction name outside `FactionName`; a
-  subfaction not allowed under its faction).
-- `ArmyValidationError` — roster input (`amount < 1` on set, `points_limit < 0`).
-- `InventoryValidationError` — inventory input (`amount < 1` on set).
+- `UnitValidationError` (`service_unit.py`) — catalog input across `UnitService`
+  (unknown updatable field; `category` not `range`/`melee`; a faction name outside
+  `FactionName`; a subfaction not allowed under its faction).
+- `ArmyValidationError` (`service_army.py`) — roster input (`amount < 1` on set,
+  `points_limit < 0`).
+- `InventoryValidationError` (`service_inventory.py`) — inventory input
+  (`amount < 1` on set).
+
+(No `UserValidationError`: `UserService` does no field-validation — registration
+input is validated at the Pydantic boundary (`Register_Create`) and surfaces as a
+422. Add one to `service_user.py` if a user business rule ever needs it.)
+
+Validation stays **400**, not 422: 422 is reserved for FastAPI's *request-shape*
+validation (a malformed body); these are well-formed requests that fail a business
+rule.
+
+### The `code` vocabulary and its HTTP mapping
+
+- **`ErrorCode`** (`app/core/errors.py`) — a `StrEnum` of stable codes
+  (`NOT_FOUND`, `CONFLICT`, `VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL`).
+  It lives *below* both the service and API layers so each can reference it
+  without importing the other. The `code` is a *semantic* label, independent of
+  HTTP.
+- **`CODE_STATUS`** (`app/api/errors.py`) — the single `code → HTTP status` map.
+  Deriving the status from the code here (rather than storing it on the error)
+  makes it impossible for the two to disagree.
+
+This split keeps the service layer HTTP-agnostic: a service raises
+`NotFoundError`; the API layer alone decides "that's `NOT_FOUND`, HTTP 404."
+
+### API-layer handlers (`app/main.py`)
+
+One handler function is registered **once**, against the `CodedError` marker base.
+Starlette resolves a handler by walking the raised exception's MRO, so every coded
+error lands there — including one added tomorrow. It builds the body
+`{"detail": message, "code": code, "field"?: field}` and sets the status from
+`CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
+`{data, meta}` envelope** (intentionally deferred; see roadmap R9).
+
+> **Adding a new service `*ValidationError`?** Inherit `CodedError` (alongside
+> `ValueError`) and it is mapped automatically. This replaced a hand-maintained
+> `_SERVICE_ERRORS` tuple, where a forgotten entry silently became a 500 —
+> `tests/test_errors.py` now fails if any class carrying an `ErrorCode` skips the
+> base.
+
+Registration is deliberately against **our own marker base, never a blanket
+`ValueError`/`LookupError` handler**: those builtins are raised throughout the
+stdlib and third-party libs, so catching them would swallow library exceptions and
+leak their messages, and a `TypeError` (almost always a bug) would be mislabelled
+a client 400 instead of a server 500. Anything unmatched falls to the catch-all
+`Exception` handler → generic **500** (`code = INTERNAL`, logged with traceback);
+an `IntegrityError` backstop returns a generic **409** (`code = CONFLICT`).
 
 **Naming principle — name an error by how it's *handled*, not where it's raised.**
-`attention-api` mixes both styles on purpose, and so do we:
 
 - **Generic** for cross-cutting failures nothing branches on: a `NotFoundError`
   is a not-found regardless of resource (its `message` names the row). Minting
   `UnitNotFoundError`/`ArmyNotFoundError` that all become an identical 404 is
   class-proliferation for no gain.
-- **Resource-named** for validation, grouped per service (`UnitValidationError`,
-  …) — this is attention's `MessageValidationError` shape, and the `.field`
-  carries the specifics.
-- **Rule-named** (like attention's `ChallengeAlreadyExistsError`) *only* when a
-  failure needs its own status, its own handler, or the frontend must react
-  differently. Here every duplicate starts as a generic `ConflictError` (→ 409);
-  split out `DuplicateFactionError(ConflictError)` *later* only if the UI must
-  tell one duplicate from another. Add specificity when the handling diverges,
-  not before.
+- **Resource-named** for validation, one per service (`UnitValidationError`, …) —
+  the `.field` carries the specifics.
+- **Rule-named** *only* when a failure needs its own code/status or the frontend
+  must react differently. Every duplicate starts as a generic `ConflictError`
+  (→ 409); split out `DuplicateFactionError` *later* only if the UI must tell one
+  duplicate from another. Add specificity when the handling diverges, not before.
 
-**API layer.** A single `@app.exception_handler(ServiceError)` in `app/main.py`
-builds the response from `exc.status_code` and `exc.field`: the body is
-`{"detail": message, "field": field?}` — close to FastAPI's default, i.e. **no
-`{data, meta}` envelope** (that was intentionally deferred). It's picked over the
-builtin `LookupError`/`ValueError` handlers because Starlette matches handlers by
-walking the exception's MRO, where `ServiceError` sits ahead of them. Those
-builtin handlers remain as fallbacks for any un-migrated raise.
+**Auth errors are coded too.** `app/core/security.py` defines
+`UnauthorizedError` (`code = UNAUTHORIZED` → 401, and the handler adds a
+`WWW-Authenticate: Bearer` header) and `ForbiddenError` (`code = FORBIDDEN` →
+403), raised by `get_current_user` / `get_current_admin` (and login) instead of a
+bare `HTTPException`. The bearer scheme uses `auto_error=False` so a missing token
+reaches us as `None` and we raise the coded error rather than FastAPI's uncoded
+401. They inherit `CodedError` too, so the same single handler maps them.
 
-**Status codes.** `NotFoundError` → 404, `ConflictError` → 409, and the
-`*ValidationError` family → 400 (with `field`). Validation stays 400, not 422: 422
-is reserved for FastAPI's request-shape validation (a malformed body), whereas
-these are well-formed requests that fail a business rule.
-
-**Done.** All four services now raise the typed errors; `errors.py` +
-the handler are in place, and the test suite covers the 404/409/400 mapping and
-the `field` payload.
+**Request validation is reshaped too.** A `RequestValidationError` handler in
+`app/main.py` turns FastAPI's default 422 *array* into the one shape, using a
+distinct `REQUEST_VALIDATION` code (→ 422) so a malformed request stays
+distinguishable from a business-rule `VALIDATION` (→ 400). Every Pydantic error
+becomes an `errors[]` element (`field` from its `loc`, with the `body`/`path`
+prefix dropped); the top level mirrors the first (R9/C). With this, **every
+backend error source returns `{detail, code, field?, errors[]}`** in one shape.
 
 ## Populating the catalog
 
@@ -889,10 +956,13 @@ API tests come with the API layer — one file per router (`test_api_user.py`,
 `test_api_auth.py` and authorization tests once auth lands (a user can't read
 another user's armies; a non-admin can't write the catalog).
 
-- Service tests run against an in-memory SQLite database (one fresh schema per
-  test, foreign keys enforced) so SQL actually executes. This is equivalent to
-  Postgres for our schema (UUIDs, JSON, CHECKs, and cascades all behave), though
-  Postgres-specific behavior isn't exercised.
+- Two test tiers (ROADMAP R6). By default, tests run against an in-memory SQLite
+  database (one fresh schema per test, foreign keys enforced) so SQL actually
+  executes — fast, no services. Set `TEST_DATABASE_URL` to a Postgres URL and the
+  same suite runs against Postgres with the schema built by `alembic upgrade head`
+  (the parity tier), which exercises what SQLite can't: `VARCHAR` length limits,
+  tz-aware timestamps, and native `UUID`/`JSON`. `tests/test_migrations.py` also
+  asserts the migrations and models agree. CI runs both tiers.
 - API tests use FastAPI's `TestClient` with the `get_session` dependency
   overridden (`app.dependency_overrides[get_session] = ...`) so routers run
   against the test session.
@@ -927,10 +997,10 @@ Pieces (all at the repo root):
     **service name** (`postgresql+psycopg2://…@db:5432/…`), not `localhost`.
   `make run` stays the fast bare-metal path; compose is the one-command path.
 - **`docker-compose.test.yml`** — an overlay that points the suite at a
-  throwaway Postgres (a separate `POSTGRES_DB`, no persistent volume) so
-  integration tests run against real Postgres without touching dev data. (The
-  current pytest suite uses in-memory SQLite and needs none of this; this is the
-  Postgres-parity option for later.)
+  throwaway Postgres (a separate `POSTGRES_DB`, no persistent volume) via
+  `TEST_DATABASE_URL`, so `make docker-test` runs the parity tier against real
+  Postgres without touching dev data (ROADMAP R6). A plain `pytest` ignores that
+  variable and uses the fast in-memory SQLite tier.
 
 Cross-cutting concerns:
 
@@ -980,11 +1050,12 @@ Cross-cutting concerns:
     `docker-entrypoint.sh` (migrate-then-serve), `docker-compose.yml`
     (API + Postgres, healthcheck) + a `docker-compose.test.yml` overlay, and
     `make docker-*` targets — see "Deployment & containerization."
-12. ✓ Custom service errors: a typed exception hierarchy in
-    `app/core/services/errors.py` (`NotFoundError`, `ConflictError`, and
-    per-service `*ValidationError`) replacing the builtin `LookupError`/`ValueError`
-    across all services; a single `ServiceError` handler maps them (409 for
-    duplicates, `field` on validation) — see "Custom service errors."
+12. ✓ Custom service errors: typed exceptions carrying a `code` — `NotFoundError`
+    / `ConflictError` in `app/core/services/errors.py` and a per-service
+    `*ValidationError` in each service module — each inheriting the builtin
+    (`LookupError`/`ValueError`) it maps to; one handler registered per concrete
+    class maps them (409 for duplicates, `field` on validation) — see "Custom
+    service errors."
 
 ### Remaining work — ordered by ease of implementation
 
@@ -1003,8 +1074,10 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
     `UnitService`). See "API layer → Planned additions."
 16. ✓ **`GET /factions/taxonomy`** — exposes `FACTION_SUBFACTIONS` for subfaction
     dropdowns. See "API layer → Planned additions."
-17. ✓ **`X-Total-Count` on `GET /units`** — `UnitService.count_units` sets the
-    total header for the catalog's "N results" count. See "API layer → Planned
+17. ✓ **Pagination convention (R4)** — every list endpoint returns a `Page`
+    envelope `{items, total, limit, offset}` with the total in the body (an
+    earlier `X-Total-Count` header was replaced — see the resolved BUG1), plus
+    `GET /units/facets` for per-faction counts. See "API layer → Planned
     additions."
 18. ✓ **Seed script** — `scripts/seed_datasheets.py` (get-or-create, idempotent) +
     `make seed`, loading `scripts/data/datasheets.json`. The JSON ships **empty**;
@@ -1132,7 +1205,7 @@ already exist on the tables; the work is exposing them.
 | FE1 | Add `created_at` (optionally `updated_at`) to `Army_Read` so the frontend can show the army's "Created" date | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also add `created_at` to the frontend `types.ts` | S |
 | FE2 | Add a `q` filter to `GET /me/inventory` so inventory search is server-side, not client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count already in `GET /units` (`service_unit._apply_unit_filters`) | S |
 | FE3 | Add `is_admin` to the `/me` response to unblock admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | S |
-| BUG1 | **Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` comes from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser can't read the header → `total` defaults to `0` → pager is hidden → stuck on the first 25. Works locally because the Vite proxy makes it same-origin. **Fix:** add `expose_headers=["X-Total-Count"]` to `CORSMiddleware`; if the symptom persists, confirm the header round-trips and that `units.ts`/`client.ts` parse it | `app/main.py` (CORS `expose_headers`); verify `src/api/units.ts`/`client.ts` in the web repo | S |
+| BUG1 | ✓ **RESOLVED (R4). Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` came from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser couldn't read the header → `total` defaulted to `0` → pager hidden → stuck on the first 25. **Fixed** by R4 moving `total` into the response body (`Page` envelope), which removes the header entirely — there is no cross-origin-invisible side channel left, so no `expose_headers` entry is needed | resolved in `app/api/pagination.py` + the list endpoints; frontend reads `total` off the body | S |
 
 ### Tier 1 — Make the scrape→seed pipeline honest & robust
 
@@ -1164,7 +1237,7 @@ these before opening the API to real traffic.
 |---|---|---|---|
 | H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
 | Q1 | **Extend the N+1 fix beyond `/units`** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so *every* list that serializes units lazy-loads them per row: `GET /units` (`1+2N`), `GET /me/inventory` (each entry's `unit` + its weapons/abilities), and `GET /me/armies` — which is worst: it serializes `Army_Read.units` (lazy) **and** re-queries the same units in `points_total`. Options: `selectinload` the chains; compute `points_total` with a single `SUM(amount*points)` aggregate instead of a per-entry loop; and/or split `Army_Read` into a **summary** schema (list — no `units`) vs a **detail** schema (`GET /{id}` — units eager-loaded), the classic list-vs-detail split. Coordinated FE change (the web app reads `army.units`) | `app/api/unit.py`, `app/api/inventory.py`, `app/api/army.py`, `service_army.points_total` | M |
-| M5 | Wire the already-installed `sentry-sdk` (no-op when `SENTRY_DSN` unset), add basic structured logging, and a sanitized catch-all `Exception` → 500 handler so internals never leak | `app/main.py` | S/M |
+| M5 | ✅ **Done (R7).** `app/observability.py`: request-ID middleware (`X-Request-ID` generated or echoed, on the header + every error body), JSON structured logging with that ID on every line, and `sentry-sdk` initialized only when `SENTRY_DSN` is set (no-op otherwise). The sanitized catch-all `Exception` → 500 was already in place | `app/observability.py`, `app/main.py` | S/M |
 
 > **Revisit: relationship-loading strategy.** The loading strategy across the
 > `*_Read` schemas needs a deliberate pass — everything defaults to **lazy**
@@ -1375,7 +1448,8 @@ expired-token handling.
 
 ### Production-readiness
 
-The top ops gap is **logging/observability** (M5) — nothing surfaces errors
-today. Behind it: a deep healthcheck (L3), a single typed `Settings` (L4), and
+Logging/observability (M5) is **done** (R7): request IDs, JSON logs, and
+DSN-guarded Sentry. The remaining ops items: a deep healthcheck (L3), a single
+typed `Settings` (L4), and
 JWT lifetime/revocation (L5). Address these before treating a deploy as
 production-grade.

@@ -4,15 +4,15 @@ Uses full paths (no shared prefix) because `/factions` and `/subfactions` are
 sibling resources. Catalog writes are admin/seed in principle.
 """
 
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import SQLModel
 
+from app.api.deps import get_current_admin
+from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Ability_Read, Weapon_Read, get_unit_service
 from app.core.db.models import FACTION_SUBFACTIONS, FactionName
-from app.core.security import get_current_admin
 from app.core.services.service_unit import UnitService
 
 router = APIRouter(tags=["catalog"])
@@ -20,6 +20,14 @@ router = APIRouter(tags=["catalog"])
 
 class Subfaction_Read(SQLModel):
     id: UUID
+    name: str
+
+
+class Subfaction_ListRead(SQLModel):
+    # Flat listing (GET /subfactions) carries faction_id, which the nested form
+    # inside Faction_Read can omit because its parent already supplies it.
+    id: UUID
+    faction_id: UUID
     name: str
 
 
@@ -49,8 +57,8 @@ class Weapon_Create(SQLModel):
     strength: int
     armor_piercing: int
     damage: str
-    range_inches: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    range_inches: int | None = None
+    keywords: list[str] | None = None
 
 
 class Ability_Create(SQLModel):
@@ -59,35 +67,56 @@ class Ability_Create(SQLModel):
 
 
 class Weapon_Update(SQLModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
-    attacks: Optional[str] = None
-    weapon_skill: Optional[int] = None
-    strength: Optional[int] = None
-    armor_piercing: Optional[int] = None
-    damage: Optional[str] = None
-    range_inches: Optional[int] = None
-    keywords: Optional[list[str]] = None
+    name: str | None = None
+    category: str | None = None
+    attacks: str | None = None
+    weapon_skill: int | None = None
+    strength: int | None = None
+    armor_piercing: int | None = None
+    damage: str | None = None
+    range_inches: int | None = None
+    keywords: list[str] | None = None
 
 
 class Ability_Update(SQLModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
 
 
-@router.get("/factions", response_model=list[Faction_Read])
+@router.get("/factions", response_model=Page[Faction_Read])
 def list_factions(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Faction_Read]:
-    return service.list_factions()
+) -> Page[Faction_Read]:
+    items = service.list_factions(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_factions(), page)
 
 
-@router.get("/factions/taxonomy", response_model=dict[str, list[str]])
+@router.get("/subfactions", response_model=Page[Subfaction_ListRead])
+def list_subfactions(
+    faction_id: UUID | None = None,
+    page: PageParams = Depends(),
+    service: UnitService = Depends(get_unit_service),
+) -> Page[Subfaction_ListRead]:
+    """Every created subfaction, optionally filtered to one faction.
+
+    Distinct from GET /taxonomy: that publishes the *allowed* subfaction names
+    (from the constant); this lists the rows actually created in the DB (with ids).
+    """
+    items = service.list_subfactions(faction_id, limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_subfactions(faction_id), page)
+
+
+@router.get("/taxonomy", response_model=dict[str, list[str]])
 def faction_taxonomy() -> dict[str, list[str]]:
     """The allowed subfactions under each faction (for building dropdowns).
 
     Sourced from the `FACTION_SUBFACTIONS` map, not the DB — these are the values
     `create_subfaction` will accept, whether or not any have been created yet.
+
+    Deliberately *not* under `/factions/...`: it's static reference data, not a
+    faction resource, and `/factions/taxonomy` would collide with a future
+    `GET /factions/{faction_id}` (both claim the same path slot). See ROADMAP R12.
     """
     return {faction.value: list(subs) for faction, subs in FACTION_SUBFACTIONS.items()}
 
@@ -98,9 +127,7 @@ def faction_taxonomy() -> dict[str, list[str]]:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_faction(
-    payload: Faction_Create, service: UnitService = Depends(get_unit_service)
-) -> Faction_Read:
+def create_faction(payload: Faction_Create, service: UnitService = Depends(get_unit_service)) -> Faction_Read:
     return service.create_faction(payload.name)
 
 
@@ -122,9 +149,7 @@ def create_subfaction(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_subfaction(
-    subfaction_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_subfaction(subfaction_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_subfaction(subfaction_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -135,17 +160,17 @@ def delete_subfaction(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_weapon(
-    payload: Weapon_Create, service: UnitService = Depends(get_unit_service)
-) -> Weapon_Read:
+def create_weapon(payload: Weapon_Create, service: UnitService = Depends(get_unit_service)) -> Weapon_Read:
     return service.create_weapon(**payload.model_dump())
 
 
-@router.get("/weapons", response_model=list[Weapon_Read])
+@router.get("/weapons", response_model=Page[Weapon_Read])
 def list_weapons(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Weapon_Read]:
-    return service.list_weapons()
+) -> Page[Weapon_Read]:
+    items = service.list_weapons(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_weapons(), page)
 
 
 @router.patch(
@@ -166,9 +191,7 @@ def update_weapon(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_weapon(
-    weapon_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_weapon(weapon_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_weapon(weapon_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -179,17 +202,17 @@ def delete_weapon(
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(get_current_admin)],
 )
-def create_ability(
-    payload: Ability_Create, service: UnitService = Depends(get_unit_service)
-) -> Ability_Read:
+def create_ability(payload: Ability_Create, service: UnitService = Depends(get_unit_service)) -> Ability_Read:
     return service.create_ability(payload.name, payload.description)
 
 
-@router.get("/abilities", response_model=list[Ability_Read])
+@router.get("/abilities", response_model=Page[Ability_Read])
 def list_abilities(
+    page: PageParams = Depends(),
     service: UnitService = Depends(get_unit_service),
-) -> list[Ability_Read]:
-    return service.list_abilities()
+) -> Page[Ability_Read]:
+    items = service.list_abilities(limit=page.limit, offset=page.offset)
+    return paginate(items, service.count_abilities(), page)
 
 
 @router.patch(
@@ -210,8 +233,6 @@ def update_ability(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(get_current_admin)],
 )
-def delete_ability(
-    ability_id: UUID, service: UnitService = Depends(get_unit_service)
-) -> Response:
+def delete_ability(ability_id: UUID, service: UnitService = Depends(get_unit_service)) -> Response:
     service.delete_ability(ability_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
