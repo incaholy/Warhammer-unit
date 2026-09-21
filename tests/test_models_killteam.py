@@ -9,7 +9,14 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from app.core.db.models_killteam import KillTeam, KillTeamRule, KTFaction
+from app.core.db.models_killteam import (
+    KillTeam,
+    KillTeamRule,
+    KTAbility,
+    KTFaction,
+    KTOperative,
+    KTWeapon,
+)
 
 
 def test_faction_kill_team_rule_chain_links_both_ways(
@@ -91,3 +98,114 @@ def test_deleting_an_unused_faction_is_allowed(session, make_kt_faction):
 def test_operative_count_must_be_at_least_one(session, make_kill_team, count):
     with pytest.raises(IntegrityError):
         make_kill_team(operative_count=count)
+
+
+# ---- The datacard: operatives, their weapons and abilities (slice 2) ----
+
+
+def test_an_operative_owns_its_weapons_and_abilities(
+    session, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    prime = make_kt_operative(name="Ravener Prime", apl=3, move=7, save=4, wounds=10)
+    make_kt_weapon(operative=prime, name="Toxic lunge", category="melee")
+    make_kt_ability(operative=prime, name="Neuropredatory Crest")
+    session.refresh(prime)
+
+    assert [w.name for w in prime.weapons] == ["Toxic lunge"]
+    assert [a.name for a in prime.abilities] == ["Neuropredatory Crest"]
+    assert prime.weapons[0].operative.name == "Ravener Prime"
+
+
+def test_operative_name_is_unique_per_kill_team_only(session, make_kill_team, make_kt_operative):
+    raveners = make_kill_team()
+    make_kt_operative(kill_team=raveners, name="Ravener Warrior")
+    # The same name on another kill team is fine; twice on one is not.
+    make_kt_operative(kill_team=make_kill_team(), name="Ravener Warrior")
+    with pytest.raises(IntegrityError):
+        make_kt_operative(kill_team=raveners, name="Ravener Warrior")
+
+
+def test_max_per_roster_is_null_for_an_unlimited_operative(session, make_kt_operative):
+    # Raveners: every specialist is capped at 1, Warriors are not capped at all --
+    # still bounded by the kill team's operative_count.
+    warrior = make_kt_operative(name="Ravener Warrior", max_per_roster=None)
+    felltalon = make_kt_operative(name="Ravener Felltalon", max_per_roster=1)
+
+    assert warrior.max_per_roster is None
+    assert felltalon.max_per_roster == 1
+
+
+def test_max_per_roster_of_zero_is_rejected(session, make_kt_operative):
+    # "Cannot be taken" is said by leaving the operative off the list, not by a 0.
+    with pytest.raises(IntegrityError):
+        make_kt_operative(max_per_roster=0)
+
+
+def test_required_marks_the_operative_a_roster_cannot_omit(session, make_kt_operative):
+    assert make_kt_operative(name="Ravener Prime", required=True).required is True
+    assert make_kt_operative(name="Ravener Warrior").required is False
+
+
+def test_weapon_range_defaults_by_category(session, make_kt_weapon):
+    # Decision #15. A 2024 profile prints no range, so the column has a defined
+    # meaning instead of a blank: melee reaches 1, ranged 2.
+    assert make_kt_weapon(category="melee").range == 1
+    assert make_kt_weapon(category="range").range == 2
+
+
+def test_a_printed_range_overrides_the_default(session, make_kt_weapon):
+    # What the scraper does with a "Range 3" weapon rule (K2).
+    spitter = make_kt_weapon(category="range", range=3, weapon_rules=["Range 3", "Poison"])
+    assert spitter.range == 3
+    assert "Range 3" in spitter.weapon_rules
+
+
+def test_a_range_below_one_is_rejected_even_though_a_default_exists(session, make_kt_weapon):
+    # A default only fires when the column is OMITTED, so the check is what holds an
+    # explicit 0 from a future parser out.
+    with pytest.raises(IntegrityError):
+        make_kt_weapon(range=0)
+
+
+def test_weapon_category_is_one_of_two_values(session, make_kt_weapon):
+    with pytest.raises(IntegrityError):
+        make_kt_weapon(category="thrown")
+
+
+def test_damage_is_stored_as_normal_and_crit(session, make_kt_weapon):
+    # The page prints "4/5"; splitting it once here beats parsing a string on every
+    # read in the roster and the game tracker.
+    claws = make_kt_weapon(normal_damage=4, crit_damage=5)
+    assert (claws.normal_damage, claws.crit_damage) == (4, 5)
+
+
+def test_deleting_an_operative_deletes_its_weapons_and_abilities(
+    session, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    warrior = make_kt_operative()
+    make_kt_weapon(operative=warrior)
+    make_kt_ability(operative=warrior)
+
+    session.delete(warrior)
+    session.commit()
+
+    assert session.exec(select(KTWeapon)).all() == []
+    assert session.exec(select(KTAbility)).all() == []
+
+
+def test_deleting_a_kill_team_cascades_through_operatives(
+    session, make_kill_team, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    # Two levels down: the kill team names neither weapons nor abilities, and the
+    # database walks the chain.
+    raveners = make_kill_team()
+    warrior = make_kt_operative(kill_team=raveners)
+    make_kt_weapon(operative=warrior)
+    make_kt_ability(operative=warrior)
+
+    session.delete(raveners)
+    session.commit()
+
+    assert session.exec(select(KTOperative)).all() == []
+    assert session.exec(select(KTWeapon)).all() == []
+    assert session.exec(select(KTAbility)).all() == []

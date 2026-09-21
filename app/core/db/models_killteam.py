@@ -5,9 +5,11 @@ separate games (KILLTEAM.md decision #11), and the only thing shared with the 40
 tables is `TimestampMixin`. Every table name carries a `kt_` prefix so the two sets
 sort together and can never collide (`kt_factions` vs `factions`).
 
-Built in slices (ROADMAP K1). This module currently holds the top of the tree:
+Built in slices (ROADMAP K1). This module currently holds:
 
     KTFaction → KillTeam → KillTeamRule
+                        └→ KTOperative → KTWeapon
+                                      └→ KTAbility
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -19,7 +21,7 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, UniqueConstraint, text
 from sqlmodel import Field, Relationship
 
 from app.core.db.models import TimestampMixin
@@ -66,6 +68,8 @@ class KillTeam(TimestampMixin, table=True):
     # cascades in the database, and `cascade_delete` makes the ORM do the same when
     # the kill team is deleted through a session.
     rules: list["KillTeamRule"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    # Cascades two levels: an operative's weapons and abilities go with it.
+    operatives: list["KTOperative"] = Relationship(back_populates="kill_team", cascade_delete=True)
 
 
 class KillTeamRule(TimestampMixin, table=True):
@@ -86,3 +90,132 @@ class KillTeamRule(TimestampMixin, table=True):
     description: str
 
     kill_team: KillTeam = Relationship(back_populates="rules")
+
+
+class KTOperative(TimestampMixin, table=True):
+    """One operative on a kill team's roster list, with its datacard stats.
+
+    The two roster limits live here as data, not as code per team (KILLTEAM.md →
+    "Roster limits"): `required` marks an operative a roster cannot omit (Raveners'
+    Prime), and `max_per_roster` caps how many may be taken -- 1 for each specialist,
+    NULL for one that can be taken freely (Warriors), still bounded by the kill
+    team's `operative_count`.
+    """
+
+    __tablename__ = "kt_operatives"
+    __table_args__ = (
+        UniqueConstraint("kill_team_id", "name"),
+        CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
+        CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
+        # NULL means "no limit"; a limit of 0 would mean "cannot be taken", which is
+        # what leaving the operative off the list already says.
+        CheckConstraint(
+            "max_per_roster IS NULL OR max_per_roster >= 1", name="ck_kt_operative_max_per_roster"
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
+    name: str = Field(max_length=128, index=True)
+
+    # The 2024 stat line: APL, Move, Save, Wounds. `save = 3` means 3+, the same
+    # convention as the 40k `Unit.armor_save`.
+    apl: int
+    move: int
+    save: int
+    wounds: int
+
+    keywords: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
+
+    required: bool = Field(default=False)
+    max_per_roster: int | None = Field(default=None)
+
+    kill_team: KillTeam = Relationship(back_populates="operatives")
+    weapons: list["KTWeapon"] = Relationship(back_populates="operative", cascade_delete=True)
+    abilities: list["KTAbility"] = Relationship(back_populates="operative", cascade_delete=True)
+
+
+def _range_for_category(context) -> int:
+    """The default `range` for a weapon whose caller gave none.
+
+    A context-sensitive column default: one column, a value that depends on this
+    row's `category`. SQL's `DEFAULT` takes a single value and cannot look at another
+    column, and a SQLModel `model_validator` is not an option either -- table models
+    skip validation, so a validator never runs. This does run, on every ORM and Core
+    insert, and lives in the models file where the schema is documented.
+    """
+    params = context.get_current_parameters()
+    return 1 if params.get("category") == "melee" else 2
+
+
+class KTWeapon(TimestampMixin, table=True):
+    """One weapon profile on an operative's datacard.
+
+    Owned by that operative rather than shared through a link table (decision #14):
+    a datacard lists its own profiles, and two operatives' weapons of the same name
+    can differ.
+
+    A 2024 profile is ATK / HIT / DMG / WR, where DMG is split into normal and
+    critical. Damage is stored as the two integers the page prints, not as its "4/5"
+    string, because the roster and the game tracker compare and sum them.
+    """
+
+    __tablename__ = "kt_weapons"
+    __table_args__ = (
+        UniqueConstraint("operative_id", "name"),
+        # The same two values as the 40k `Weapon.category`, so one vocabulary covers
+        # both games.
+        CheckConstraint("category IN ('range', 'melee')", name="ck_kt_weapon_category"),
+        # A default only fires when the column is omitted, so this is what holds an
+        # explicit 0 from a future parser out.
+        CheckConstraint("range >= 1", name="ck_kt_weapon_range"),
+        CheckConstraint(
+            "attacks >= 0 AND hit >= 0 AND normal_damage >= 0 AND crit_damage >= 0",
+            name="ck_kt_weapon_stats_non_negative",
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    operative_id: UUID = Field(foreign_key="kt_operatives.id", ondelete="CASCADE", index=True)
+    name: str = Field(max_length=128)
+    category: str = Field(max_length=8)  # "range" | "melee"
+
+    # Decision #15: the number from a printed `Range x` rule when the page states
+    # one, otherwise 1 for melee and 2 for range. NULL-typed in Python because the
+    # value is assigned at insert; the column itself is NOT NULL, with a
+    # `server_default` covering a raw-SQL insert that names no range.
+    range: int | None = Field(
+        default=None,
+        nullable=False,
+        sa_column_kwargs={"default": _range_for_category, "server_default": text("1")},
+    )
+
+    attacks: int
+    hit: int  # "3+" is stored as 3, like `save`
+    normal_damage: int
+    crit_damage: int
+
+    # "Rending", "Silent", "Range 3", "Piercing 1" -- names with their parameters, as
+    # printed. `Range x` is also lifted into `range` above; it stays here because the
+    # rules list is what the datacard shows.
+    weapon_rules: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
+
+    operative: KTOperative = Relationship(back_populates="weapons")
+
+
+class KTAbility(TimestampMixin, table=True):
+    """An operative's ability or unique action (Raveners: Toxic Lunge, Burrow).
+
+    One table for both: they read the same way on the datacard (a name and its text),
+    and nothing in the tracker needs to tell them apart -- the players do.
+    """
+
+    __tablename__ = "kt_abilities"
+    __table_args__ = (UniqueConstraint("operative_id", "name"),)
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    operative_id: UUID = Field(foreign_key="kt_operatives.id", ondelete="CASCADE", index=True)
+    name: str = Field(max_length=128)
+    description: str
+
+    operative: KTOperative = Relationship(back_populates="abilities")

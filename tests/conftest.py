@@ -20,7 +20,14 @@ from sqlmodel import Session, SQLModel, create_engine
 # Importing the models registers every table on SQLModel.metadata.
 from app.core.db.connection import get_session
 from app.core.db.models import Army, Faction, Subfaction, Unit, User
-from app.core.db.models_killteam import KillTeam, KillTeamRule, KTFaction
+from app.core.db.models_killteam import (
+    KillTeam,
+    KillTeamRule,
+    KTAbility,
+    KTFaction,
+    KTOperative,
+    KTWeapon,
+)
 from app.core.security import create_access_token
 from app.main import app
 
@@ -322,5 +329,65 @@ def make_kill_team_rule(session, make_kill_team):
         session.commit()
         session.refresh(rule)
         return rule
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_operative(session, make_kill_team):
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
+        data = dict(
+            name=f"Operative {next(_counter)}",
+            apl=2,
+            move=6,
+            save=4,
+            wounds=9,
+            keywords=["RAVENER", "TYRANID"],
+        )
+        data.update(overrides)
+        operative = KTOperative(kill_team_id=kill_team.id, **data)
+        session.add(operative)
+        session.commit()
+        session.refresh(operative)
+        return operative
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_weapon(session, make_kt_operative):
+    def _make(operative=None, **overrides):
+        operative = operative or make_kt_operative()
+        data = dict(
+            name=f"Weapon {next(_counter)}",
+            category="melee",
+            attacks=4,
+            hit=3,
+            normal_damage=4,
+            crit_damage=5,
+            weapon_rules=[],
+        )
+        data.update(overrides)
+        weapon = KTWeapon(operative_id=operative.id, **data)
+        session.add(weapon)
+        session.commit()
+        session.refresh(weapon)
+        return weapon
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_ability(session, make_kt_operative):
+    def _make(operative=None, **overrides):
+        operative = operative or make_kt_operative()
+        data = dict(name=f"Ability {next(_counter)}", description="Does something.")
+        data.update(overrides)
+        ability = KTAbility(operative_id=operative.id, **data)
+        session.add(ability)
+        session.commit()
+        session.refresh(ability)
+        return ability
 
     return _make

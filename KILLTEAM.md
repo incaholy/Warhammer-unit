@@ -32,6 +32,8 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 11 | Separation | Kill Team and the 40k army list builder are **two sections**: `/kill-team` and `/army-list` | Two games with different rules; neither's routes, models or views leak into the other |
 | 12 | Finding a kill team | A flat **Kill Team faction** list (`KTFaction`), e.g. Tyranids → Raveners. No Imperium / Chaos / Xenos level, and no link to the 40k `Faction` → `Subfaction` lookup | The army name is what people look for; the 40k lookup puts the army on different levels (Tyranids is a subfaction, Space Marines a faction) and would tie the two games' faction lists together |
 | 13 | Team rules | Rules belong to the **kill team** (`KillTeamRule`), not the faction | Two kill teams in the same faction can have different rules |
+| 14 | Weapons and abilities | Belong to **one operative** (a plain FK), not shared through link tables the way 40k's `unit_weapons` / `unit_abilities` do | A datacard lists its own profiles, and the same weapon name on two operatives can carry different numbers; sharing would mean deduplicating on name *and* every stat |
+| 15 | Weapon range | One non-null `range` column: the number from a printed `Range x` weapon rule when there is one, otherwise **1 for melee, 2 for range**, filled by a context-sensitive column default | A 2024 profile prints ATK/HIT/DMG/WR and no range — distance appears only as a weapon rule — so the column needs a defined meaning rather than a blank |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -96,15 +98,28 @@ against: Raveners.
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
 | `KillTeam` | name, **operative count**; FK `KTFaction` |
 | `KillTeamRule` | name, text; FK kill team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts) |
-| `KTOperative` | name, APL, move, save, wounds, keywords, base size, **required**, **max per roster** (null = no limit); FK kill team |
-| `KTWeapon` | name, ranged/melee, attacks, hit, normal damage, crit damage, weapon rules (JSON; range is a rule, e.g. "Range 3", not a column) |
-| `KTAbility` | name, text (includes unique actions) |
+| `KTOperative` | name, APL, move, save, wounds, keywords, **required**, **max per roster** (null = no limit); FK kill team |
+| `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
+| `KTAbility` | name, text (includes unique actions); FK operative |
 | `KTPloy` | name, strategy or firefight, CP cost, text; FK kill team. The Raveners page shows no cost, so the column takes a default when the page gives none |
 | `KTEquipment` | name, text; FK kill team, or null for universal |
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
 - Routes under `/api/v1/kill-team/...`; public read, admin write (same policy as the
   40k catalog).
+
+### The datacard
+
+An operative owns its weapons and abilities (decision #14), so deleting one takes
+them with it, and deleting a kill team cascades through operatives to both.
+
+`range` (decision #15) is filled by a **context-sensitive column default**: one
+column, a value that depends on the row's `category`. SQL's `DEFAULT` cannot do that
+— and a SQLModel `model_validator` cannot either, because table models skip
+validation — so the default is a callable on the column that reads the row's
+`category` at insert. A `server_default` of 1 backs it for a raw-SQL insert that
+names no `range`, and `CHECK (range >= 1)` holds whatever the caller passes, since a
+default only fires when the column is omitted.
 
 ### Factions
 
