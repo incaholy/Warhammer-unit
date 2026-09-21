@@ -8,8 +8,9 @@ sort together and can never collide (`kt_factions` vs `factions`).
 Built in slices (ROADMAP K1). This module currently holds:
 
     KTFaction → KillTeam → KillTeamRule
-                        └→ KTOperative → KTWeapon
-                                      └→ KTAbility
+                        ├→ KTOperative → KTWeapon
+                        │             └→ KTAbility
+                        └→ KTPloy (kill_team_id NULL = every team can use it)
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -21,7 +22,7 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, Index, UniqueConstraint, text
 from sqlmodel import Field, Relationship
 
 from app.core.db.models import TimestampMixin
@@ -70,6 +71,9 @@ class KillTeam(TimestampMixin, table=True):
     rules: list["KillTeamRule"] = Relationship(back_populates="kill_team", cascade_delete=True)
     # Cascades two levels: an operative's weapons and abilities go with it.
     operatives: list["KTOperative"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    # A team's own ploys only. The universal ones (kill_team_id NULL) belong to no
+    # team, so they are not in this list and are not deleted with one.
+    ploys: list["KTPloy"] = Relationship(back_populates="kill_team", cascade_delete=True)
 
 
 class KillTeamRule(TimestampMixin, table=True):
@@ -219,3 +223,50 @@ class KTAbility(TimestampMixin, table=True):
     description: str
 
     operative: KTOperative = Relationship(back_populates="abilities")
+
+
+class KTPloy(TimestampMixin, table=True):
+    """A ploy: a CP-priced option a player may use during a game.
+
+    Two kinds, as the datacard pages divide them: `strategy` (played in the Strategy
+    phase) and `firefight` (played during activations).
+
+    Almost every ploy belongs to one kill team, so `kill_team_id` is a plain FK --
+    except that **Command Re-roll is usable by every kill team**. That is stored as a
+    NULL `kill_team_id` rather than copied onto each team, so there is one row to
+    correct and a team's ploy list is "its own, plus the universal ones".
+
+    NULL costs one constraint: Postgres treats two NULLs as distinct, so
+    `UniqueConstraint(kill_team_id, name)` would happily take a second
+    "Command Re-roll". The partial index below closes that -- unique on `name` among
+    the rows that have no kill team.
+    """
+
+    __tablename__ = "kt_ploys"
+    __table_args__ = (
+        UniqueConstraint("kill_team_id", "name"),
+        Index(
+            "uq_kt_ploy_universal_name",
+            "name",
+            unique=True,
+            sqlite_where=text("kill_team_id IS NULL"),
+            postgresql_where=text("kill_team_id IS NULL"),
+        ),
+        CheckConstraint("kind IN ('strategy', 'firefight')", name="ck_kt_ploy_kind"),
+        CheckConstraint("cp_cost >= 0", name="ck_kt_ploy_cp_cost"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # NULL = every kill team may use it (Command Re-roll). A team's own ploys go
+    # with the team; the universal rows are not anyone's to delete.
+    kill_team_id: UUID | None = Field(
+        default=None, foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True
+    )
+    name: str = Field(max_length=128)
+    kind: str = Field(max_length=16)  # "strategy" | "firefight"
+    # The datacard pages do not print costs, so this is what a ploy costs unless the
+    # source says otherwise (Command Re-roll is 1 CP).
+    cp_cost: int = Field(default=1)
+    description: str
+
+    kill_team: KillTeam | None = Relationship(back_populates="ploys")

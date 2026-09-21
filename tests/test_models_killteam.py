@@ -15,6 +15,7 @@ from app.core.db.models_killteam import (
     KTAbility,
     KTFaction,
     KTOperative,
+    KTPloy,
     KTWeapon,
 )
 
@@ -209,3 +210,87 @@ def test_deleting_a_kill_team_cascades_through_operatives(
     assert session.exec(select(KTOperative)).all() == []
     assert session.exec(select(KTWeapon)).all() == []
     assert session.exec(select(KTAbility)).all() == []
+
+
+# ---- Ploys (slice 3) ----
+
+
+def test_a_ploy_belongs_to_its_kill_team(session, make_kill_team, make_kt_ploy):
+    raveners = make_kill_team(name="Raveners")
+    ploy = make_kt_ploy(kill_team=raveners, name="Subterranean Assault", kind="strategy")
+
+    assert ploy.kill_team.name == "Raveners"
+    assert [p.name for p in raveners.ploys] == ["Subterranean Assault"]
+
+
+def test_command_reroll_belongs_to_no_kill_team(session, make_kill_team, make_kt_ploy):
+    # The one ploy every kill team can use is stored once, with no owner, rather
+    # than copied onto each team.
+    reroll = make_kt_ploy(kill_team=None, name="Command Re-roll", cp_cost=1)
+    raveners = make_kill_team()
+
+    assert reroll.kill_team_id is None
+    assert reroll.kill_team is None
+    # It is nobody's ploy, so it is not in a team's own list…
+    assert raveners.ploys == []
+    # …and a team's ploy list is "its own plus the universal ones".
+    universal = session.exec(select(KTPloy).where(KTPloy.kill_team_id.is_(None))).all()
+    assert [p.name for p in universal] == ["Command Re-roll"]
+
+
+def test_a_universal_ploy_cannot_be_added_twice(session, make_kt_ploy):
+    # A plain UNIQUE(kill_team_id, name) does NOT catch this: two NULLs are distinct
+    # to the database, so a second "Command Re-roll" would be accepted. The partial
+    # unique index is what refuses it.
+    make_kt_ploy(kill_team=None, name="Command Re-roll")
+    with pytest.raises(IntegrityError):
+        make_kt_ploy(kill_team=None, name="Command Re-roll")
+
+
+def test_a_team_may_name_a_ploy_after_a_universal_one(session, make_kt_ploy, make_kill_team):
+    # The partial index only covers the universal rows, so a kill team is free to
+    # carry a ploy of the same name; scoping still holds per team.
+    make_kt_ploy(kill_team=None, name="Command Re-roll")
+    make_kt_ploy(kill_team=make_kill_team(), name="Command Re-roll")
+
+    assert len(session.exec(select(KTPloy)).all()) == 2
+
+
+def test_ploy_name_is_unique_per_kill_team_only(session, make_kill_team, make_kt_ploy):
+    raveners = make_kill_team()
+    make_kt_ploy(kill_team=raveners, name="Predatory Bound")
+    make_kt_ploy(kill_team=make_kill_team(), name="Predatory Bound")
+    with pytest.raises(IntegrityError):
+        make_kt_ploy(kill_team=raveners, name="Predatory Bound")
+
+
+def test_ploy_kind_is_strategy_or_firefight(session, make_kt_ploy):
+    assert make_kt_ploy(kind="strategy").kind == "strategy"
+    assert make_kt_ploy(kind="firefight").kind == "firefight"
+    with pytest.raises(IntegrityError):
+        make_kt_ploy(kind="tactical")
+
+
+def test_cp_cost_defaults_to_one_and_cannot_be_negative(session, make_kill_team, make_kt_ploy):
+    default = KTPloy(kill_team_id=make_kill_team().id, name="Free-ish", kind="strategy", description="x")
+    session.add(default)
+    session.commit()
+    session.refresh(default)
+    assert default.cp_cost == 1
+
+    with pytest.raises(IntegrityError):
+        make_kt_ploy(cp_cost=-1)
+
+
+def test_deleting_a_kill_team_takes_its_ploys_but_not_the_universal_one(
+    session, make_kill_team, make_kt_ploy
+):
+    raveners = make_kill_team()
+    make_kt_ploy(kill_team=raveners, name="Subterranean Assault")
+    make_kt_ploy(kill_team=None, name="Command Re-roll")
+
+    session.delete(raveners)
+    session.commit()
+
+    remaining = session.exec(select(KTPloy)).all()
+    assert [p.name for p in remaining] == ["Command Re-roll"]

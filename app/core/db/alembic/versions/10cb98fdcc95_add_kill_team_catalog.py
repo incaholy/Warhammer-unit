@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 9902245579a8
+Revision ID: 10cb98fdcc95
 Revises: 44441c6a9671
-Create Date: 2026-09-19 19:20:26.471484
+Create Date: 2026-09-21 15:39:30.718661
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '9902245579a8'
+revision: str = '10cb98fdcc95'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -77,6 +77,23 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_kt_operatives_kill_team_id'), 'kt_operatives', ['kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_operatives_name'), 'kt_operatives', ['name'], unique=False)
+    op.create_table('kt_ploys',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('kill_team_id', sa.Uuid(), nullable=True),
+    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('kind', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('cp_cost', sa.Integer(), nullable=False),
+    sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.CheckConstraint("kind IN ('strategy', 'firefight')", name='ck_kt_ploy_kind'),
+    sa.CheckConstraint('cp_cost >= 0', name='ck_kt_ploy_cp_cost'),
+    sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('kill_team_id', 'name')
+    )
+    op.create_index(op.f('ix_kt_ploys_kill_team_id'), 'kt_ploys', ['kill_team_id'], unique=False)
+    op.create_index('uq_kt_ploy_universal_name', 'kt_ploys', ['name'], unique=True, sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
     op.create_table('kt_abilities',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -120,6 +137,9 @@ def downgrade() -> None:
     op.drop_table('kt_weapons')
     op.drop_index(op.f('ix_kt_abilities_operative_id'), table_name='kt_abilities')
     op.drop_table('kt_abilities')
+    op.drop_index('uq_kt_ploy_universal_name', table_name='kt_ploys', sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
+    op.drop_index(op.f('ix_kt_ploys_kill_team_id'), table_name='kt_ploys')
+    op.drop_table('kt_ploys')
     op.drop_index(op.f('ix_kt_operatives_name'), table_name='kt_operatives')
     op.drop_index(op.f('ix_kt_operatives_kill_team_id'), table_name='kt_operatives')
     op.drop_table('kt_operatives')

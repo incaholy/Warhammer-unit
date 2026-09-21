@@ -101,12 +101,25 @@ against: Raveners.
 | `KTOperative` | name, APL, move, save, wounds, keywords, **required**, **max per roster** (null = no limit); FK kill team |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
 | `KTAbility` | name, text (includes unique actions); FK operative |
-| `KTPloy` | name, strategy or firefight, CP cost, text; FK kill team. The Raveners page shows no cost, so the column takes a default when the page gives none |
+| `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
 | `KTEquipment` | name, text; FK kill team, or null for universal |
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
 - Routes under `/api/v1/kill-team/...`; public read, admin write (same policy as the
   40k catalog).
+
+### Ploys
+
+Two kinds, as the pages divide them: `strategy` and `firefight`. A ploy belongs to
+one kill team, with one exception — **Command Re-roll, which every kill team can
+use**. That is a `kill_team_id` of NULL: one row to correct rather than a copy per
+team, and a team's ploy list reads as "its own, plus the universal ones". Deleting a
+kill team takes its own ploys and leaves the universal rows alone.
+
+NULL costs one constraint. Postgres treats two NULLs as distinct, so
+`UNIQUE(kill_team_id, name)` would accept a second "Command Re-roll"; a **partial
+unique index** on `name` where `kill_team_id IS NULL` is what refuses it. The same
+applies to universal equipment when that lands.
 
 ### The datacard
 

@@ -26,6 +26,7 @@ from app.core.db.models_killteam import (
     KTAbility,
     KTFaction,
     KTOperative,
+    KTPloy,
     KTWeapon,
 )
 from app.core.security import create_access_token
@@ -389,5 +390,28 @@ def make_kt_ability(session, make_kt_operative):
         session.commit()
         session.refresh(ability)
         return ability
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_ploy(session, make_kill_team):
+    """A ploy. Pass `kill_team=None` explicitly for a universal one (Command Re-roll)."""
+
+    def _make(kill_team=..., **overrides):
+        if kill_team is ...:
+            kill_team = make_kill_team()
+        data = dict(
+            name=f"Ploy {next(_counter)}",
+            kind="strategy",
+            cp_cost=1,
+            description="Does something, for a cost.",
+        )
+        data.update(overrides)
+        ploy = KTPloy(kill_team_id=kill_team.id if kill_team else None, **data)
+        session.add(ploy)
+        session.commit()
+        session.refresh(ploy)
+        return ploy
 
     return _make
