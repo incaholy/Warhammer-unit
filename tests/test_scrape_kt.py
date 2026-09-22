@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.scrape_wahapedia_kt import NavEntry, parse_nav, parse_operatives
+from scripts.scrape_wahapedia_kt import (
+    NavEntry,
+    parse_nav,
+    parse_operatives,
+    parse_ploys,
+    parse_team_rules,
+)
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "kt_nav.html").read_text()
 TEAM = (Path(__file__).parent / "fixtures" / "kt_team.html").read_text()
@@ -227,3 +233,72 @@ def test_a_page_with_no_datacards_fails_loudly():
     # Seeding a kill team with an empty roster list would look like a working run.
     with pytest.raises(ValueError, match="no operatives"):
         parse_operatives("<html><body><div>Not a datacard</div></body></html>")
+
+
+# ---- The team-level sections ----
+
+
+def test_team_rules_come_from_the_faction_rules_section():
+    rules = parse_team_rules(TEAM)
+
+    assert [r.name for r in rules] == ["Ember Tide", "Hollow Resolve"]
+
+
+def test_a_rule_keeps_an_action_printed_inside_it():
+    # Raveners print the Burrow ACTION within the Burrow rule. It is not an
+    # operative's action, and `KillTeamRule` is name-and-text, so it stays in the
+    # rule -- only the element carrying the rule's own NAME is removed.
+    ember = parse_team_rules(TEAM)[0]
+
+    assert "STOKE" in ember.description
+    assert "1AP" in ember.description
+    assert ember.description.startswith("At the end of the Set Up Operatives step")
+
+
+def test_flavour_text_is_left_out_of_every_rule():
+    # `ShowFluff` is prose about the faction; the tracker shows rules.
+    for rule in parse_team_rules(TEAM):
+        assert "flavour" not in rule.description.lower()
+
+
+def test_a_rule_does_not_repeat_its_own_name():
+    assert not parse_team_rules(TEAM)[1].description.startswith("Hollow Resolve")
+
+
+def test_both_kinds_of_ploy_are_read_with_the_kind_the_rules_use():
+    # The site's class says "Tactical"; the section is printed "Firefight Ploys",
+    # which is what `KTPloy.kind` stores.
+    ploys = parse_ploys(TEAM)
+
+    assert [(p.name, p.kind) for p in ploys] == [
+        ("ASHEN ADVANCE", "strategy"),
+        ("EMBER GUARD", "firefight"),
+    ]
+
+
+def test_a_ploy_keeps_its_rule_text_and_drops_its_flavour():
+    ploy = parse_ploys(TEAM)[0]
+
+    assert ploy.description == 'Friendly operatives may move an extra 1" this turning point.'
+
+
+def test_equipment_is_not_read_as_a_ploy():
+    # Equipment shares the stratWrapper shape, told apart by the stratName variant.
+    assert "Cinder Charm" not in {p.name for p in parse_ploys(TEAM)}
+
+
+def test_hidden_tooltip_copies_are_not_read_as_extra_content():
+    # The site repeats some blocks inside `div.tooltip_templates` to fill hover
+    # popups. Novitiates' page copies two firefight ploys that way, so reading them
+    # produced each ploy twice -- which UNIQUE(kill_team_id, name) would reject at
+    # seed time, after the scrape had already "succeeded".
+    ploys = parse_ploys(TEAM)
+
+    assert [p.name for p in ploys].count("EMBER GUARD") == 1
+    assert len({p.name for p in ploys}) == len(ploys)
+
+
+def test_a_page_with_no_faction_rules_section_returns_nothing():
+    # Unlike a page with no datacards, this is legitimate: not every team has its
+    # own rules section, so an empty list is an answer rather than a failure.
+    assert parse_team_rules("<html><body><h2>Something else</h2></body></html>") == []

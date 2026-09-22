@@ -96,4 +96,56 @@
   </td></tr></table>
 </div></div></div></div>
 
+<!-- Team-level sections. Each is introduced by an h2.outline_header2, prints a
+     ShowFluff paragraph of flavour beside the rules, and nests its blocks. A faction
+     rule is headed by a BARE h3; an action printed inside one keeps its own classed
+     heading and belongs to the rule. Ploys and equipment share the stratWrapper
+     shape, told apart by the stratName variant. -->
+
+<h2 class="outline_header2">Faction Rules</h2>
+<div class="Columns2"><div class="BreakInsideAvoid">
+  <h3>Ember Tide</h3>
+  <p class="ShowFluff legend2">Flavour prose the tracker never shows.</p>
+  <div>At the end of the Set Up Operatives step, place one Ember marker.</div>
+  <div class="stratWrapper BreakInsideAvoid"><div class="BreakInsideAvoid Corner24"><div class="Corner24_in">
+    <h3 class="h_actions">STOKE<span>1AP</span></h3>
+    <div class="actionEffect">Move the Ember marker up to 3".</div>
+  </div></div></div>
+</div></div>
+<div class="BreakInsideAvoid">
+  <h3>Hollow Resolve</h3>
+  <p class="ShowFluff legend2">More flavour.</p>
+  <div>Friendly operatives ignore the first point of damage each turning point.</div>
+</div>
+
+<h2 class="outline_header2">Strategy Ploys</h2>
+<div class="Columns2"><div class="stratWrapper BreakInsideAvoid">
+  <div class="stratStrategicPloy_wrap"><div class="stratName stratStrategicPloy"><span>ASHEN ADVANCE</span></div></div>
+  <p class="ShowFluff stratLegend2">Flavour beside a ploy.</p>
+  <div>Friendly operatives may move an extra 1" this turning point.</div>
+</div></div>
+
+<h2 class="outline_header2">Firefight Ploys</h2>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratTacticalPloy_wrap"><div class="stratName stratTacticalPloy"><span>EMBER GUARD</span></div></div>
+  <p class="ShowFluff stratLegend2">Flavour beside a ploy.</p>
+  <div>Improve one friendly operative's Save by 1 for this activation.</div>
+</div>
+
+<h2 class="outline_header2">Faction Equipment</h2>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratEquipment_wrap"><div class="stratName stratEquipment"><span>Cinder Charm</span></div></div>
+  <div>The bearer may re-roll one defence die.</div>
+</div>
+
+<!-- Hidden tooltip templates: the site keeps a COPY of some content here to fill
+     hover popups. Novitiates' real page repeats two firefight ploys this way, which
+     read as duplicates and would break UNIQUE(kill_team_id, name) at seed time. -->
+<div class="tooltip_templates">
+  <span><div class="stratWrapper BreakInsideAvoid">
+    <div class="stratTacticalPloy_wrap"><div class="stratName stratTacticalPloy"><span>EMBER GUARD</span></div></div>
+    <div>Improve one friendly operative's Save by 1 for this activation.</div>
+  </div></span>
+</div>
+
 </div></body></html>

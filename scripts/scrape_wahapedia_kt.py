@@ -28,6 +28,7 @@ where 40k has Aeldari as a subfaction *under* Xenos.
 """
 
 import re
+from copy import copy
 from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, Tag
@@ -61,6 +62,22 @@ class NavEntry:
     @property
     def url(self) -> str:
         return TEAM_URL.format(slug=self.slug)
+
+
+def _soup(html: str) -> BeautifulSoup:
+    """A page ready to read: hidden tooltip templates removed.
+
+    The site keeps a copy of some content inside `div.tooltip_templates` to fill
+    hover popups. It is not visible content, and it is a COPY -- Novitiates' page
+    repeats two firefight ploys there, so reading it produced the same ploy twice
+    and would have violated `UNIQUE(kill_team_id, name)` at seed time. Dropping the
+    templates once, here, is narrower than de-duplicating results in every parser,
+    and it protects the ones where a duplicate would be harder to notice.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for template in soup.find_all("div", class_="tooltip_templates"):
+        template.extract()
+    return soup
 
 
 def _clean(text: str) -> str:
@@ -316,7 +333,7 @@ def parse_operatives(html: str) -> list[Operative]:
     Raises `ValueError` when a page yields no operatives: a team whose datacards
     failed to parse must not seed as an empty roster list.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _soup(html)
     operatives: list[Operative] = []
     for frame in soup.find_all("div", class_="dsOuterFrame"):
         heading = frame.find("h3", class_="pTable_h3")
@@ -343,3 +360,124 @@ def parse_operatives(html: str) -> list[Operative]:
     if not operatives:
         raise ValueError("no operatives on the page — has the datacard markup changed?")
     return operatives
+
+
+# ---------------------------------------------------------------------------
+# The team-level sections: Faction Rules, Strategy/Firefight Ploys, Equipment.
+# Each is introduced by an `h2.outline_header2`, and the page prints FLAVOUR text
+# (`p.ShowFluff`) beside the rules -- excluded everywhere, since it is prose about
+# the faction rather than anything the tracker shows.
+# ---------------------------------------------------------------------------
+
+# The site's class says "Tactical"; the section it sits under is printed "Firefight
+# Ploys", which is what the rules call them and what `KTPloy.kind` stores.
+_PLOY_KIND_BY_CLASS = {"stratStrategicPloy": "strategy", "stratTacticalPloy": "firefight"}
+
+
+@dataclass(frozen=True)
+class TeamRule:
+    """A team-wide rule (Raveners: Burrow, Tunnel, Predatory Instincts), as
+    `KillTeamRule` stores it."""
+
+    name: str
+    description: str
+
+
+@dataclass(frozen=True)
+class Ploy:
+    """A ploy, as `KTPloy` stores it, minus the CP cost.
+
+    The pages print no cost, so `cp_cost` is left to the column's default of 1 --
+    the same split as a weapon's `range`: the parser reports what the page said, and
+    a default that applies to everything lives in one place.
+    """
+
+    name: str
+    kind: str
+    description: str
+
+
+def _section(soup: BeautifulSoup, title: str) -> list[Tag]:
+    """Every element between an `h2.outline_header2` and the next one."""
+    heading = next((h for h in soup.find_all("h2", class_="outline_header2") if title in h.get_text()), None)
+    if heading is None:
+        return []
+    nodes = []
+    for el in heading.find_all_next():
+        if el.name == "h2" and "outline_header2" in (el.get("class") or []):
+            break
+        nodes.append(el)
+    return nodes
+
+
+def _rule_text(block: Tag, name_el: Tag) -> str:
+    """A block's rule text: its heading and any flavour paragraph removed.
+
+    Only the element that carries the NAME is dropped, matched by tag and text -- a
+    heading INSIDE the rule (Raveners print the Burrow action within the Burrow rule)
+    is part of the rule and stays. `ShowFluff` is the page's prose about the faction,
+    which the tracker never shows.
+
+    Works on a COPY: extracting from the live tree would corrupt the document for
+    every parser reading the same soup afterwards.
+    """
+    clone = copy(block)
+    for fluff in clone.find_all("p", class_="ShowFluff"):
+        fluff.extract()
+    wanted = _clean(name_el.get_text(" ", strip=True))
+    for candidate in clone.find_all(name_el.name):
+        if _clean(candidate.get_text(" ", strip=True)) == wanted:
+            candidate.extract()
+            break
+    return re.sub(r"\s+", " ", _clean(clone.get_text(" ", strip=True))).strip()
+
+
+def parse_team_rules(html: str) -> list[TeamRule]:
+    """The kill team's own rules, from the "Faction Rules" section.
+
+    Each is a `BreakInsideAvoid` block headed by a bare `h3`. An action printed
+    inside a rule (Raveners' BURROW) stays part of that rule's text: it is not an
+    operative's action, and `KillTeamRule` is name-and-text.
+    """
+    soup = _soup(html)
+    rules: list[TeamRule] = []
+    # Iterating the HEADINGS rather than the blocks is what keeps this free of the
+    # nesting problem that duplicated unique actions: a rule is named once, however
+    # many wrappers the page puts around it.
+    for node in _section(soup, "Faction Rules"):
+        if node.name != "h3" or node.get("class"):
+            continue  # an action's heading carries a class; a rule's does not
+        block = node.find_parent("div", class_="BreakInsideAvoid")
+        if block is None:
+            continue
+        rules.append(
+            TeamRule(
+                name=_clean(node.get_text(" ", strip=True)),
+                description=_rule_text(block, node),
+            )
+        )
+    return rules
+
+
+def parse_ploys(html: str) -> list[Ploy]:
+    """Every ploy on the page, strategy and firefight, in printed order."""
+    soup = _soup(html)
+    ploys: list[Ploy] = []
+    for name_el in soup.find_all("div", class_="stratName"):
+        kind = next(
+            (_PLOY_KIND_BY_CLASS[c] for c in (name_el.get("class") or []) if c in _PLOY_KIND_BY_CLASS),
+            None,
+        )
+        if kind is None:
+            continue  # equipment shares this shape and is read separately
+        block = name_el.find_parent("div", class_="stratWrapper")
+        if block is None:
+            continue
+        ploys.append(
+            Ploy(
+                name=_clean(name_el.get_text(" ", strip=True)),
+                kind=kind,
+                description=_rule_text(block, name_el),
+            )
+        )
+    return ploys
