@@ -102,7 +102,7 @@ against: Raveners.
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
 | `KTAbility` | name, text (includes unique actions); FK operative |
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
-| `KTEquipment` | name, text; FK kill team, or null for universal |
+| `KTEquipment` | name, text; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
 - Routes under `/api/v1/kill-team/...`; public read, admin write (same policy as the
@@ -120,6 +120,30 @@ NULL costs one constraint. Postgres treats two NULLs as distinct, so
 `UNIQUE(kill_team_id, name)` would accept a second "Command Re-roll"; a **partial
 unique index** on `name` where `kill_team_id IS NULL` is what refuses it. The same
 applies to universal equipment when that lands.
+
+### Equipment
+
+Same ownership shape as ploys: a team's own equipment carries its `kill_team_id`,
+the universal list is stored once with NULL, and a partial unique index keeps the
+universal names unique. Deleting a kill team takes its own equipment and leaves the
+universal list.
+
+Two rules recorded here because they belong to the **roster** (K4), not the catalog
+entry:
+
+- **An option cannot be selected more than once in a game.** That is
+  `UNIQUE(roster_id, equipment_id)` on the roster's equipment, not something the
+  catalog can express.
+- **The allowance is 4 pieces**, and *some kill teams get more*. Deliberately not a
+  column yet: when K4 enforces it, either a constant with a per-team override or a
+  `KillTeam.equipment_limit` column defaulting to 4, decided once the pages show how
+  the exceptions are worded.
+
+Equipment whose effect is a weapon keeps its profile in the description for now,
+since `KTWeapon` belongs to an operative. If K2's pages show profiles worth
+structuring, the upgrade path is a nullable `KTWeapon.equipment_id` alongside a
+nullable `operative_id`, with a check that exactly one owner is set — a migration,
+not a redesign.
 
 ### The datacard
 

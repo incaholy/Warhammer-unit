@@ -13,6 +13,7 @@ from app.core.db.models_killteam import (
     KillTeam,
     KillTeamRule,
     KTAbility,
+    KTEquipment,
     KTFaction,
     KTOperative,
     KTPloy,
@@ -294,3 +295,61 @@ def test_deleting_a_kill_team_takes_its_ploys_but_not_the_universal_one(
 
     remaining = session.exec(select(KTPloy)).all()
     assert [p.name for p in remaining] == ["Command Re-roll"]
+
+
+# ---- Equipment (slice 3) ----
+
+
+def test_equipment_belongs_to_its_kill_team(session, make_kill_team, make_kt_equipment):
+    raveners = make_kill_team(name="Raveners")
+    item = make_kt_equipment(kill_team=raveners, name="Chromatospore Camouflage")
+
+    assert item.kill_team.name == "Raveners"
+    assert [e.name for e in raveners.equipment] == ["Chromatospore Camouflage"]
+
+
+def test_universal_equipment_belongs_to_no_kill_team(session, make_kill_team, make_kt_equipment):
+    # The universal list is available to every team, so it is stored once rather
+    # than copied onto each -- the same shape as Command Re-roll.
+    shared = make_kt_equipment(kill_team=None, name="Frag grenade")
+    raveners = make_kill_team()
+
+    assert shared.kill_team_id is None
+    assert raveners.equipment == []
+    universal = session.exec(select(KTEquipment).where(KTEquipment.kill_team_id.is_(None))).all()
+    assert [e.name for e in universal] == ["Frag grenade"]
+
+
+def test_universal_equipment_cannot_be_added_twice(session, make_kt_equipment):
+    # UNIQUE(kill_team_id, name) does not catch this: two NULLs are distinct. The
+    # partial unique index is what refuses it.
+    make_kt_equipment(kill_team=None, name="Frag grenade")
+    with pytest.raises(IntegrityError):
+        make_kt_equipment(kill_team=None, name="Frag grenade")
+
+
+def test_a_team_may_name_equipment_after_a_universal_entry(session, make_kill_team, make_kt_equipment):
+    # The partial index covers only the universal rows, so this must be allowed.
+    make_kt_equipment(kill_team=None, name="Frag grenade")
+    make_kt_equipment(kill_team=make_kill_team(), name="Frag grenade")
+
+    assert len(session.exec(select(KTEquipment)).all()) == 2
+
+
+def test_equipment_name_is_unique_per_kill_team_only(session, make_kill_team, make_kt_equipment):
+    raveners = make_kill_team()
+    make_kt_equipment(kill_team=raveners, name="Acid Blood")
+    make_kt_equipment(kill_team=make_kill_team(), name="Acid Blood")
+    with pytest.raises(IntegrityError):
+        make_kt_equipment(kill_team=raveners, name="Acid Blood")
+
+
+def test_deleting_a_kill_team_keeps_the_universal_equipment(session, make_kill_team, make_kt_equipment):
+    raveners = make_kill_team()
+    make_kt_equipment(kill_team=raveners, name="Acid Blood")
+    make_kt_equipment(kill_team=None, name="Frag grenade")
+
+    session.delete(raveners)
+    session.commit()
+
+    assert [e.name for e in session.exec(select(KTEquipment)).all()] == ["Frag grenade"]

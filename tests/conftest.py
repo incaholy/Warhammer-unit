@@ -24,6 +24,7 @@ from app.core.db.models_killteam import (
     KillTeam,
     KillTeamRule,
     KTAbility,
+    KTEquipment,
     KTFaction,
     KTOperative,
     KTPloy,
@@ -413,5 +414,23 @@ def make_kt_ploy(session, make_kill_team):
         session.commit()
         session.refresh(ploy)
         return ploy
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_equipment(session, make_kill_team):
+    """Equipment. Pass `kill_team=None` explicitly for a universal entry."""
+
+    def _make(kill_team=..., **overrides):
+        if kill_team is ...:
+            kill_team = make_kill_team()
+        data = dict(name=f"Equipment {next(_counter)}", description="Grants something.")
+        data.update(overrides)
+        item = KTEquipment(kill_team_id=kill_team.id if kill_team else None, **data)
+        session.add(item)
+        session.commit()
+        session.refresh(item)
+        return item
 
     return _make

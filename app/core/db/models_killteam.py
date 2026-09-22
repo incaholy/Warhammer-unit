@@ -10,7 +10,8 @@ Built in slices (ROADMAP K1). This module currently holds:
     KTFaction → KillTeam → KillTeamRule
                         ├→ KTOperative → KTWeapon
                         │             └→ KTAbility
-                        └→ KTPloy (kill_team_id NULL = every team can use it)
+                        ├→ KTPloy     (kill_team_id NULL = every team can use it)
+                        └→ KTEquipment (same: NULL = the universal list)
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -74,6 +75,8 @@ class KillTeam(TimestampMixin, table=True):
     # A team's own ploys only. The universal ones (kill_team_id NULL) belong to no
     # team, so they are not in this list and are not deleted with one.
     ploys: list["KTPloy"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    # Its own equipment only; the universal list (kill_team_id NULL) is nobody's.
+    equipment: list["KTEquipment"] = Relationship(back_populates="kill_team", cascade_delete=True)
 
 
 class KillTeamRule(TimestampMixin, table=True):
@@ -270,3 +273,43 @@ class KTPloy(TimestampMixin, table=True):
     description: str
 
     kill_team: KillTeam | None = Relationship(back_populates="ploys")
+
+
+class KTEquipment(TimestampMixin, table=True):
+    """A piece of equipment a player may select for a game.
+
+    Same ownership shape as `KTPloy`: a team's own equipment carries its
+    `kill_team_id`, and the universal list -- available to every kill team -- is
+    stored once with NULL, guarded by a partial unique index because two NULLs are
+    distinct to the database.
+
+    No cost column: equipment is selected from a list up to an allowance rather than
+    bought. The allowance, and the rule that an option cannot be taken twice in one
+    game, belong to the roster (KILLTEAM.md → "Equipment"), not to the catalog entry.
+
+    Equipment whose effect is a weapon profile keeps that profile in `description`
+    for now; `KTWeapon` belongs to an operative. See KILLTEAM.md for the upgrade path
+    if the saved pages show profiles worth structuring.
+    """
+
+    __tablename__ = "kt_equipment"
+    __table_args__ = (
+        UniqueConstraint("kill_team_id", "name"),
+        Index(
+            "uq_kt_equipment_universal_name",
+            "name",
+            unique=True,
+            sqlite_where=text("kill_team_id IS NULL"),
+            postgresql_where=text("kill_team_id IS NULL"),
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # NULL = the universal list, which belongs to no team and is not deleted with one.
+    kill_team_id: UUID | None = Field(
+        default=None, foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True
+    )
+    name: str = Field(max_length=128)
+    description: str
+
+    kill_team: KillTeam | None = Relationship(back_populates="equipment")

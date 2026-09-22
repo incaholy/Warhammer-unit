@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 10cb98fdcc95
+Revision ID: 64b6d4339fbf
 Revises: 44441c6a9671
-Create Date: 2026-09-21 15:39:30.718661
+Create Date: 2026-09-21 16:56:49.557202
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '10cb98fdcc95'
+revision: str = '64b6d4339fbf'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -43,6 +43,19 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_kt_kill_teams_faction_id'), 'kt_kill_teams', ['faction_id'], unique=False)
     op.create_index(op.f('ix_kt_kill_teams_name'), 'kt_kill_teams', ['name'], unique=True)
+    op.create_table('kt_equipment',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('kill_team_id', sa.Uuid(), nullable=True),
+    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('kill_team_id', 'name')
+    )
+    op.create_index(op.f('ix_kt_equipment_kill_team_id'), 'kt_equipment', ['kill_team_id'], unique=False)
+    op.create_index('uq_kt_equipment_universal_name', 'kt_equipment', ['name'], unique=True, sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
     op.create_table('kt_kill_team_rules',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -145,6 +158,9 @@ def downgrade() -> None:
     op.drop_table('kt_operatives')
     op.drop_index(op.f('ix_kt_kill_team_rules_kill_team_id'), table_name='kt_kill_team_rules')
     op.drop_table('kt_kill_team_rules')
+    op.drop_index('uq_kt_equipment_universal_name', table_name='kt_equipment', sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
+    op.drop_index(op.f('ix_kt_equipment_kill_team_id'), table_name='kt_equipment')
+    op.drop_table('kt_equipment')
     op.drop_index(op.f('ix_kt_kill_teams_name'), table_name='kt_kill_teams')
     op.drop_index(op.f('ix_kt_kill_teams_faction_id'), table_name='kt_kill_teams')
     op.drop_table('kt_kill_teams')
