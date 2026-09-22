@@ -185,6 +185,44 @@ def test_a_weapon_with_no_rules_reads_as_an_empty_list():
     assert glaive.rules == []
 
 
+def test_abilities_and_unique_actions_come_back_together():
+    # One list for both: they read the same way on a datacard, and the tracker shows
+    # the text rather than acting on it.
+    warden = _by_name()["Hollow Sentinel Warden"]
+
+    assert [a.name for a in warden.abilities] == ["Warden's Vigil", "EMBER STRIKE"]
+
+
+def test_an_ability_keeps_its_rule_text_without_repeating_its_name():
+    # The block prints "NAME: text"; only the text is the description.
+    vigil = _by_name()["Hollow Sentinel Warden"].abilities[0]
+
+    assert vigil.name == "Warden's Vigil"
+    assert vigil.description == "Whenever this operative is activated, it may do the thing."
+    assert not vigil.description.startswith("Warden's Vigil")
+
+
+def test_a_unique_action_keeps_its_ap_cost_in_the_text():
+    # No AP column: the cost stays where a player reads it, at the front.
+    strike = _by_name()["Hollow Sentinel Warden"].abilities[1]
+
+    assert strike.name == "EMBER STRIKE"  # not "EMBER STRIKE1AP"
+    assert strike.description.startswith("1AP.")
+    assert "inflict D3 damage" in strike.description
+
+
+def test_a_unique_action_is_read_once_despite_nesting():
+    # `BreakInsideAvoid` nests around an action, so selecting on it alone returned
+    # every action twice. Actions are matched by their `stratWrapper` instead.
+    names = [a.name for a in _by_name()["Hollow Sentinel Warden"].abilities]
+
+    assert names.count("EMBER STRIKE") == 1
+
+
+def test_an_operative_with_no_abilities_gets_an_empty_list():
+    assert _by_name()["Hollow Sentinel"].abilities == []
+
+
 def test_a_page_with_no_datacards_fails_loudly():
     # Seeding a kill team with an empty roster list would look like a working run.
     with pytest.raises(ValueError, match="no operatives"):

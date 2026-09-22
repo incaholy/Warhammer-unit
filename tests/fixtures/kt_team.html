@@ -51,6 +51,22 @@
     </tbody>
   </table>
 
+  <!-- Abilities and unique actions share one block. An ability is named by a
+       `redfont` span; an action is a `stratWrapper` with its AP in the heading. The
+       action is wrapped in an OUTER BreakInsideAvoid as the real page does, so a
+       parser selecting on that class alone returns it twice. -->
+  <div class="wtOuterFrame Columns2">
+    <div class="BreakInsideAvoid">
+      <span class="redfont">Warden's Vigil</span>: Whenever this operative is activated, it may do the thing.
+    </div>
+    <div class="BreakInsideAvoid">
+      <div class="stratWrapper BreakInsideAvoid">
+        <h3 class="h_actions_ds">EMBER STRIKE<span>1AP</span></h3>
+        <div><div class="actionEffect">Select one enemy operative within 2" and inflict D3 damage.</div></div>
+      </div>
+    </div>
+  </div>
+
   <table class="dsKeywords"><tr><td>
     <span class="tt kwbu">SENTINEL</span>, <span class="tt kwbu">HOLLOW</span> <span class="tt kwbu">VIGIL</span>,
     <span class="tt kwbu">WARDEN</span> <span class="dsModelBase2">&#8960;40mm</span>

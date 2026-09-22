@@ -164,6 +164,20 @@ class Weapon:
 
 
 @dataclass(frozen=True)
+class Ability:
+    """An ability or a unique action, in the shape `KTAbility` stores.
+
+    One type for both, as the table is: they read the same way on a datacard, and
+    nothing in the tracker needs to tell them apart -- the players do. A unique
+    action's AP cost stays at the front of its text ("1AP. Select one enemy ...")
+    rather than becoming a column; see KILLTEAM.md if that ever needs structuring.
+    """
+
+    name: str
+    description: str
+
+
+@dataclass(frozen=True)
 class Operative:
     """One operative's datacard."""
 
@@ -174,6 +188,7 @@ class Operative:
     wounds: int
     keywords: list[str] = field(default_factory=list)
     weapons: list[Weapon] = field(default_factory=list)
+    abilities: list[Ability] = field(default_factory=list)
 
 
 def _stat_line(frame: Tag) -> dict[str, int | None]:
@@ -251,6 +266,50 @@ def _keywords(frame: Tag) -> list[str]:
     return keywords
 
 
+def _abilities(frame: Tag) -> list[Ability]:
+    """An operative's abilities and unique actions, in the order printed.
+
+    Two shapes share one block on the page, and each needs its own reading:
+
+      ability       <div class="BreakInsideAvoid"><span class="redfont">NAME</span>: text
+      unique action <div class="stratWrapper"><h3 class="h_actions_ds">NAME<span>1AP</span></h3>
+                      <div class="actionEffect">text</div>
+
+    Actions are matched by their wrapper rather than by `BreakInsideAvoid`, which
+    nests -- selecting on it returned every action twice.
+    """
+    abilities: list[Ability] = []
+
+    for block in frame.find_all("div", class_="BreakInsideAvoid"):
+        # An ability is the only thing here named by a `redfont` span: an action
+        # block carries none (checked across two teams' pages, 44 action blocks), so
+        # this single test separates the two shapes.
+        label = block.find("span", class_="redfont")
+        if label is None:
+            continue
+        name = _clean(label.get_text(" ", strip=True)).lstrip("*").strip()
+        text = _clean(block.get_text(" ", strip=True))
+        # The block repeats the name, then a colon, then the rule.
+        _, _, description = text.partition(":")
+        abilities.append(Ability(name=name, description=re.sub(r"\s+", " ", description).strip()))
+
+    for block in frame.find_all("div", class_="stratWrapper"):
+        heading = block.find("h3", class_="h_actions_ds")
+        if heading is None:
+            continue
+        cost = heading.find("span")
+        cost_text = _clean(cost.get_text(strip=True)) if cost else ""
+        if cost:
+            cost.extract()  # so the name is not "TOXIC LUNGE1AP"
+        name = _clean(heading.get_text(" ", strip=True))
+        effect = block.find("div", class_="actionEffect")
+        body = _clean(effect.get_text(" ", strip=True)) if effect else ""
+        description = f"{cost_text}. {body}".strip(". ") if cost_text else body
+        abilities.append(Ability(name=name, description=re.sub(r"\s+", " ", description).strip()))
+
+    return abilities
+
+
 def parse_operatives(html: str) -> list[Operative]:
     """Every operative on a kill team's page, with its stats, keywords and weapons.
 
@@ -278,6 +337,7 @@ def parse_operatives(html: str) -> list[Operative]:
                 wounds=stats.get("WOUNDS") or 0,
                 keywords=_keywords(frame),
                 weapons=weapons,
+                abilities=_abilities(frame),
             )
         )
     if not operatives:
