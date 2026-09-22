@@ -1,0 +1,83 @@
+<!--
+  Synthetic fixture reproducing Wahapedia's kill team datacard DOM for the parser
+  test — NOT scraped content (invented operative, weapon and keyword names). The
+  STRUCTURE is real: one `div.dsOuterFrame` per operative, the name in
+  `h3.pTable_h3`, each stat in a labelled `td.pCell` holding a `div.dsStat`, weapons
+  in a `table.wTable` where the name row's first cell carries `wsDataRanged` or
+  `wsDataMelee`, and the keyword strip in `table.dsKeywords` with the base size
+  trailing the last keyword.
+
+  Deliberately included: a multi-word keyword, a ranged weapon with a printed
+  `Range x` rule, a ranged weapon WITHOUT one, a melee weapon with no rules at all,
+  and a second operative so a parser cannot pass by reading only the first frame.
+-->
+<html><body><div id="wahMainContent">
+
+<div class="pagebreak"><div class="dsOuterFrame"><div class="dsName_Profile"><div>
+  <table><tr class="pHeaderRow">
+    <td class="pDisplayHeaderCell"><div class="dsUnitHeader">
+      <h3 class="pTable_h3"><div>Hollow Sentinel Warden</div></h3>
+      <p class="ShowFluff legend2">Flavour text the parser ignores.</p>
+    </div></td>
+    <td class="pCell">APL<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsAPL.png"/>3</div></td>
+    <td class="pCell">MOVE<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsMove.png"/>7"</div></td>
+    <td class="pCell">SAVE<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsSave.png"/>5<span class="dsPlus">+</span></div></td>
+    <td class="pCell pCellRightmost">WOUNDS<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsWounds.png"/>19</div></td>
+  </tr></table>
+
+  <table class="wTable">
+    <tr class="wTable1"><td></td><td class="wTable_WEAPON"><div class="wTable1">NAME</div></td>
+      <td><div class="ct wTable1">ATK</div></td><td><div class="ct wTable1">HIT</div></td>
+      <td><div class="ct wTable1">DMG</div></td><td><div class="wTable1">WR</div></td></tr>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataRanged"></td><td class="pad2626" colspan="6"><span>Ash lash</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataRanged"></td>
+        <td class="pad2626"><span>Ash lash</span></td><td class="ct pad2626">4</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">3/4</td>
+        <td class="wTable1_short pad2626"><span class="tt kwbu">Range</span> <span class="tt kwbu">3"</span>, <span class="tt kwbu">Silent</span></td></tr>
+    </tbody>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataRanged"></td><td class="pad2626" colspan="6"><span>Cinder bolt</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataRanged"></td>
+        <td class="pad2626"><span>Cinder bolt</span></td><td class="ct pad2626">4</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">3/5</td>
+        <td class="wTable1_short pad2626"><span class="tt kwbu">Piercing</span> <span class="tt kwbu">1</span></td></tr>
+    </tbody>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataMelee"></td><td class="pad2626" colspan="6"><span>Rusted glaive</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataMelee"></td>
+        <td class="pad2626"><span>Rusted glaive</span></td><td class="ct pad2626">5</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">4/5</td><td class="wTable1_short pad2626"></td></tr>
+    </tbody>
+  </table>
+
+  <table class="dsKeywords"><tr><td>
+    <span class="tt kwbu">SENTINEL</span>, <span class="tt kwbu">HOLLOW</span> <span class="tt kwbu">VIGIL</span>,
+    <span class="tt kwbu">WARDEN</span> <span class="dsModelBase2">&#8960;40mm</span>
+  </td></tr></table>
+</div></div></div></div>
+
+<div class="pagebreak"><div class="dsOuterFrame"><div class="dsName_Profile"><div>
+  <table><tr class="pHeaderRow">
+    <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Sentinel</div></h3></div></td>
+    <!-- Deliberately out of the usual order: a parser reading stats by COLUMN
+         would return these swapped, and every value here is distinct so it shows. -->
+    <td class="pCell">WOUNDS<div class="dsStat">12</div></td>
+    <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+    <td class="pCell">MOVE<div class="dsStat">6"</div></td>
+    <td class="pCell pCellRightmost">APL<div class="dsStat">2</div></td>
+  </tr></table>
+  <table class="wTable">
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataMelee"></td><td class="pad2626" colspan="6"><span>Bone shard</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataMelee"></td>
+        <td class="pad2626"><span>Bone shard</span></td><td class="ct pad2626">4</td><td class="ct pad2626">4+</td>
+        <td class="ct pad2626">2/3</td><td class="wTable1_short pad2626"></td></tr>
+    </tbody>
+  </table>
+  <table class="dsKeywords"><tr><td>
+    <span class="tt kwbu">SENTINEL</span>, <span class="tt kwbu">HOLLOW</span> <span class="tt kwbu">VIGIL</span> <span class="dsModelBase2">&#8960;32mm</span>
+  </td></tr></table>
+</div></div></div></div>
+
+</div></body></html>
