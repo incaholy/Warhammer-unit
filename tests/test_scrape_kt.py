@@ -11,14 +11,17 @@ import pytest
 
 from scripts.scrape_wahapedia_kt import (
     NavEntry,
+    parse_equipment,
     parse_nav,
     parse_operatives,
     parse_ploys,
     parse_team_rules,
+    universal_equipment_url,
 )
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "kt_nav.html").read_text()
 TEAM = (Path(__file__).parent / "fixtures" / "kt_team.html").read_text()
+UNIVERSAL_EQUIPMENT = (Path(__file__).parent / "fixtures" / "kt_universal_equipment.html").read_text()
 
 
 def test_every_kill_team_comes_back_with_its_faction_and_slug():
@@ -302,3 +305,42 @@ def test_a_page_with_no_faction_rules_section_returns_nothing():
     # Unlike a page with no datacards, this is legitimate: not every team has its
     # own rules section, so an empty list is an answer rather than a failure.
     assert parse_team_rules("<html><body><h2>Something else</h2></body></html>") == []
+
+
+# ---- Equipment ----
+
+
+def test_equipment_is_read_from_the_same_blocks_as_ploys():
+    # Ploys and equipment share the stratWrapper shape; the stratName variant is
+    # what tells them apart, so this must not pick up a ploy.
+    items = parse_equipment(TEAM)
+
+    assert [i.name for i in items] == ["Cinder Charm"]
+    assert items[0].description == "The bearer may re-roll one defence die."
+
+
+def test_an_equipment_name_is_stored_as_printed():
+    # The universal page prefixes quantities ("1X AMMO CACHE", "2X LADDERS") where
+    # faction equipment has none. Stored verbatim: the quantity is part of what the
+    # page calls the entry, and a tidier invented name diverges from the source.
+    items = {i.name: i for i in parse_equipment(UNIVERSAL_EQUIPMENT)}
+
+    assert "1X AMMO CACHE" in items
+    assert "AMMO CACHE" not in items
+
+
+def test_a_ploy_is_not_read_as_equipment():
+    assert "ASHEN ADVANCE" not in {i.name for i in parse_equipment(TEAM)}
+
+
+def test_the_universal_equipment_page_is_found_from_the_nav():
+    # One URL is spelled out in this module (the nav); everything else is discovered,
+    # including this page. The trailing slash avoids the site's 301.
+    assert (
+        universal_equipment_url(FIXTURE) == "https://wahapedia.ru/kill-team3/the-rules/universal-equipment/"
+    )
+
+
+def test_a_nav_without_the_universal_equipment_link_fails_loudly():
+    with pytest.raises(ValueError, match="universal equipment"):
+        universal_equipment_url("<html><body><a href='/kill-team3/kill-teams/x'>X</a></body></html>")

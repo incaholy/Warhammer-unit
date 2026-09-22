@@ -384,6 +384,19 @@ class TeamRule:
 
 
 @dataclass(frozen=True)
+class Equipment:
+    """A piece of equipment, as `KTEquipment` stores it.
+
+    The same type for a team's own equipment and for the universal list; which it is
+    depends on the page it came from, and the seed decides the `kill_team_id` (NULL
+    for universal).
+    """
+
+    name: str
+    description: str
+
+
+@dataclass(frozen=True)
 class Ploy:
     """A ploy, as `KTPloy` stores it, minus the CP cost.
 
@@ -481,3 +494,47 @@ def parse_ploys(html: str) -> list[Ploy]:
             )
         )
     return ploys
+
+
+def universal_equipment_url(nav_html: str) -> str:
+    """The universal equipment page, discovered from the nav rather than hardcoded.
+
+    It is listed there like the kill teams are, so the one URL this module spells out
+    stays `NAV_URL`.
+    """
+    soup = BeautifulSoup(nav_html, "html.parser")
+    link = soup.find("a", href=re.compile(r"universal-equipment"))
+    if link is None:
+        raise ValueError(f"no universal equipment link in the nav — has {NAV_URL} changed?")
+    href = link["href"]
+    if not href.endswith("/"):
+        href += "/"  # the site 301s the slash-less form; `fetch()` caches by URL
+    return f"https://wahapedia.ru{href}"
+
+
+def parse_equipment(html: str) -> list[Equipment]:
+    """Every piece of equipment on a page, in printed order.
+
+    Serves both sources: a kill team's "Faction Equipment" section and the universal
+    equipment page, which print the same `stratEquipment` blocks. Whether a row ends
+    up team-owned or universal is the seed's call, from which page it read.
+
+    Names are stored VERBATIM, including the universal page's quantity prefixes
+    ("1X AMMO CACHE", "2X LADDERS"). Stripping them would read more consistently
+    beside faction equipment, but the quantity is part of what the page calls the
+    entry, and inventing a tidier name is the kind of quiet divergence from the
+    source this pipeline exists to avoid.
+    """
+    soup = _soup(html)
+    equipment: list[Equipment] = []
+    for name_el in soup.find_all("div", class_="stratEquipment"):
+        block = name_el.find_parent("div", class_="stratWrapper")
+        if block is None:
+            continue
+        equipment.append(
+            Equipment(
+                name=_clean(name_el.get_text(" ", strip=True)),
+                description=_rule_text(block, name_el),
+            )
+        )
+    return equipment
