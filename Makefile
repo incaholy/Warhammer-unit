@@ -36,7 +36,7 @@ APP_PORT ?= 8000
 # ---- Docker ----
 COMPOSE ?= docker compose
 
-.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test lint lint-detailed lint-imports format check openapi create-admin seed scrape docker-build docker-up docker-down docker-test
+.PHONY: help setup install install-dev venv check-db-url db-setup migrate migrate-fresh run test lint lint-detailed lint-imports format check openapi create-admin seed scrape seed-kt scrape-kt docker-build docker-up docker-down docker-test
 
 help: ## Show this help.
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -122,6 +122,12 @@ seed: check-db-url ## Load the datasheet catalog from scripts/data/datasheets.js
 
 scrape: ## Scrape Wahapedia datasheets into scripts/data/datasheets.json (then run make seed).
 	@$(PYTHON) -m scripts.scrape_wahapedia
+
+seed-kt: check-db-url ## Load the Kill Team catalog from scripts/data/killteam.json (idempotent).
+	@$(PYTHON) -m scripts.seed_killteam
+
+scrape-kt: ## Scrape Wahapedia Kill Team into scripts/data/killteam.json (gitignored; then make seed-kt).
+	@$(PYTHON) -m scripts.scrape_wahapedia_kt
 
 docker-build: ## Build the API Docker image.
 	@$(COMPOSE) build

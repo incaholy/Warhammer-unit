@@ -1,0 +1,45 @@
+<!--
+  Synthetic fixture reproducing Wahapedia's kill-team3/nav.html DOM structure for the
+  parser test — NOT scraped content (invented faction and kill team names). What is
+  real here is the STRUCTURE: the dropdown is selected by the `NavBtn_Factions`
+  button, a `FactionHeader` is the grand alliance we deliberately DROP, a
+  `factionGroup_KT` is the faction we keep, and the links under it are its kill teams.
+
+  Deliberately included: a second dropdown that must be ignored, a faction whose
+  label carries a typographic apostrophe, and a kill team link outside the Kill
+  Teams dropdown.
+-->
+<html><body>
+  <div class="NavDropdown">
+  <div class="NavBtn NavBtn_Rules">The Rules</div>
+  <div class="NavDropdown-content">
+    <div class="NavColumns3"><div class="BreakInsideAvoid">
+      <div class="FactionHeader">Expansions</div>
+      <a href="/kill-team3/the-rules/some-expansion">Some Expansion</a>
+      <!-- a kill team link outside the Kill Teams dropdown: must not be collected -->
+      <a href="/kill-team3/kill-teams/not-in-the-dropdown">Not In The Dropdown</a>
+    </div></div>
+  </div>
+  </div>
+
+  <div class="NavDropdown">
+  <div class="NavBtn NavBtn_Factions">Kill Teams</div>
+  <div class="NavDropdown-content">
+    <div class="NavColumns3">
+      <div class="BreakInsideAvoid">
+        <div class="FactionHeader">Dominion</div>
+        <div class="factionGroup_KT">&nbsp;Vigil Host</div>
+        <a   href="/kill-team3/kill-teams/hollow-sentinels">Hollow Sentinels</a>
+        <a   href="/kill-team3/kill-teams/ashen-choir">Ashen Choir</a>
+        <div class="factionGroup_KT">&nbsp;Iron Covenant</div>
+        <a   href="/kill-team3/kill-teams/rust-wardens">Rust Wardens</a>
+      </div>
+      <div class="BreakInsideAvoid">
+        <div class="FactionHeader">Outlanders</div>
+        <div class="factionGroup_KT">&nbsp;Kaeth’ar Compact</div>
+        <a   href="/kill-team3/kill-teams/tidewalkers">Tidewalkers</a>
+      </div>
+    </div>
+  </div>
+  </div>
+</body></html>

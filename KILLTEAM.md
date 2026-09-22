@@ -75,17 +75,34 @@ divided by path:
 
 ## Data pipeline
 
-- `scripts/scrape_wahapedia_kt.py`: reuses `fetch()`; **pure** parse functions for
-  operatives, weapons, abilities, ploys, equipment, each tested against saved HTML in
-  `tests/fixtures/`.
-- Output goes to a **gitignored** path; the tracked file stays an empty template.
+- `scripts/scrape_wahapedia_kt.py`: reuses `fetch()`; **pure** parse functions, each
+  tested against a **synthetic** fixture in `tests/fixtures/` — one reproducing the
+  DOM structure with invented names, as `wahapedia_datasheets.html` does, so no
+  scraped content is committed to a public repo.
+- Output goes to `scripts/data/killteam.json`, which is **gitignored**. The 40k
+  equivalent ended up tracked; this one is not.
 - `scripts/seed_killteam.py`: idempotent, natural-key upserts, `SeedError` / `_ref`
   pattern from `scripts/seed_datasheets.py`.
 - `make scrape-kt`, `make seed-kt`.
 
-**Input needed:** saved HTML for one or two kill teams and the universal equipment
-page. The catalog tables are built before this (models first), and the pipeline fills
-them.
+**Which teams: discovered, not configured.** The site's nav is one small standalone
+file (`nav.html`, assembled by JS, which is why a page's own HTML does not contain
+it), and its "Kill Teams" dropdown carries every team with its faction and slug — 48
+teams across 22 factions. `parse_nav` reads it, so there is no hand-maintained list
+to drift, and a team added later appears on the next run. Two grouping levels are in
+that markup and only one is ours: `FactionHeader` (Imperium / Chaos / Xenos /
+**Aeldari**) is dropped, `factionGroup_KT` is the `KTFaction`. That asymmetry is also
+the proof of decision #12 — 40k files Aeldari as a subfaction *under* Xenos, where
+Kill Team makes it an alliance above Craftworlds, Corsairs and Harlequins.
+
+Labels are normalised on the way through (curly quotes to straight, `&nbsp;`
+stripped) as a rule rather than a per-faction exception list: the nav writes
+"T’au Empire" where we store "T'au Empire", and two spellings would seed two rows.
+
+**Still needed from a browser:** the per-team pages carry the stats, and fetching
+them is what 403s intermittently, so save Raveners, one other kill team, and the
+universal equipment page into `tests/fixtures/` when it is time to write those
+parsers. `nav.html` needs no save — it fetches reliably.
 
 ## Catalog
 

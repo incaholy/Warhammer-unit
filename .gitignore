@@ -222,5 +222,9 @@ __marimo__/
 .DS_Store
 # scraper cache (fetched Wahapedia HTML — not committed)
 scripts/data/cache/
+# The Kill Team scrape output. Deliberately NOT tracked: it is a copy of someone
+# else's content, and the 40k equivalent (scripts/data/datasheets.json) ended up
+# committed. `make scrape-kt` writes it, `make seed-kt` reads it.
+scripts/data/killteam.json
 
 
