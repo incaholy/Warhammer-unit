@@ -360,11 +360,17 @@ class KTSelectionOption(TimestampMixin, table=True):
     `max_selections` caps repeats, NULL meaning no limit beyond the budget: Raveners
     allow each specialist once and Warriors freely.
 
-    `loadout_text` holds the weapon options the page prints for this entry ("with one
-    option from each of the following: Hand flamer or heavy bolt pistol; ..."). A
-    datacard lists every profile an operative can have and never says which are
-    alternatives, so this printed text is the only record of that until a roster has
-    to enforce it -- at which point it becomes structured groups.
+    `loadout_options` holds the weapon loadouts the page prints for this entry, and is
+    **display only -- nothing validates it**. Wyrmblade offers "GUNNER with flamer and
+    gun butt", "GUNNER with grenade launcher and gun butt" and "GUNNER with webber and
+    gun butt": one operative with a weapon choice, so it is ONE option (12 of the 48
+    teams repeat an operative like that) with its printed variants kept here. A list,
+    not a string, because there is usually more than one.
+
+    Which weapons a roster actually took is recorded when the roster is built (K4) and
+    snapshotted into a game (K5), from the operative's own profiles. The catalog says
+    what an operative CAN use; it deliberately does not encode which combinations are
+    legal -- that is a rule, and decision #1 leaves rules to the players.
     """
 
     __tablename__ = "kt_selection_options"
@@ -384,7 +390,9 @@ class KTSelectionOption(TimestampMixin, table=True):
     cost: int = Field(default=1)
     models: int = Field(default=1)
     max_selections: int | None = Field(default=None)
-    loadout_text: str | None = Field(default=None)
+    # Display only. See the class docstring: not validated, and not the record of what
+    # a roster took.
+    loadout_options: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
 
     selection_list: KTSelectionList = Relationship(back_populates="options")
     operative: KTOperative = Relationship(back_populates="offered_by")

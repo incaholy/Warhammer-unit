@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 93949938b92e
+Revision ID: 304d1ea885e1
 Revises: 44441c6a9671
-Create Date: 2026-09-22 18:39:21.912760
+Create Date: 2026-09-23 16:16:38.694991
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '93949938b92e'
+revision: str = '304d1ea885e1'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -139,7 +139,7 @@ def upgrade() -> None:
     sa.Column('cost', sa.Integer(), nullable=False),
     sa.Column('models', sa.Integer(), nullable=False),
     sa.Column('max_selections', sa.Integer(), nullable=True),
-    sa.Column('loadout_text', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('loadout_options', sa.JSON(), nullable=False),
     sa.CheckConstraint('cost >= 1', name='ck_kt_selection_option_cost'),
     sa.CheckConstraint('max_selections IS NULL OR max_selections >= 1', name='ck_kt_selection_option_max_selections'),
     sa.CheckConstraint('models >= 1', name='ck_kt_selection_option_models'),

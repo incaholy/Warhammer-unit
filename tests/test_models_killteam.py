@@ -469,10 +469,15 @@ def test_the_printed_sentences_are_kept_beside_the_structure(
     listing = make_kt_selection_list(
         restriction_text="Other than WARRIOR operatives, your kill team can only include each operative on this list once."
     )
-    option = make_kt_selection_option(selection_list=listing, loadout_text="Hand flamer or heavy bolt pistol")
+    option = make_kt_selection_option(
+        selection_list=listing,
+        loadout_options=["with flamer and gun butt", "with webber and gun butt"],
+    )
 
     assert "WARRIOR" in listing.restriction_text
-    assert option.loadout_text == "Hand flamer or heavy bolt pistol"
+    # Display only: one operative with a weapon choice is ONE option (Wyrmblade prints
+    # three "GUNNER with ..." lines), and nothing validates these strings.
+    assert option.loadout_options == ["with flamer and gun butt", "with webber and gun butt"]
 
 
 def test_a_keyword_cap_is_a_rule_about_a_SET_of_operatives(

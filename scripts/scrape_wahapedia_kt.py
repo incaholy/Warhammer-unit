@@ -423,6 +423,111 @@ def _section(soup: BeautifulSoup, title: str) -> list[Tag]:
     return nodes
 
 
+def _own_element(el: Tag) -> Tag:
+    """A copy of `el` with its nested lists removed.
+
+    Composition lists nest three deep -- a selection list, its operatives, and each
+    operative's loadouts -- so "what does THIS line say?" has to exclude the children.
+    Read whole, Wrecka Krew's `<li>KRUSHA GUNNER<ul><li>'Eavy rokkit launcha; fists`
+    yields the name with its weapons glued on.
+    """
+    clone = copy(el)
+    for nested in clone.find_all("ul"):
+        nested.extract()
+    return clone
+
+
+def _own_text(el: Tag) -> str:
+    """`el`'s own text, its nested lists excluded."""
+    return re.sub(r"\s+", " ", _clean(_own_element(el).get_text(" ", strip=True))).strip()
+
+
+def _words(name: str) -> list[str]:
+    """A name as upper-case words, punctuation treated as a separator.
+
+    "Proctor-Exactant" and "PROCTOR-EXACTANT" both become ["PROCTOR", "EXACTANT"], so
+    the two halves of a page can be compared without caring how either is punctuated.
+
+    Trailing footnote markers are dropped: the composition prints "SHARPSHOOTER ¹" and
+    "WARRIOR SICARIAN *" where the marker points at a note below the list, and keeping
+    it as a word stopped those entries matching their datacards. Only a TRAILING
+    all-digit or asterisk word goes, so "XV26 Stealth Battlesuit" keeps its model
+    number.
+    """
+    words = re.sub(r"[^A-Z0-9 ]", " ", name.upper()).split()
+    while words and (words[-1].isdigit() or set(words[-1]) <= {"*"}):
+        words.pop()
+    return words
+
+
+class OperativeNotResolved(ValueError):
+    """A composition entry could not be tied to exactly one datacard."""
+
+
+def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) -> str | None:
+    """The datacard name a composition entry refers to.
+
+    A page names its operatives twice, differently: the composition says `FELLTALON`
+    or `EXACTION SQUAD PROCTOR-EXACTANT`, while the datacards say `Ravener Felltalon`
+    and `Arbites Proctor-Exactant`. `KTSelectionOption.operative_id` needs the second,
+    so the two have to be matched -- and the scraper is the only place holding both.
+
+    Rules run strongest first, and each needs a UNIQUE winner or falls through, so a
+    loose rule can never steal a match from a strict one. Counted over all 48 teams
+    (444 entries) the ordering resolves every one, with no ambiguity: exact, suffix,
+    suffix+shortest, prefix, same words, card-contains-entry, entry-contains-card, and
+    finally the last word.
+
+    The tie-break is "fewest extra words": `GUNNER` matches `Spectre Gunner`,
+    `Spectre Heavy Gunner` and `Spectre Stub-Gunner`, and the first is meant -- the
+    others are their own entries and match themselves exactly.
+
+    `strict=False` returns None instead of raising, which is how a caller asks "is
+    this line an operative at all?". That question cannot be answered from the markup:
+    the site styles a keyword only on its FIRST appearance on a page, so
+    `GUNNER with webber and gun butt` carries no styled span even though it names an
+    operative, while `Autogun; gun butt` looks the same and does not. Resolving the
+    text is the reliable test -- no datacard is called "Autogun".
+    """
+    entry_words = _words(entry)
+    if not entry_words:
+        if strict:
+            raise OperativeNotResolved("an empty composition entry cannot name an operative")
+        return None
+    joined = " ".join(entry_words)
+    as_set = set(entry_words)
+
+    rules = (
+        lambda card: _words(card) == entry_words,
+        lambda card: " ".join(_words(card)).endswith(" " + joined),
+        lambda card: " ".join(_words(card)).startswith(joined + " "),
+        lambda card: set(_words(card)) == as_set,
+        lambda card: set(_words(card)) >= as_set,
+        # The other direction: the ENTRY carries a prefix the card does not.
+        # "INQUISITORIAL AGENT INTERROGATOR" against the card "Interrogator Agent".
+        lambda card: bool(_words(card)) and as_set >= set(_words(card)),
+        lambda card: bool(_words(card)) and _words(card)[-1] == entry_words[-1],
+    )
+    for matches in rules:
+        hits = [card for card in datacards if matches(card)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            shortest = min(hits, key=lambda card: len(_words(card)))
+            if sum(1 for card in hits if len(_words(card)) == len(_words(shortest))) == 1:
+                return shortest
+            if strict:
+                raise OperativeNotResolved(
+                    f"composition entry {entry!r} matches several datacards equally: {hits}"
+                )
+            return None
+    if strict:
+        raise OperativeNotResolved(
+            f"composition entry {entry!r} matches no datacard (candidates: {datacards})"
+        )
+    return None
+
+
 def _rule_text(block: Tag, name_el: Tag) -> str:
     """A block's rule text: its heading and any flavour paragraph removed.
 

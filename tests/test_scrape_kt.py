@@ -11,11 +11,13 @@ import pytest
 
 from scripts.scrape_wahapedia_kt import (
     NavEntry,
+    OperativeNotResolved,
     parse_equipment,
     parse_nav,
     parse_operatives,
     parse_ploys,
     parse_team_rules,
+    resolve_operative,
     universal_equipment_url,
 )
 
@@ -344,3 +346,83 @@ def test_the_universal_equipment_page_is_found_from_the_nav():
 def test_a_nav_without_the_universal_equipment_link_fails_loudly():
     with pytest.raises(ValueError, match="universal equipment"):
         universal_equipment_url("<html><body><a href='/kill-team3/kill-teams/x'>X</a></body></html>")
+
+
+# ---- Matching a composition entry to a datacard ----
+#
+# A page names each operative twice: the composition says FELLTALON, the datacard says
+# "Ravener Felltalon". `KTSelectionOption` needs the datacard, and the scraper is the
+# only place holding both halves.
+
+RAVENERS = ["Ravener Prime", "Ravener Felltalon", "Ravener Warrior", "Ravener Wrecker"]
+SPECTRES = ["Spectre Gunner", "Spectre Heavy Gunner", "Spectre Stub-Gunner", "Spectre Guide"]
+
+
+def test_an_entry_naming_the_datacard_outright_resolves():
+    assert resolve_operative("RAVENER WARRIOR", RAVENERS) == "Ravener Warrior"
+
+
+def test_an_entry_that_drops_the_team_prefix_resolves():
+    # The commonest shape by far: 292 of the 444 real entries.
+    assert resolve_operative("FELLTALON", RAVENERS) == "Ravener Felltalon"
+
+
+def test_the_shortest_match_wins_when_several_cards_end_with_the_entry():
+    # GUNNER matches three Spectre cards. The plain one is meant -- the others are
+    # their own entries and match themselves exactly.
+    assert resolve_operative("GUNNER", SPECTRES) == "Spectre Gunner"
+    assert resolve_operative("HEAVY GUNNER", SPECTRES) == "Spectre Heavy Gunner"
+    assert resolve_operative("STUB-GUNNER", SPECTRES) == "Spectre Stub-Gunner"
+
+
+def test_an_entry_resolves_when_the_datacard_adds_a_suffix():
+    assert resolve_operative("AUTOSAVANT", ["Autosavant Agent", "Interrogator Agent"]) == ("Autosavant Agent")
+
+
+def test_an_entry_resolves_when_the_words_are_in_a_different_order():
+    assert (
+        resolve_operative("INQUISITORIAL AGENT INTERROGATOR", ["Interrogator Agent", "Tome-Skull"])
+        == "Interrogator Agent"
+    )
+
+
+def test_an_entry_resolves_on_its_last_word_when_the_prefixes_differ():
+    # The composition uses the kill team's name, the datacard the unit's: "EXACTION
+    # SQUAD PROCTOR-EXACTANT" against "Arbites Proctor-Exactant". Ten real entries.
+    assert (
+        resolve_operative(
+            "EXACTION SQUAD PROCTOR-EXACTANT", ["Arbites Proctor-Exactant", "Arbites Castigator"]
+        )
+        == "Arbites Proctor-Exactant"
+    )
+
+
+def test_punctuation_does_not_decide_a_match():
+    assert resolve_operative("PROCTOR EXACTANT", ["Arbites Proctor-Exactant"]) == ("Arbites Proctor-Exactant")
+
+
+def test_an_entry_matching_two_cards_equally_raises_rather_than_guessing():
+    # Picking one would seed a roster list that looks legal and offers the wrong
+    # operative.
+    with pytest.raises(OperativeNotResolved, match="several datacards"):
+        resolve_operative("GUNNER", ["Alpha Gunner", "Omega Gunner"])
+
+
+def test_an_entry_matching_nothing_raises_with_the_candidates():
+    with pytest.raises(OperativeNotResolved, match="no datacard"):
+        resolve_operative("SOMETHING ELSE", RAVENERS)
+
+
+def test_a_loadout_line_resolves_to_nothing_which_is_how_it_is_recognised():
+    # This is the discriminator, and it replaces reading a style class. The site marks
+    # a keyword only on its FIRST appearance on a page, so "GUNNER with webber and gun
+    # butt" carries no styled span although it names an operative, while
+    # "Autogun; gun butt" looks identical and does not. No datacard is called Autogun.
+    assert resolve_operative("Autogun; gun butt", SPECTRES, strict=False) is None
+    assert resolve_operative("GUNNER", SPECTRES, strict=False) == "Spectre Gunner"
+
+
+def test_an_empty_entry_is_not_an_operative():
+    assert resolve_operative("", RAVENERS, strict=False) is None
+    with pytest.raises(OperativeNotResolved):
+        resolve_operative("   ", RAVENERS)
