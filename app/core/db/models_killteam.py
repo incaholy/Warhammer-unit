@@ -25,7 +25,7 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Index, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
 from sqlmodel import Field, Relationship
 
 from app.core.db.models import TimestampMixin
@@ -112,6 +112,9 @@ class KTOperative(TimestampMixin, table=True):
     __tablename__ = "kt_operatives"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "name"),
+        # Redundant to the primary key, and there for `KTSelectionOption`'s composite
+        # foreign key to point at: a target must be provably unique.
+        UniqueConstraint("kill_team_id", "id", name="uq_kt_operative_team_id"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
     )
@@ -330,6 +333,8 @@ class KTSelectionList(TimestampMixin, table=True):
     __tablename__ = "kt_selection_lists"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "position"),
+        # As above: the target of a composite foreign key from `KTSelectionOption`.
+        UniqueConstraint("kill_team_id", "id", name="uq_kt_selection_list_team_id"),
         CheckConstraint("budget >= 1", name="ck_kt_selection_list_budget"),
         CheckConstraint("position >= 0", name="ck_kt_selection_list_position"),
     )
@@ -344,7 +349,15 @@ class KTSelectionList(TimestampMixin, table=True):
     restriction_text: str | None = Field(default=None)
 
     kill_team: KillTeam = Relationship(back_populates="selection_lists")
-    options: list["KTSelectionOption"] = Relationship(back_populates="selection_list", cascade_delete=True)
+    # `overlaps` is the price of the composite foreign keys below: this relationship
+    # and `KTOperative.offered_by` both write an option's `kill_team_id`, which is
+    # deliberate -- it is one column reached through two parents -- and SQLAlchemy wants
+    # that stated rather than inferred.
+    options: list["KTSelectionOption"] = Relationship(
+        back_populates="selection_list",
+        cascade_delete=True,
+        sa_relationship_kwargs={"overlaps": "offered_by"},
+    )
     restrictions: list["KTSelectionRestriction"] = Relationship(
         back_populates="selection_list", cascade_delete=True
     )
@@ -376,6 +389,23 @@ class KTSelectionOption(TimestampMixin, table=True):
     __tablename__ = "kt_selection_options"
     __table_args__ = (
         UniqueConstraint("selection_list_id", "operative_id"),
+        # An option's list and its operative must belong to the SAME kill team. Two
+        # plain foreign keys cannot say that -- each only promises "some list" and
+        # "some operative" -- so the option carries `kill_team_id` and reaches both
+        # parents THROUGH it. Offering another team's operative then fails in the
+        # database rather than needing a service to remember to check.
+        ForeignKeyConstraint(
+            ["kill_team_id", "selection_list_id"],
+            ["kt_selection_lists.kill_team_id", "kt_selection_lists.id"],
+            ondelete="CASCADE",
+            name="fk_kt_selection_option_list_same_team",
+        ),
+        ForeignKeyConstraint(
+            ["kill_team_id", "operative_id"],
+            ["kt_operatives.kill_team_id", "kt_operatives.id"],
+            ondelete="CASCADE",
+            name="fk_kt_selection_option_operative_same_team",
+        ),
         CheckConstraint("cost >= 1", name="ck_kt_selection_option_cost"),
         CheckConstraint("models >= 1", name="ck_kt_selection_option_models"),
         CheckConstraint(
@@ -385,8 +415,12 @@ class KTSelectionOption(TimestampMixin, table=True):
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    selection_list_id: UUID = Field(foreign_key="kt_selection_lists.id", ondelete="CASCADE", index=True)
-    operative_id: UUID = Field(foreign_key="kt_operatives.id", ondelete="CASCADE", index=True)
+    # Denormalised on purpose: it is what makes the two composite foreign keys above
+    # possible, and they in turn keep it honest -- it cannot disagree with either
+    # parent's team.
+    kill_team_id: UUID = Field(index=True)
+    selection_list_id: UUID = Field(index=True)
+    operative_id: UUID = Field(index=True)
     cost: int = Field(default=1)
     models: int = Field(default=1)
     max_selections: int | None = Field(default=None)
@@ -394,8 +428,12 @@ class KTSelectionOption(TimestampMixin, table=True):
     # a roster took.
     loadout_options: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
 
-    selection_list: KTSelectionList = Relationship(back_populates="options")
-    operative: KTOperative = Relationship(back_populates="offered_by")
+    selection_list: KTSelectionList = Relationship(
+        back_populates="options", sa_relationship_kwargs={"overlaps": "offered_by"}
+    )
+    operative: KTOperative = Relationship(
+        back_populates="offered_by", sa_relationship_kwargs={"overlaps": "options,selection_list"}
+    )
 
 
 class KTSelectionRestriction(TimestampMixin, table=True):

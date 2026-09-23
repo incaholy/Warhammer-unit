@@ -466,7 +466,10 @@ def make_kt_selection_option(session, make_kt_selection_list, make_kt_operative)
             kill_team=selection_list.kill_team if selection_list.kill_team else None
         )
         option = KTSelectionOption(
-            selection_list_id=selection_list.id, operative_id=operative.id, **overrides
+            kill_team_id=selection_list.kill_team_id,
+            selection_list_id=selection_list.id,
+            operative_id=operative.id,
+            **overrides,
         )
         session.add(option)
         session.commit()

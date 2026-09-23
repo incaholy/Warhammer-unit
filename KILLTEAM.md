@@ -118,7 +118,7 @@ against: Raveners.
 | `KillTeamRule` | name, text; FK kill team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts) |
 | `KTOperative` | name, APL, move, save, wounds, keywords; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it |
 | `KTSelectionList` | label (as printed), `budget` in selections, `position`, `restriction_text`; FK kill team |
-| `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_text`; FK list + operative |
+| `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**); `kill_team_id` + composite FKs to its list and operative |
 | `KTSelectionRestriction` | `keyword`, `max_operatives`; FK list — a cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
 | `KTAbility` | name, text (includes unique actions); FK operative |
@@ -238,6 +238,14 @@ most common — so nothing about size is hardcoded.
 The cap sits on the **option**, not the operative: it is stated by the list, and two
 lists can offer the same operative on different terms.
 
+**An option cannot offer another kill team's operative.** Two plain foreign keys only
+promise "some list" and "some operative", so the option carries `kill_team_id` and
+reaches both parents through composite foreign keys — a mismatch is refused by the
+database rather than by a service remembering to check (verified against Postgres with
+raw SQL). The cost is one denormalised column, a redundant unique key on each parent
+for the composite keys to target, and an `overlaps=` annotation on the relationships,
+since two of them write that column by design.
+
 Three of the 48 teams use weighted costs (Blooded, Brood Brother, Pathfinders); `cost`
 and `models` are what make them expressible rather than exceptional.
 
@@ -250,14 +258,17 @@ two, which is why `KTSelectionRestriction` exists rather than a note in
 quarter of the teams. It is evaluated against `KTOperative.keywords`, which the catalog
 already holds, and a list may carry several caps (Inquisitorial Agent states three).
 
-**Not yet structured, kept as printed text.** `restriction_text` on a list keeps the
-sentence the caps were read from; `loadout_text` on an option keeps the weapon options
-a page prints for that entry ("with one option from each of the following: Hand flamer
-or heavy bolt pistol; …"). A datacard lists every profile an operative can have and
-never marks which are alternatives, so that text is the only record of it. When a
-roster has to enforce a loadout these become structured option groups — and the
-filtering service (choose one weapon, the alternatives drop away) gains something to
-filter on.
+**Loadouts are display only.** `loadout_options` keeps the printed variants for an
+entry ("with flamer and gun butt", "with webber and gun butt") and **nothing validates
+them**. Wyrmblade prints three `GUNNER with …` lines, and 12 of the 48 teams repeat an
+operative that way: one operative with a weapon choice, so it is ONE option. Which
+weapons a roster took is recorded at K4 from the operative's own profiles and
+snapshotted into a game at K5. Which combinations are *legal* is a rule, and decision
+#1 leaves rules to the players — so the catalog says what an operative can use and
+stops there.
+
+`restriction_text` on a list likewise keeps the sentence its caps were read from, for a
+human to check the parse against.
 
 Also roster-level rather than catalog (K4): an equipment option cannot be selected
 twice in one game, and the allowance is 4 pieces with some teams allowed more.

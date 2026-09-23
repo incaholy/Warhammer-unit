@@ -461,6 +461,49 @@ def test_deleting_an_operative_withdraws_it_from_every_list(
     assert len(session.exec(select(KTSelectionList)).all()) == 2  # the lists remain
 
 
+def test_an_option_cannot_offer_another_kill_teams_operative(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list
+):
+    # Two plain foreign keys only promise "some list" and "some operative", so nothing
+    # stopped a list offering an operative from a different kill team -- a roster would
+    # then be offered something it cannot field. The option carries `kill_team_id` and
+    # reaches both parents through it, so the database refuses the mismatch.
+    ravener_list = make_kt_selection_list(kill_team=make_kill_team(name="Raveners"))
+    stranger = make_kt_operative(kill_team=make_kill_team(name="Novitiates"))
+
+    session.add(
+        KTSelectionOption(
+            kill_team_id=ravener_list.kill_team_id,
+            selection_list_id=ravener_list.id,
+            operative_id=stranger.id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_an_options_team_cannot_disagree_with_its_list(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list
+):
+    # The denormalised column is kept honest by the same constraints: it cannot name a
+    # team that is not the list's.
+    listing = make_kt_selection_list(kill_team=make_kill_team())
+    other = make_kill_team()
+    operative = make_kt_operative(kill_team=other)
+
+    session.add(
+        KTSelectionOption(
+            kill_team_id=other.id,  # matches the operative, not the list
+            selection_list_id=listing.id,
+            operative_id=operative.id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
 def test_the_printed_sentences_are_kept_beside_the_structure(
     session, make_kt_selection_list, make_kt_selection_option
 ):
