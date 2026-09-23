@@ -270,6 +270,21 @@ stops there.
 `restriction_text` on a list likewise keeps the sentence its caps were read from, for a
 human to check the parse against.
 
+**Parsing it.** The section is one `ul.redTriangle`, three levels deep: a list, its
+operatives, and each operative's printed loadouts. Three shapes appear across the 48
+teams — a numbered line ("4 RAVENER operatives selected from the following list"), a
+fixed roster ("Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y",
+budget = the sum), and an unnumbered line naming one operative ("BOSS NOB operative
+with one of the following options", budget 1). A count on a LINE is a budget; a count on
+an ENTRY is models. Counts are read from the leading number only: "XV26 Stealth
+Battlesuit" would otherwise read as 26 operatives.
+
+47 of the 48 teams parse. **Inquisitorial Agent does not**, and raises rather than
+guessing: it prints "5 INQUISITORIAL AGENT operatives selected from the list above, or
+REQUISITIONED operatives from one group", which reuses another list's options and adds
+requisitioned groups. Handled per team when K6 widens; a wrong budget would seed a
+roster rule that looks right.
+
 Also roster-level rather than catalog (K4): an equipment option cannot be selected
 twice in one game, and the allowance is 4 pieces with some teams allowed more.
 

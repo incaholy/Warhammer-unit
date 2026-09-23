@@ -10,8 +10,10 @@ from pathlib import Path
 import pytest
 
 from scripts.scrape_wahapedia_kt import (
+    CompositionNotParsed,
     NavEntry,
     OperativeNotResolved,
+    parse_composition,
     parse_equipment,
     parse_nav,
     parse_operatives,
@@ -23,6 +25,7 @@ from scripts.scrape_wahapedia_kt import (
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "kt_nav.html").read_text()
 TEAM = (Path(__file__).parent / "fixtures" / "kt_team.html").read_text()
+COMPOSITION = (Path(__file__).parent / "fixtures" / "kt_composition.html").read_text()
 UNIVERSAL_EQUIPMENT = (Path(__file__).parent / "fixtures" / "kt_universal_equipment.html").read_text()
 
 
@@ -426,3 +429,123 @@ def test_an_empty_entry_is_not_an_operative():
     assert resolve_operative("", RAVENERS, strict=False) is None
     with pytest.raises(OperativeNotResolved):
         resolve_operative("   ", RAVENERS)
+
+
+# ---- Composition: the budgeted selection lists (decision #16) ----
+
+
+def _lists():
+    return parse_composition(COMPOSITION)
+
+
+def _options(index: int):
+    return {option.operative: option for option in _lists()[index].options}
+
+
+def test_each_printed_line_becomes_a_budgeted_list_in_order():
+    lists = _lists()
+
+    assert [(lst.position, lst.budget) for lst in lists] == [(0, 1), (1, 4), (2, 1)]
+    assert lists[0].label == "1 HOLLOW WARDEN operative"
+
+
+def test_a_line_naming_its_own_operative_is_a_budget_of_one():
+    # "1 HOLLOW WARDEN operative" has no entries beneath it: the line IS the option, and
+    # its number is the budget, not models. A budget-1 list over one option is what
+    # "required" means (decision #16), so no flag is needed.
+    warden = _lists()[0]
+
+    assert warden.budget == 1
+    assert [option.operative for option in warden.options] == ["Hollow Warden"]
+    assert warden.options[0].models == 1
+
+
+def test_a_numbered_line_takes_its_budget_from_the_leading_number():
+    assert _lists()[1].budget == 4
+
+
+def test_digits_inside_a_name_are_not_read_as_a_budget():
+    # The third line names "XV9 EMBER SUIT" and carries no leading count, so its budget
+    # is 1. Reading any number in the text instead would make it 9 -- the real bug my
+    # own first scan hit, where "XV26 Stealth Battlesuits" became 26 operatives.
+    suits = _lists()[2]
+
+    assert suits.budget == 1
+    assert [option.operative for option in suits.options] == ["XV9 Ember Suit"]
+
+
+def test_one_operative_printed_twice_collapses_into_one_option():
+    # Wyrmblade prints three "GUNNER with ..." lines and 12 of the 48 teams repeat an
+    # operative that way. It is one operative with a weapon choice, and
+    # UNIQUE(selection_list_id, operative_id) would reject two rows for it.
+    sentinel = _options(1)["Hollow Sentinel"]
+
+    assert [option.operative for option in _lists()[1].options].count("Hollow Sentinel") == 1
+    assert sentinel.loadout_options == [
+        "with ash lash and rusted glaive",
+        "with cinder bolt and rusted glaive",
+    ]
+
+
+def test_an_entry_can_put_two_models_on_the_table_for_one_selection():
+    # "2 EMBER WISP operatives (still counts as one selection)".
+    wisp = _options(1)["Hollow Ember Wisp"]
+
+    assert (wisp.models, wisp.cost) == (2, 1)
+
+
+def test_an_entry_can_cost_more_than_one_selection():
+    # "ASH PROPHET (counts as two selections)" -- the parenthetical is a note about the
+    # entry, so it is stripped before the name is resolved and read for the cost.
+    assert _options(1)["Hollow Ash Prophet"].cost == 2
+
+
+def test_loadout_variants_are_collected_from_the_nested_list():
+    # "WARDEN equipped with one of the following options:" -- and "equipped with" as
+    # well as "with", which is how Nemesis Claw phrases it.
+    # Every nested group, not just the first: a line reading "equipped with one of the
+    # following options: ... Or one option from each of the following:" prints two.
+    assert _options(1)["Hollow Warden"].loadout_options == [
+        "Ash lash; rusted glaive",
+        "Cinder bolt; rusted glaive",
+        "Ember charm or ash token",
+    ]
+
+
+def test_a_loadout_line_is_not_read_as_an_operative():
+    # "Ash lash; rusted glaive" resolves to no datacard, which is how it is recognised.
+    assert "Ash lash; rusted glaive" not in _options(1)
+
+
+def test_the_restriction_sentence_is_kept_verbatim():
+    # A loose text node after the list, and the source of the caps and keyword limits
+    # read from it next. Kept whole so a human can check that reading.
+    restriction = _lists()[-1].restriction_text
+
+    assert _lists()[-1].position == 2
+    assert restriction is not None
+    assert "each operative on this list once" in restriction
+    assert "up to one EMBER operative" in restriction
+
+
+def test_a_page_with_no_composition_fails_loudly():
+    # A team that seeds with no selection lists would offer a roster nothing, and look
+    # like a successful scrape.
+    with pytest.raises(CompositionNotParsed, match="no 'Operatives' section"):
+        parse_composition("<html><body><h2>Something else</h2></body></html>")
+
+
+def test_a_line_whose_operatives_cannot_be_found_fails_loudly():
+    # Inquisitorial Agent prints "5 ... operatives selected from the list above, or
+    # REQUISITIONED operatives from one group" -- a shape this parser does not know, and
+    # guessing its budget would seed a roster rule that looks right.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>5 THINGS selected from the list above</li></ul>
+    """
+    with pytest.raises(CompositionNotParsed, match="no operatives found"):
+        parse_composition(html)

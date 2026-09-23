@@ -1,0 +1,73 @@
+<!--
+  Synthetic fixture for the composition parser — NOT scraped content (invented names).
+  It carries its own minimal datacards, because a composition entry is resolved against
+  them, plus the composition section itself.
+
+  Structure is real: one ul.redTriangle whose items are selection lists, each list's
+  operatives in a nested ul.redCircle2, and each operative's weapon variants in a
+  further nested ul. The restriction sentence is a loose text node after the list.
+
+  Deliberately included: a line naming its own operative with no entries (shape C), a
+  numbered list (shape A), an operative repeated with two loadouts (must collapse into
+  ONE option), an entry whose leading count is models with "still counts as one
+  selection", an entry costing two selections, an "equipped with" phrasing, and a
+  loadout line that must not be read as an operative.
+-->
+<html><body><div id="wahMainContent">
+
+<!-- datacards, trimmed to what resolution needs -->
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Warden</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">7"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">5<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">19</div></td>
+</tr></table></div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Sentinel</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">2</div></td><td class="pCell">MOVE<div class="dsStat">6"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">12</div></td>
+</tr></table></div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Ember Wisp</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">2</div></td><td class="pCell">MOVE<div class="dsStat">8"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">5<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">7</div></td>
+</tr></table></div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Ash Prophet</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">6"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">14</div></td>
+</tr></table></div></div>
+
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>XV9 Ember Suit</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">7"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">3<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">18</div></td>
+</tr></table></div></div>
+
+<div class="BreakInsideAvoid">
+<h2>Operatives</h2>
+<ul class="redTriangle">
+  <li>1 <span class="kwb kwbo">HOLLOW WARDEN</span> operative</li>
+  <li>4 <span class="kwb">HOLLOW</span> operatives selected from the following list:
+    <ul class="redCircle2">
+      <li><span class="kwb kwbo">SENTINEL</span> with ash lash and rusted glaive</li>
+      <li><span class="kwb kwbo">SENTINEL</span> with cinder bolt and rusted glaive</li>
+      <li>2 <span class="kwb kwbo">EMBER WISP</span> operatives (still counts as one selection)</li>
+      <li><span class="kwb kwbo">ASH PROPHET</span> (counts as two selections)</li>
+      <li><span class="kwb kwbo">WARDEN</span> equipped with one of the following options:
+        <ul><li>Ash lash; rusted glaive</li><li>Cinder bolt; rusted glaive</li></ul>
+        Or one option from each of the following:
+        <ul><li>Ember charm or ash token</li></ul>
+      </li>
+    </ul>
+  </li>
+  <li><span class="kwb kwbo">XV9 EMBER SUIT</span> operative</li>
+</ul>
+Other than SENTINEL operatives, your kill team can only include each operative on this list once, and can only include up to one EMBER operative.
+</div>
+
+</div></body></html>

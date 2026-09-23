@@ -643,3 +643,232 @@ def parse_equipment(html: str) -> list[Equipment]:
             )
         )
     return equipment
+
+
+# ---------------------------------------------------------------------------
+# Composition: which operatives a roster may contain (KILLTEAM.md decision #16).
+#
+# The section is one `ul.redTriangle`, three levels deep:
+#
+#   li  "4 RAVENER operatives selected from the following list:"   <- a list
+#     ul.redCircle2
+#       li  "GUNNER with flamer and gun butt"                      <- an option
+#         ul
+#           li  "Autogun; gun butt"                                <- a loadout
+#
+# Counts are read from the LEADING number of a line, never from its text: "XV26
+# Stealth Battlesuit" would otherwise be read as 26 operatives.
+# ---------------------------------------------------------------------------
+
+_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+_COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
+_LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
+_IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
+
+
+class CompositionNotParsed(ValueError):
+    """A composition line does not match a shape this parser knows."""
+
+
+@dataclass(frozen=True)
+class SelectionOption:
+    """One operative a list offers, as `KTSelectionOption` stores it."""
+
+    operative: str  # the canonical datacard name, via resolve_operative
+    cost: int = 1
+    models: int = 1
+    loadout_options: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SelectionList:
+    """One budgeted list, as `KTSelectionList` stores it."""
+
+    label: str
+    budget: int
+    position: int
+    options: list[SelectionOption] = field(default_factory=list)
+    restriction_text: str | None = None
+
+
+def _restriction_sentence(top: Tag) -> str | None:
+    """The sentence printed after the composition list, if any.
+
+    It is a loose text node in the wrapper that holds the heading and the list --
+    Raveners' "Other than WARRIOR operatives, your kill team can only include each
+    operative on this list once." Kept verbatim; the caps and keyword limits are read
+    from it separately.
+    """
+    wrapper = top.parent
+    if wrapper is None:
+        return None
+    clone = copy(wrapper)
+    for el in clone.find_all(["ul", "h1", "h2", "h3"]):
+        el.extract()
+    text = re.sub(r"\s+", " ", _clean(clone.get_text(" ", strip=True))).strip()
+    return text or None
+
+
+def _loadouts(entry: Tag) -> list[str]:
+    """An entry's printed weapon variants: the items of its child lists. Display only.
+
+    Every nested list, not just the first: a line reading "with one of the following
+    options: ... Or one option from each of the following:" prints two groups, and for
+    display purposes they are all variants of the same entry.
+    """
+    variants = []
+    for nested in entry.find_all("ul"):
+        variants.extend(_own_text(li) for li in nested.find_all("li", recursive=False))
+    return [v for v in variants if v]
+
+
+def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
+    """One option, or None when the line does not name an operative.
+
+    The line's own text is "<count?> <NAME> <with loadout?>", and the name is what
+    resolves against the datacards -- which is also how a loadout line is recognised,
+    since no datacard is called "Autogun".
+    """
+    text = _own_text(entry)
+    if not text or _IS_NESTED_LIST.search(text):
+        return None
+
+    count = _LEADING_COUNT.match(text)
+    models = int(count.group(1)) if count else 1
+    name = _LEADING_COUNT.sub("", text, count=1)
+    # "equipped with" as well as "with": Nemesis Claw prints "VISIONARY equipped with
+    # one of the following options", and splitting on "with" alone left "VISIONARY
+    # equipped", which resolves to nothing.
+    name = re.split(r"\bequipped\b|\bwith\b|\bOr the following\b", name)[0]
+    name = re.sub(r"\boperatives?\b.*$", "", name, flags=re.IGNORECASE)
+    # A parenthetical is a note about the entry, not part of its name: "ASH PROPHET
+    # (counts as two selections)" resolves only once it is removed. The note itself is
+    # read from the full text below.
+    name = re.sub(r"\(.*?\)", " ", name).strip(" :,")
+
+    operative = resolve_operative(name, datacards, strict=False) if name else None
+    if operative is None:
+        return None
+
+    # "MAGUS (counts as two selections)" -- what taking it spends from the budget.
+    spend = _COUNTS_AS.search(text)
+    cost = _COUNT_WORDS.get(spend.group(1).lower(), 1) if spend else 1
+    # "2 PSYCHIC FAMILIAR operatives (still counts as one selection)": the leading
+    # count is models, and the sentence says it is still one selection.
+    if spend and models > 1:
+        cost = _COUNT_WORDS.get(spend.group(1).lower(), 1)
+
+    # Printed variants: the child list items, or the "with ..." tail when the line
+    # spells one loadout out inline ("3 VOIDSMAN with lasgun and gun butt").
+    variants = _loadouts(entry)
+    if not variants:
+        tail = re.search(r"\bwith\b(?! one of the following| one option)(.+)$", text, re.IGNORECASE)
+        if tail:
+            variants = [f"with {tail.group(1).strip(' :,')}"]
+
+    return SelectionOption(operative=operative, cost=cost, models=models, loadout_options=variants)
+
+
+def parse_composition(html: str) -> list[SelectionList]:
+    """The kill team's selection lists, in printed order.
+
+    Three shapes appear across the 48 teams:
+
+      A  "4 RAVENER operatives selected from the following list:"  -> budget 4
+      B  "Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y"
+                                                                   -> a fixed roster,
+                                                                      budget = the sum
+      C  "BOSS NOB operative with one of the following options:"    -> an implicit 1
+
+    Anything else raises rather than guessing a budget: a wrong number would seed a
+    roster rule that looks right.
+
+    Repeated operatives collapse. Wyrmblade prints three "GUNNER with ..." lines, and
+    that is one operative with a weapon choice (KILLTEAM.md: loadouts are display
+    only), so the variants merge into one option.
+    """
+    soup = _soup(html)
+    head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
+    if head is None:
+        raise CompositionNotParsed("no 'Operatives' section on the page")
+    top = next(
+        (el for el in head.find_all_next() if el.name == "ul" and "redTriangle" in (el.get("class") or [])),
+        None,
+    )
+    if top is None:
+        raise CompositionNotParsed("the 'Operatives' section has no composition list")
+
+    # After the structural checks, so a page with no composition reports that rather
+    # than failing on its datacards.
+    datacards = [operative.name for operative in parse_operatives(html)]
+
+    lists: list[SelectionList] = []
+    for position, line in enumerate(top.find_all("li", recursive=False)):
+        label = _own_text(line)
+        options: dict[str, SelectionOption] = {}
+        for entry in line.find_all("li"):
+            option = _option_from(entry, datacards)
+            if option is None:
+                continue
+            existing = options.get(option.operative)
+            if existing is None:
+                options[option.operative] = option
+            else:  # the same operative again, with another printed loadout
+                options[option.operative] = SelectionOption(
+                    operative=existing.operative,
+                    cost=existing.cost,
+                    models=existing.models,
+                    loadout_options=[*existing.loadout_options, *option.loadout_options],
+                )
+
+        # A line with no entries beneath it names its own operative ("1 RAVENER PRIME
+        # operative", "BOSS NOB operative with one of the following options:"). Its
+        # leading number is the BUDGET, not models -- "2 BOMB SQUIG operatives" is two
+        # selections of one operative, where a nested "2 PSYCHIC FAMILIAR operatives"
+        # is two models for one selection.
+        if not options:
+            inline = _option_from(line, datacards)
+            if inline is not None:
+                options = {
+                    inline.operative: SelectionOption(
+                        operative=inline.operative,
+                        cost=inline.cost,
+                        models=1,
+                        loadout_options=inline.loadout_options,
+                    )
+                }
+
+        count = _LEADING_COUNT.match(label)
+        if count:
+            budget = int(count.group(1))  # shape A
+        elif label.lower().startswith("every"):
+            budget = sum(option.models for option in options.values())  # shape B
+        else:
+            budget = 1  # shape C: an unnumbered line naming one operative
+
+        if not options:
+            raise CompositionNotParsed(f"no operatives found for composition line {label!r}")
+        lists.append(
+            SelectionList(
+                label=label,
+                budget=budget,
+                position=position,
+                options=list(options.values()),
+            )
+        )
+
+    if not lists:
+        raise CompositionNotParsed("the composition list is empty")
+    sentence = _restriction_sentence(top)
+    if sentence:
+        # Printed after the whole composition and referring to "this list", so it
+        # belongs to the last one.
+        last = lists[-1]
+        lists[-1] = SelectionList(
+            label=last.label,
+            budget=last.budget,
+            position=last.position,
+            options=last.options,
+            restriction_text=sentence,
+        )
+    return lists
