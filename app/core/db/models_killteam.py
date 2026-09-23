@@ -10,8 +10,10 @@ Built in slices (ROADMAP K1). This module currently holds:
     KTFaction → KillTeam → KillTeamRule
                         ├→ KTOperative → KTWeapon
                         │             └→ KTAbility
-                        ├→ KTPloy     (kill_team_id NULL = every team can use it)
-                        └→ KTEquipment (same: NULL = the universal list)
+                        ├→ KTPloy       (kill_team_id NULL = every team can use it)
+                        ├→ KTEquipment  (same: NULL = the universal list)
+                        └→ KTSelectionList ─┬→ KTSelectionOption → KTOperative
+                                            └→ KTSelectionRestriction
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -54,16 +56,15 @@ class KillTeam(TimestampMixin, table=True):
     """A kill team, e.g. Raveners — the root everything else in the catalog hangs off."""
 
     __tablename__ = "kt_kill_teams"
-    __table_args__ = (CheckConstraint("operative_count >= 1", name="ck_kt_kill_team_operative_count"),)
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(unique=True, index=True, max_length=128)
     faction_id: UUID = Field(foreign_key="kt_factions.id", index=True)
 
-    # The set number of operatives a roster fields (Raveners: 5 — 1 Prime + 4 others).
-    # A roster over *or* under this is reported by validate (KILLTEAM.md → "Roster
-    # limits"); it's data, not code per team.
-    operative_count: int
+    # No `operative_count`: a page states its composition as budgeted LISTS, and with
+    # weighted costs a headcount stops being a fact -- Brood Brother spends 4
+    # selections and can field more models than that. "Is this roster legal?" is
+    # answered per list (decision #16), not by counting rows.
 
     faction: KTFaction = Relationship(back_populates="kill_teams")
     # A rule only exists as part of its kill team, so it goes with it: the FK
@@ -77,6 +78,7 @@ class KillTeam(TimestampMixin, table=True):
     ploys: list["KTPloy"] = Relationship(back_populates="kill_team", cascade_delete=True)
     # Its own equipment only; the universal list (kill_team_id NULL) is nobody's.
     equipment: list["KTEquipment"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    selection_lists: list["KTSelectionList"] = Relationship(back_populates="kill_team", cascade_delete=True)
 
 
 class KillTeamRule(TimestampMixin, table=True):
@@ -102,11 +104,9 @@ class KillTeamRule(TimestampMixin, table=True):
 class KTOperative(TimestampMixin, table=True):
     """One operative on a kill team's roster list, with its datacard stats.
 
-    The two roster limits live here as data, not as code per team (KILLTEAM.md →
-    "Roster limits"): `required` marks an operative a roster cannot omit (Raveners'
-    Prime), and `max_per_roster` caps how many may be taken -- 1 for each specialist,
-    NULL for one that can be taken freely (Warriors), still bounded by the kill
-    team's `operative_count`.
+    Whether a roster may take it, and how many times, is NOT here: that is stated by
+    the selection list offering it, and two lists can offer the same operative on
+    different terms. `KTSelectionOption` carries it (KILLTEAM.md decision #16).
     """
 
     __tablename__ = "kt_operatives"
@@ -114,11 +114,6 @@ class KTOperative(TimestampMixin, table=True):
         UniqueConstraint("kill_team_id", "name"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
-        # NULL means "no limit"; a limit of 0 would mean "cannot be taken", which is
-        # what leaving the operative off the list already says.
-        CheckConstraint(
-            "max_per_roster IS NULL OR max_per_roster >= 1", name="ck_kt_operative_max_per_roster"
-        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -134,12 +129,10 @@ class KTOperative(TimestampMixin, table=True):
 
     keywords: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
 
-    required: bool = Field(default=False)
-    max_per_roster: int | None = Field(default=None)
-
     kill_team: KillTeam = Relationship(back_populates="operatives")
     weapons: list["KTWeapon"] = Relationship(back_populates="operative", cascade_delete=True)
     abilities: list["KTAbility"] = Relationship(back_populates="operative", cascade_delete=True)
+    offered_by: list["KTSelectionOption"] = Relationship(back_populates="operative", cascade_delete=True)
 
 
 def _range_for_category(context) -> int:
@@ -313,3 +306,119 @@ class KTEquipment(TimestampMixin, table=True):
     description: str
 
     kill_team: KillTeam | None = Relationship(back_populates="equipment")
+
+
+class KTSelectionList(TimestampMixin, table=True):
+    """One of the lists a roster is built from (KILLTEAM.md decision #16).
+
+    A page states its composition as budgeted lists rather than as a headcount with a
+    leader: "1 RAVENER PRIME operative", then "4 RAVENER operatives selected from the
+    following list". Each is a list with a `budget` -- how many selections may be
+    spent on it -- and its options.
+
+    This covers the shapes a flag could not. A budget of 1 over a single option IS
+    "required", so nothing needs marking as such; a budget of 1 over several options is
+    "choose one of these"; and an option costing two selections (Brood Brother's Magus)
+    spends the budget without another column anywhere else.
+
+    `restriction_text` keeps the sentence printed beside the list -- the one the caps
+    were read from ("Other than WARRIOR operatives, your kill team can only include
+    each operative on this list once"). The structured columns drive validation; the
+    sentence is what lets a human check the parse read it correctly.
+    """
+
+    __tablename__ = "kt_selection_lists"
+    __table_args__ = (
+        UniqueConstraint("kill_team_id", "position"),
+        CheckConstraint("budget >= 1", name="ck_kt_selection_list_budget"),
+        CheckConstraint("position >= 0", name="ck_kt_selection_list_position"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
+    # As printed, so a roster builder can show the page's own wording.
+    label: str = Field(max_length=256)
+    # Selections this list may spend, NOT models: an option may cost more than one.
+    budget: int
+    position: int  # print order
+    restriction_text: str | None = Field(default=None)
+
+    kill_team: KillTeam = Relationship(back_populates="selection_lists")
+    options: list["KTSelectionOption"] = Relationship(back_populates="selection_list", cascade_delete=True)
+    restrictions: list["KTSelectionRestriction"] = Relationship(
+        back_populates="selection_list", cascade_delete=True
+    )
+
+
+class KTSelectionOption(TimestampMixin, table=True):
+    """One operative a list offers, and on what terms.
+
+    `cost` is what taking it spends from the list's budget (Brood Brother's Magus
+    counts as two selections). `models` is how many operatives one selection puts on
+    the table -- "2 PSYCHIC FAMILIAR operatives (still counts as one selection)" is
+    `cost=1, models=2`, a different axis from cost and so its own column.
+    `max_selections` caps repeats, NULL meaning no limit beyond the budget: Raveners
+    allow each specialist once and Warriors freely.
+
+    `loadout_text` holds the weapon options the page prints for this entry ("with one
+    option from each of the following: Hand flamer or heavy bolt pistol; ..."). A
+    datacard lists every profile an operative can have and never says which are
+    alternatives, so this printed text is the only record of that until a roster has
+    to enforce it -- at which point it becomes structured groups.
+    """
+
+    __tablename__ = "kt_selection_options"
+    __table_args__ = (
+        UniqueConstraint("selection_list_id", "operative_id"),
+        CheckConstraint("cost >= 1", name="ck_kt_selection_option_cost"),
+        CheckConstraint("models >= 1", name="ck_kt_selection_option_models"),
+        CheckConstraint(
+            "max_selections IS NULL OR max_selections >= 1",
+            name="ck_kt_selection_option_max_selections",
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    selection_list_id: UUID = Field(foreign_key="kt_selection_lists.id", ondelete="CASCADE", index=True)
+    operative_id: UUID = Field(foreign_key="kt_operatives.id", ondelete="CASCADE", index=True)
+    cost: int = Field(default=1)
+    models: int = Field(default=1)
+    max_selections: int | None = Field(default=None)
+    loadout_text: str | None = Field(default=None)
+
+    selection_list: KTSelectionList = Relationship(back_populates="options")
+    operative: KTOperative = Relationship(back_populates="offered_by")
+
+
+class KTSelectionRestriction(TimestampMixin, table=True):
+    """A cap on how many operatives CARRYING A KEYWORD a list may contribute.
+
+    Deathwatch: "your kill team can only include each operative on this list once, and
+    can only include up to one GRAVIS operative." The first half is per-option
+    (`KTSelectionOption.max_selections`); the second is a different shape, and
+    `max_selections` cannot express it -- GRAVIS is carried by several entries, so
+    capping each at one still allows two GRAVIS operatives.
+
+    Not an exception: 13 of the 48 kill teams state a cap like this (Novitiates two
+    PURGATUS, Hunter Clade one DIKTAT, Farstalker Kinband two HOUND, ...), which is
+    what earns it a table rather than a sentence in `restriction_text`. Left
+    unstructured, `validate` would quietly approve illegal rosters for a quarter of
+    the teams.
+
+    Evaluated against `KTOperative.keywords`, which the catalog already stores, so the
+    rule needs nothing beyond the keyword and its limit. A list may carry several.
+    """
+
+    __tablename__ = "kt_selection_restrictions"
+    __table_args__ = (
+        UniqueConstraint("selection_list_id", "keyword"),
+        CheckConstraint("max_operatives >= 1", name="ck_kt_selection_restriction_max"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    selection_list_id: UUID = Field(foreign_key="kt_selection_lists.id", ondelete="CASCADE", index=True)
+    # Stored as keywords are: upper case, as printed on a datacard.
+    keyword: str = Field(max_length=128, index=True)
+    max_operatives: int
+
+    selection_list: KTSelectionList = Relationship(back_populates="restrictions")

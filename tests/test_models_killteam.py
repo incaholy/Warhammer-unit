@@ -17,6 +17,9 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
+    KTSelectionList,
+    KTSelectionOption,
+    KTSelectionRestriction,
     KTWeapon,
 )
 
@@ -25,7 +28,7 @@ def test_faction_kill_team_rule_chain_links_both_ways(
     session, make_kt_faction, make_kill_team, make_kill_team_rule
 ):
     tyranids = make_kt_faction(name="Tyranids")
-    raveners = make_kill_team(faction=tyranids, name="Raveners", operative_count=5)
+    raveners = make_kill_team(faction=tyranids, name="Raveners")
     burrow = make_kill_team_rule(kill_team=raveners, name="Burrow")
 
     assert raveners.faction.name == "Tyranids"
@@ -96,15 +99,6 @@ def test_deleting_an_unused_faction_is_allowed(session, make_kt_faction):
     assert session.exec(select(KTFaction)).all() == []
 
 
-@pytest.mark.parametrize("count", [0, -1])
-def test_operative_count_must_be_at_least_one(session, make_kill_team, count):
-    with pytest.raises(IntegrityError):
-        make_kill_team(operative_count=count)
-
-
-# ---- The datacard: operatives, their weapons and abilities (slice 2) ----
-
-
 def test_an_operative_owns_its_weapons_and_abilities(
     session, make_kt_operative, make_kt_weapon, make_kt_ability
 ):
@@ -125,27 +119,6 @@ def test_operative_name_is_unique_per_kill_team_only(session, make_kill_team, ma
     make_kt_operative(kill_team=make_kill_team(), name="Ravener Warrior")
     with pytest.raises(IntegrityError):
         make_kt_operative(kill_team=raveners, name="Ravener Warrior")
-
-
-def test_max_per_roster_is_null_for_an_unlimited_operative(session, make_kt_operative):
-    # Raveners: every specialist is capped at 1, Warriors are not capped at all --
-    # still bounded by the kill team's operative_count.
-    warrior = make_kt_operative(name="Ravener Warrior", max_per_roster=None)
-    felltalon = make_kt_operative(name="Ravener Felltalon", max_per_roster=1)
-
-    assert warrior.max_per_roster is None
-    assert felltalon.max_per_roster == 1
-
-
-def test_max_per_roster_of_zero_is_rejected(session, make_kt_operative):
-    # "Cannot be taken" is said by leaving the operative off the list, not by a 0.
-    with pytest.raises(IntegrityError):
-        make_kt_operative(max_per_roster=0)
-
-
-def test_required_marks_the_operative_a_roster_cannot_omit(session, make_kt_operative):
-    assert make_kt_operative(name="Ravener Prime", required=True).required is True
-    assert make_kt_operative(name="Ravener Warrior").required is False
 
 
 def test_weapon_range_defaults_by_category(session, make_kt_weapon):
@@ -353,3 +326,212 @@ def test_deleting_a_kill_team_keeps_the_universal_equipment(session, make_kill_t
     session.commit()
 
     assert [e.name for e in session.exec(select(KTEquipment)).all()] == ["Frag grenade"]
+
+
+# ---- Selection lists: how a roster is built (decision #16) ----
+
+
+def test_a_list_offers_operatives_within_a_budget(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list, make_kt_selection_option
+):
+    # Raveners: "1 RAVENER PRIME operative", then "4 RAVENER operatives selected from
+    # the following list". Two lists, each with its own budget.
+    raveners = make_kill_team(name="Raveners")
+    prime = make_kt_operative(kill_team=raveners, name="Ravener Prime")
+    warrior = make_kt_operative(kill_team=raveners, name="Ravener Warrior")
+
+    leaders = make_kt_selection_list(
+        kill_team=raveners, label="1 RAVENER PRIME operative", budget=1, position=0
+    )
+    body = make_kt_selection_list(kill_team=raveners, label="4 RAVENER operatives", budget=4, position=1)
+    make_kt_selection_option(selection_list=leaders, operative=prime)
+    make_kt_selection_option(selection_list=body, operative=warrior)
+    session.refresh(raveners)
+
+    assert [lst.budget for lst in raveners.selection_lists] == [1, 4]
+    assert leaders.options[0].operative.name == "Ravener Prime"
+    # A budget of 1 over a single option IS "required" -- no flag needed for it.
+    assert (leaders.budget, len(leaders.options)) == (1, 1)
+
+
+def test_an_option_defaults_to_one_selection_for_one_model(session, make_kt_selection_option):
+    option = make_kt_selection_option()
+
+    assert (option.cost, option.models) == (1, 1)
+    assert option.max_selections is None  # no limit beyond the list's budget
+
+
+def test_an_option_may_cost_more_than_one_selection(session, make_kt_selection_option):
+    # Brood Brother: "MAGUS (counts as two selections)". A headcount could not say
+    # this, which is why operative_count is gone.
+    assert make_kt_selection_option(cost=2).cost == 2
+
+
+def test_an_option_may_put_two_models_on_the_table_for_one_selection(session, make_kt_selection_option):
+    # "2 PSYCHIC FAMILIAR operatives (still counts as one selection)" -- a different
+    # axis from cost, so its own column.
+    option = make_kt_selection_option(cost=1, models=2)
+
+    assert (option.cost, option.models) == (1, 2)
+
+
+def test_a_cap_belongs_to_the_option_not_the_operative(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list, make_kt_selection_option
+):
+    # The cap is stated by the list ("other than WARRIOR, each operative once"), so
+    # the same operative can be offered on different terms by two lists.
+    team = make_kill_team()
+    warrior = make_kt_operative(kill_team=team, name="Warrior")
+    strict = make_kt_selection_list(kill_team=team, budget=2, position=0)
+    loose = make_kt_selection_list(kill_team=team, budget=4, position=1)
+
+    once = make_kt_selection_option(selection_list=strict, operative=warrior, max_selections=1)
+    freely = make_kt_selection_option(selection_list=loose, operative=warrior)
+
+    assert once.max_selections == 1
+    assert freely.max_selections is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("cost", 0), ("models", 0), ("max_selections", 0)],
+)
+def test_an_option_cannot_be_taken_zero_ways(session, make_kt_selection_option, field, value):
+    with pytest.raises(IntegrityError):
+        make_kt_selection_option(**{field: value})
+
+
+def test_a_budget_of_zero_is_rejected(session, make_kt_selection_list):
+    # A list nobody can spend on is not a list.
+    with pytest.raises(IntegrityError):
+        make_kt_selection_list(budget=0)
+
+
+def test_two_lists_cannot_share_a_position(session, make_kill_team, make_kt_selection_list):
+    team = make_kill_team()
+    make_kt_selection_list(kill_team=team, position=0)
+    with pytest.raises(IntegrityError):
+        make_kt_selection_list(kill_team=team, position=0)
+
+
+def test_one_list_offers_an_operative_once(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list, make_kt_selection_option
+):
+    team = make_kill_team()
+    operative = make_kt_operative(kill_team=team)
+    listing = make_kt_selection_list(kill_team=team)
+    make_kt_selection_option(selection_list=listing, operative=operative)
+
+    with pytest.raises(IntegrityError):
+        make_kt_selection_option(selection_list=listing, operative=operative)
+
+
+def test_deleting_a_kill_team_takes_its_lists_and_options(
+    session, make_kill_team, make_kt_selection_list, make_kt_selection_option
+):
+    team = make_kill_team()
+    listing = make_kt_selection_list(kill_team=team)
+    make_kt_selection_option(selection_list=listing)
+
+    session.delete(team)
+    session.commit()
+
+    assert session.exec(select(KTSelectionList)).all() == []
+    assert session.exec(select(KTSelectionOption)).all() == []
+
+
+def test_deleting_an_operative_withdraws_it_from_every_list(
+    session, make_kill_team, make_kt_operative, make_kt_selection_list, make_kt_selection_option
+):
+    # An option pointing at an operative that no longer exists would offer a roster
+    # something it cannot field.
+    team = make_kill_team()
+    operative = make_kt_operative(kill_team=team)
+    make_kt_selection_option(
+        selection_list=make_kt_selection_list(kill_team=team, position=0), operative=operative
+    )
+    make_kt_selection_option(
+        selection_list=make_kt_selection_list(kill_team=team, position=1), operative=operative
+    )
+
+    session.delete(operative)
+    session.commit()
+
+    assert session.exec(select(KTSelectionOption)).all() == []
+    assert len(session.exec(select(KTSelectionList)).all()) == 2  # the lists remain
+
+
+def test_the_printed_sentences_are_kept_beside_the_structure(
+    session, make_kt_selection_list, make_kt_selection_option
+):
+    # Structured columns drive validation; the printed text is how a human checks the
+    # parse read them correctly.
+    listing = make_kt_selection_list(
+        restriction_text="Other than WARRIOR operatives, your kill team can only include each operative on this list once."
+    )
+    option = make_kt_selection_option(selection_list=listing, loadout_text="Hand flamer or heavy bolt pistol")
+
+    assert "WARRIOR" in listing.restriction_text
+    assert option.loadout_text == "Hand flamer or heavy bolt pistol"
+
+
+def test_a_keyword_cap_is_a_rule_about_a_SET_of_operatives(
+    session,
+    make_kill_team,
+    make_kt_operative,
+    make_kt_selection_list,
+    make_kt_selection_option,
+    make_kt_selection_restriction,
+):
+    # Deathwatch: "can only include each operative on this list once, and can only
+    # include up to one GRAVIS operative." Per-option caps cannot say the second part:
+    # several entries carry GRAVIS, so capping each at one still allows two.
+    watch = make_kill_team(name="Deathwatch")
+    bombard = make_kt_operative(kill_team=watch, name="Bombard", keywords=["DEATHWATCH", "GRAVIS"])
+    demolisher = make_kt_operative(kill_team=watch, name="Demolisher", keywords=["DEATHWATCH", "GRAVIS"])
+    listing = make_kt_selection_list(kill_team=watch, budget=5)
+    make_kt_selection_option(selection_list=listing, operative=bombard, max_selections=1)
+    make_kt_selection_option(selection_list=listing, operative=demolisher, max_selections=1)
+    make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=1)
+    session.refresh(listing)
+
+    assert [(r.keyword, r.max_operatives) for r in listing.restrictions] == [("GRAVIS", 1)]
+    # The keywords the rule is evaluated against are already on the operatives.
+    assert all("GRAVIS" in o.operative.keywords for o in listing.options)
+
+
+def test_a_list_may_carry_several_keyword_caps(
+    session, make_kt_selection_restriction, make_kt_selection_list
+):
+    # Inquisitorial Agent states caps for GUN SERVITOR, SUBDUCTOR and GUNNER.
+    listing = make_kt_selection_list()
+    make_kt_selection_restriction(selection_list=listing, keyword="GUNNER", max_operatives=2)
+    make_kt_selection_restriction(selection_list=listing, keyword="SUBDUCTOR", max_operatives=2)
+
+    assert {r.keyword for r in listing.restrictions} == {"GUNNER", "SUBDUCTOR"}
+
+
+def test_one_keyword_is_capped_once_per_list(session, make_kt_selection_list, make_kt_selection_restriction):
+    # Two caps for one keyword would be a parse that read the same sentence twice.
+    listing = make_kt_selection_list()
+    make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=1)
+    with pytest.raises(IntegrityError):
+        make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=2)
+
+
+def test_a_cap_of_zero_is_rejected(session, make_kt_selection_restriction):
+    # "None of these" is said by not offering them.
+    with pytest.raises(IntegrityError):
+        make_kt_selection_restriction(max_operatives=0)
+
+
+def test_deleting_a_list_takes_its_restrictions(
+    session, make_kt_selection_list, make_kt_selection_restriction
+):
+    listing = make_kt_selection_list()
+    make_kt_selection_restriction(selection_list=listing)
+
+    session.delete(listing)
+    session.commit()
+
+    assert session.exec(select(KTSelectionRestriction)).all() == []

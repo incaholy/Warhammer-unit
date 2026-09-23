@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 64b6d4339fbf
+Revision ID: 93949938b92e
 Revises: 44441c6a9671
-Create Date: 2026-09-21 16:56:49.557202
+Create Date: 2026-09-22 18:39:21.912760
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '64b6d4339fbf'
+revision: str = '93949938b92e'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -36,8 +36,6 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('faction_id', sa.Uuid(), nullable=False),
-    sa.Column('operative_count', sa.Integer(), nullable=False),
-    sa.CheckConstraint('operative_count >= 1', name='ck_kt_kill_team_operative_count'),
     sa.ForeignKeyConstraint(['faction_id'], ['kt_factions.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -79,10 +77,7 @@ def upgrade() -> None:
     sa.Column('save', sa.Integer(), nullable=False),
     sa.Column('wounds', sa.Integer(), nullable=False),
     sa.Column('keywords', sa.JSON(), nullable=False),
-    sa.Column('required', sa.Boolean(), nullable=False),
-    sa.Column('max_per_roster', sa.Integer(), nullable=True),
     sa.CheckConstraint('apl >= 1', name='ck_kt_operative_apl'),
-    sa.CheckConstraint('max_per_roster IS NULL OR max_per_roster >= 1', name='ck_kt_operative_max_per_roster'),
     sa.CheckConstraint('move >= 0 AND save >= 0 AND wounds >= 0', name='ck_kt_operative_stats_non_negative'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -107,6 +102,22 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_kt_ploys_kill_team_id'), 'kt_ploys', ['kill_team_id'], unique=False)
     op.create_index('uq_kt_ploy_universal_name', 'kt_ploys', ['name'], unique=True, sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
+    op.create_table('kt_selection_lists',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('kill_team_id', sa.Uuid(), nullable=False),
+    sa.Column('label', sqlmodel.sql.sqltypes.AutoString(length=256), nullable=False),
+    sa.Column('budget', sa.Integer(), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('restriction_text', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.CheckConstraint('budget >= 1', name='ck_kt_selection_list_budget'),
+    sa.CheckConstraint('position >= 0', name='ck_kt_selection_list_position'),
+    sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('kill_team_id', 'position')
+    )
+    op.create_index(op.f('ix_kt_selection_lists_kill_team_id'), 'kt_selection_lists', ['kill_team_id'], unique=False)
     op.create_table('kt_abilities',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -119,6 +130,40 @@ def upgrade() -> None:
     sa.UniqueConstraint('operative_id', 'name')
     )
     op.create_index(op.f('ix_kt_abilities_operative_id'), 'kt_abilities', ['operative_id'], unique=False)
+    op.create_table('kt_selection_options',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('selection_list_id', sa.Uuid(), nullable=False),
+    sa.Column('operative_id', sa.Uuid(), nullable=False),
+    sa.Column('cost', sa.Integer(), nullable=False),
+    sa.Column('models', sa.Integer(), nullable=False),
+    sa.Column('max_selections', sa.Integer(), nullable=True),
+    sa.Column('loadout_text', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.CheckConstraint('cost >= 1', name='ck_kt_selection_option_cost'),
+    sa.CheckConstraint('max_selections IS NULL OR max_selections >= 1', name='ck_kt_selection_option_max_selections'),
+    sa.CheckConstraint('models >= 1', name='ck_kt_selection_option_models'),
+    sa.ForeignKeyConstraint(['operative_id'], ['kt_operatives.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['selection_list_id'], ['kt_selection_lists.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('selection_list_id', 'operative_id')
+    )
+    op.create_index(op.f('ix_kt_selection_options_operative_id'), 'kt_selection_options', ['operative_id'], unique=False)
+    op.create_index(op.f('ix_kt_selection_options_selection_list_id'), 'kt_selection_options', ['selection_list_id'], unique=False)
+    op.create_table('kt_selection_restrictions',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('selection_list_id', sa.Uuid(), nullable=False),
+    sa.Column('keyword', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('max_operatives', sa.Integer(), nullable=False),
+    sa.CheckConstraint('max_operatives >= 1', name='ck_kt_selection_restriction_max'),
+    sa.ForeignKeyConstraint(['selection_list_id'], ['kt_selection_lists.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('selection_list_id', 'keyword')
+    )
+    op.create_index(op.f('ix_kt_selection_restrictions_keyword'), 'kt_selection_restrictions', ['keyword'], unique=False)
+    op.create_index(op.f('ix_kt_selection_restrictions_selection_list_id'), 'kt_selection_restrictions', ['selection_list_id'], unique=False)
     op.create_table('kt_weapons',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -148,8 +193,16 @@ def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index(op.f('ix_kt_weapons_operative_id'), table_name='kt_weapons')
     op.drop_table('kt_weapons')
+    op.drop_index(op.f('ix_kt_selection_restrictions_selection_list_id'), table_name='kt_selection_restrictions')
+    op.drop_index(op.f('ix_kt_selection_restrictions_keyword'), table_name='kt_selection_restrictions')
+    op.drop_table('kt_selection_restrictions')
+    op.drop_index(op.f('ix_kt_selection_options_selection_list_id'), table_name='kt_selection_options')
+    op.drop_index(op.f('ix_kt_selection_options_operative_id'), table_name='kt_selection_options')
+    op.drop_table('kt_selection_options')
     op.drop_index(op.f('ix_kt_abilities_operative_id'), table_name='kt_abilities')
     op.drop_table('kt_abilities')
+    op.drop_index(op.f('ix_kt_selection_lists_kill_team_id'), table_name='kt_selection_lists')
+    op.drop_table('kt_selection_lists')
     op.drop_index('uq_kt_ploy_universal_name', table_name='kt_ploys', sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
     op.drop_index(op.f('ix_kt_ploys_kill_team_id'), table_name='kt_ploys')
     op.drop_table('kt_ploys')

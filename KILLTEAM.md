@@ -34,6 +34,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 13 | Team rules | Rules belong to the **kill team** (`KillTeamRule`), not the faction | Two kill teams in the same faction can have different rules |
 | 14 | Weapons and abilities | Belong to **one operative** (a plain FK), not shared through link tables the way 40k's `unit_weapons` / `unit_abilities` do | A datacard lists its own profiles, and the same weapon name on two operatives can carry different numbers; sharing would mean deduplicating on name *and* every stat |
 | 15 | Weapon range | One non-null `range` column: the number from a printed `Range x` weapon rule when there is one, otherwise **1 for melee, 2 for range**, filled by a context-sensitive column default | A 2024 profile prints ATK/HIT/DMG/WR and no range — distance appears only as a weapon rule — so the column needs a defined meaning rather than a blank |
+| 16 | Composition | A kill team's composition is **budgeted selection lists** (`KTSelectionList` → `KTSelectionOption`), not a headcount with a leader. An option carries its `cost` in selections, how many `models` it fields, and its own `max_selections` cap | The pages never say "leader": they say "1 X operative", then "4 X operatives selected from the following list". A budget of 1 over one option *is* required; over several it is "choose one". Weighted costs (Brood Brother's Magus counts as two selections) and pairs ("2 PSYCHIC FAMILIAR … still counts as one selection") cannot be expressed by a count and a flag |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -113,9 +114,12 @@ against: Raveners.
 | Table | Holds |
 |---|---|
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
-| `KillTeam` | name, **operative count**; FK `KTFaction` |
+| `KillTeam` | name; FK `KTFaction`. **No operative count** — see decision #16 |
 | `KillTeamRule` | name, text; FK kill team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts) |
-| `KTOperative` | name, APL, move, save, wounds, keywords, **required**, **max per roster** (null = no limit); FK kill team |
+| `KTOperative` | name, APL, move, save, wounds, keywords; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it |
+| `KTSelectionList` | label (as printed), `budget` in selections, `position`, `restriction_text`; FK kill team |
+| `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_text`; FK list + operative |
+| `KTSelectionRestriction` | `keyword`, `max_operatives`; FK list — a cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
 | `KTAbility` | name, text (includes unique actions); FK operative |
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
@@ -209,27 +213,54 @@ Mirrors `Army`.
 - `GET .../validate` **reports** composition problems rather than blocking saves;
   harden later, team by team.
 
-### Roster limits
+### Composition: budgeted selection lists
 
-Every kill team limits what a roster may contain. Three kinds of limit, all stored as
-**data** on the catalog (columns above), not written as code per team:
+A page states what a roster may contain as **lists**, each with a budget:
 
-| Limit | Where it lives | Example |
+    Raveners   list 1  budget 1   [Ravener Prime]
+               list 2  budget 4   [Felltalon, Tremorscythe, Venomspitter, Warrior, Wrecker]
+                                  each max 1, except Warrior (no limit)
+
+Team size is per team — across the 48 teams the totals run from 2 to 14, with 10 the
+most common — so nothing about size is hardcoded.
+
+| Rule | Where it lives | Example |
 |---|---|---|
-| **Team size**: there is *always* a set number of operatives | `KillTeam.operative_count` | Raveners: 5 (1 Prime + 4 others) |
-| **Required**: some operatives must be in the roster | `KTOperative.required` | Raveners: the Ravener Prime (leader) |
-| **Per-operative cap**: how many of the same operative may be taken | `KTOperative.max_per_roster` | Raveners: `1` for each specialist; `null` for Warriors, which can be taken without restriction (still bounded by team size) |
+| Selections a list may spend | `KTSelectionList.budget` | Raveners' second list: 4 |
+| Which operatives it offers | `KTSelectionOption` rows | the five specialists |
+| An operative that must be taken | a budget-1 list with one option | the Ravener Prime |
+| Choose one of several | a budget-1 list with several options | Angel of Death's sergeants |
+| An option costing two selections | `KTSelectionOption.cost` | Brood Brother's Magus |
+| Two models for one selection | `KTSelectionOption.models` | "2 PSYCHIC FAMILIAR … still counts as one selection" |
+| A cap on repeats | `KTSelectionOption.max_selections` | 1 per specialist, NULL for Warriors |
+| A cap on a **set** of operatives | `KTSelectionRestriction` (keyword + limit) | Deathwatch: "up to one GRAVIS operative" |
 
-`validate` checks all three and reports each problem with the operative it concerns.
-The per-operative cap is checked against `KTRosterOperative.amount`; team size against
-the sum of amounts, reporting a roster that is over **or under** size. When a game starts, each copy becomes its own `KTGameOperative`,
-since every copy tracks its own wounds and order.
+The cap sits on the **option**, not the operative: it is stated by the list, and two
+lists can offer the same operative on different terms.
 
-This is roster bookkeeping, not rules implementation: the app counts what is in the
-roster against limits read from the data, the same way it checks wounds against a
-maximum during a game. Some kill teams have selection rules these three columns
-can't express (e.g. "choose one of these options"); those are recorded when the
-fixtures show them, and handled as a later addition rather than guessed at now.
+Three of the 48 teams use weighted costs (Blooded, Brood Brother, Pathfinders); `cost`
+and `models` are what make them expressible rather than exceptional.
+
+**Keyword caps are the other set-scoped rule, and they are common: 13 of the 48 teams
+state one.** Deathwatch prints "can only include each operative on this list once, and
+can only include up to one GRAVIS operative" — two rules in one sentence, and only the
+first is per-option. Several entries carry GRAVIS, so capping each at one still allows
+two, which is why `KTSelectionRestriction` exists rather than a note in
+`restriction_text`: unstructured, `validate` would approve illegal rosters for a
+quarter of the teams. It is evaluated against `KTOperative.keywords`, which the catalog
+already holds, and a list may carry several caps (Inquisitorial Agent states three).
+
+**Not yet structured, kept as printed text.** `restriction_text` on a list keeps the
+sentence the caps were read from; `loadout_text` on an option keeps the weapon options
+a page prints for that entry ("with one option from each of the following: Hand flamer
+or heavy bolt pistol; …"). A datacard lists every profile an operative can have and
+never marks which are alternatives, so that text is the only record of it. When a
+roster has to enforce a loadout these become structured option groups — and the
+filtering service (choose one weapon, the alternatives drop away) gains something to
+filter on.
+
+Also roster-level rather than catalog (K4): an equipment option cannot be selected
+twice in one game, and the allowance is 4 pieces with some teams allowed more.
 
 ## Game tracker
 
