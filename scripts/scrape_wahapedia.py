@@ -97,9 +97,11 @@ def fetch(url: str, *, cache_dir: Path = CACHE_DIR, delay: float = 3.0, refresh:
     """GET `url` politely, caching the HTML to disk so re-runs don't re-hit the site.
 
     The cache has no expiry, which is the right default while iterating on parsers but
-    means a re-run can never see a CHANGED page: pass `refresh=True` (`--refresh` on
-    either scraper) to re-request and overwrite the copy on disk. Without it, a rebalanced
-    stat would never reach the database no matter how often the pipeline runs.
+    means a re-run can never see a CHANGED page: pass `refresh=True` to re-request and
+    overwrite the copy on disk. Without it, a rebalanced stat would never reach the
+    database no matter how often the pipeline runs. The Kill Team scraper exposes this as
+    `--refresh` / `make scrape-kt-fresh`; this module has no CLI of its own, so a 40k
+    re-scrape still means clearing `scripts/data/cache` by hand.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached = cache_dir / (re.sub(r"[^A-Za-z0-9]+", "_", url).strip("_") + ".html")

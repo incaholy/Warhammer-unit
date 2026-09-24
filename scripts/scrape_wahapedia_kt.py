@@ -130,11 +130,6 @@ def parse_nav(html: str) -> list[NavEntry]:
     return entries
 
 
-def discover() -> list[NavEntry]:
-    """Every kill team the site currently lists, via the cached fetch layer."""
-    return parse_nav(fetch(NAV_URL))
-
-
 # ---------------------------------------------------------------------------
 # A team page's datacards. One `div.dsOuterFrame` per operative, holding its name
 # (`h3.pTable_h3`), its stat line (a `td.pCell` per stat, labelled), its weapons

@@ -5,6 +5,7 @@ holds someone else's content: this tests the loader, not any particular catalog.
 """
 
 import copy
+import re
 
 import pytest
 from sqlmodel import select
@@ -579,3 +580,81 @@ def test_a_changed_option_alone_replaces_the_composition(session):
     ).one()
     assert (stored.cost, stored.models, stored.max_selections) == (1, 2, None)
     assert stored.loadout_options == ["with ash lash", "with ember brand"]
+
+
+def test_a_payload_missing_the_composition_section_leaves_it_alone(session):
+    # Absent is not empty. A team whose page could not be read never reaches the seed at
+    # all (it lands in the payload's `skipped`), so a missing key means a partial payload
+    # -- and deleting every list and option over it, reported as a replace, would be the
+    # worst possible reading.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    del payload["kill_teams"][0]["selection_lists"]
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 0
+    assert len(session.exec(select(KTSelectionList)).all()) == 2
+    assert len(session.exec(select(KTSelectionOption)).all()) == 2
+
+
+def test_an_explicitly_empty_composition_is_a_statement_and_clears_it(session):
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"] = []
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    assert session.exec(select(KTSelectionList)).all() == []
+    assert session.exec(select(KTSelectionOption)).all() == []
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        pytest.param(
+            lambda team: team["ploys"].append(dict(team["ploys"][0], kind="firefight")),
+            "ploy 'ASHEN ADVANCE' appears twice",
+            id="ploy name",
+        ),
+        pytest.param(
+            lambda team: team["operatives"].append(copy.deepcopy(team["operatives"][0])),
+            "operative 'Hollow Warden' appears twice",
+            id="operative name",
+        ),
+        pytest.param(
+            lambda team: team["selection_lists"].append(
+                dict(copy.deepcopy(team["selection_lists"][0]), label="A second list here")
+            ),
+            "selection list position 0 appears twice",
+            id="list position",
+        ),
+        pytest.param(
+            lambda team: team["selection_lists"][1]["options"].append(
+                copy.deepcopy(team["selection_lists"][1]["options"][0])
+            ),
+            "option 'Hollow Sentinel' appears twice",
+            id="option operative",
+        ),
+        pytest.param(
+            lambda team: team["operatives"][0]["weapons"].append(
+                copy.deepcopy(team["operatives"][0]["weapons"][0])
+            ),
+            "weapon ('Brazier', 'range') appears twice",
+            id="weapon name and category",
+        ),
+    ],
+)
+def test_a_payload_naming_the_same_thing_twice_is_refused(session, edit, message):
+    # Each of these keys is a unique constraint, so the second entry would not become a
+    # second row: the upsert would find the first and rewrite it, and the last one printed
+    # would silently win. A request for that row would be refused as a conflict, so this is
+    # refused too -- before anything is written, since the payload is one transaction.
+    payload = copy.deepcopy(SAMPLE)
+    edit(payload["kill_teams"][0])
+
+    with pytest.raises(SeedError, match=re.escape(message)):
+        seed(session, payload)
+
+    assert session.exec(select(KillTeam)).all() == []

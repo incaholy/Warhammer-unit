@@ -15,6 +15,7 @@ from scripts.scrape_wahapedia_kt import (
     NavEntry,
     OperativeNotResolved,
     core_rules_url,
+    main,
     parse_composition,
     parse_equipment,
     parse_nav,
@@ -796,3 +797,22 @@ def test_a_look_alike_rules_page_is_not_mistaken_for_the_core_rules():
     </body></html>"""
 
     assert core_rules_url(nav) == "https://wahapedia.ru/kill-team3/the-rules/core-rules/"
+
+
+def test_a_run_that_parses_nothing_leaves_the_payload_file_untouched(monkeypatch, tmp_path):
+    # killteam.json is gitignored, so replacing a good one with `{"kill_teams": []}` loses
+    # it for good -- and the seed would then refuse it, having already lost the catalog.
+    payload_file = tmp_path / "killteam.json"
+    payload_file.write_text('{"kill_teams": ["the good payload"]}', encoding="utf-8")
+    monkeypatch.setattr("scripts.scrape_wahapedia_kt.DATA_PATH", payload_file)
+    monkeypatch.setattr("sys.argv", ["scrape_wahapedia_kt"])
+    monkeypatch.setattr(
+        "scripts.scrape_wahapedia_kt.scrape",
+        lambda **_: {"kill_teams": [], "universal_ploys": [], "universal_equipment": [], "skipped": []},
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+
+    assert exit_info.value.code == 1
+    assert payload_file.read_text(encoding="utf-8") == '{"kill_teams": ["the good payload"]}'

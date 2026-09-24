@@ -34,13 +34,13 @@ killteam.json shape:
           "ploys":      [ { "name", "kind", "description", "cp_cost"? }, ... ],
           "equipment":  [ { "name", "description" }, ... ],
           "operatives": [ { "name", "apl", "move", "save", "wounds", "keywords",
-                            "weapons":   [ { "name", "category", "range"?, "attacks",
+                            "weapons":   [ { "name", "category", "range", "attacks",
                                              "hit", "normal_damage", "crit_damage",
                                              "rules" }, ... ],
                             "abilities": [ { "name", "description" }, ... ] }, ... ],
-          "selection_lists": [ { "label", "budget", "position", "restriction_text"?,
+          "selection_lists": [ { "label", "budget", "position", "restriction_text",
                                  "options": [ { "operative", "cost", "models",
-                                                "max_selections"?,
+                                                "max_selections",
                                                 "loadout_options" }, ... ] }, ... ],
           "keyword_caps":    [ { "keyword", "max_operatives" }, ... ] }, ...
       ],
@@ -48,6 +48,11 @@ killteam.json shape:
       "universal_equipment": [ { "name", "description" }, ... ],
       "skipped":             [ { "team", "reason" }, ... ]
     }
+
+Every key above is REQUIRED and read as such, so a scraper-side rename breaks the seed
+instead of loading 422 operatives with empty keywords. `range` and `max_selections` may
+be null (no printed Range rule, no repeat cap); `cp_cost` is the one optional key, since
+a page that prints no cost means the default.
 
 `skipped` names the teams the scraper could not read (ambiguous pages, KILLTEAM.md → K6).
 It is reported at the end of a run: the catalog loads fine without them, but a seed that
@@ -104,6 +109,73 @@ class SeedError(Exception):
     """A problem in killteam.json — a bad cross-reference or a malformed record."""
 
 
+def _duplicate(items: list[dict], key) -> Any | None:
+    """The first key that appears twice in `items`, or None."""
+    seen = set()
+    for item in items:
+        value = key(item)
+        if value in seen:
+            return value
+        seen.add(value)
+    return None
+
+
+def _check_no_duplicates(data: dict) -> None:
+    """Refuse a payload that names the same thing twice inside one section.
+
+    Every natural key below is a unique constraint, so a repeat does not become a second
+    row: `_upsert` finds the first and REWRITES it, and the last entry silently wins. An
+    API request for that second row would be refused as a conflict, so the seed refuses
+    it too rather than quietly keeping one of the two. Checked before anything is written,
+    because the whole payload is one transaction.
+    """
+    sections: list[tuple[str, list[dict], Any]] = [
+        ("kill team", data["kill_teams"], lambda team: team["name"]),
+        ("universal ploy", data.get("universal_ploys", []), lambda ploy: ploy["name"]),
+        ("universal equipment", data.get("universal_equipment", []), lambda item: item["name"]),
+    ]
+    for team in data["kill_teams"]:
+        where = team["name"]
+        sections += [
+            (f"{where} rule", team.get("rules", []), lambda rule: rule["name"]),
+            (f"{where} ploy", team.get("ploys", []), lambda ploy: ploy["name"]),
+            (f"{where} equipment", team.get("equipment", []), lambda item: item["name"]),
+            (f"{where} operative", team.get("operatives", []), lambda op: op["name"]),
+            (f"{where} keyword cap", team.get("keyword_caps", []), lambda cap: cap["keyword"]),
+            (
+                f"{where} selection list position",
+                team.get("selection_lists", []),
+                lambda listing: listing["position"],
+            ),
+        ]
+        for operative in team.get("operatives", []):
+            sections += [
+                (
+                    f"{where}'s {operative['name']} weapon",
+                    operative.get("weapons", []),
+                    lambda weapon: (weapon["name"], weapon["category"]),
+                ),
+                (
+                    f"{where}'s {operative['name']} ability",
+                    operative.get("abilities", []),
+                    lambda ability: ability["name"],
+                ),
+            ]
+        for listing in team.get("selection_lists", []):
+            sections.append(
+                (
+                    f"{where} list {listing['position']} option",
+                    listing.get("options", []),
+                    lambda option: option["operative"],
+                )
+            )
+
+    for what, items, key in sections:
+        repeat = _duplicate(items, key)
+        if repeat is not None:
+            raise SeedError(f"{what} {repeat!r} appears twice in the payload")
+
+
 def _upsert(
     session: Session,
     model,
@@ -115,12 +187,14 @@ def _upsert(
     """The row matching `keys`: created if absent, brought up to date if present.
 
     `keys` is the row's NATURAL key, and in every case here it is also a UNIQUE
-    constraint — a faction's name, a weapon's (operative, name, category), a list's
-    (kill_team, position), an option's (list, operative). Keeping those two identical is
-    the whole trick: the lookup cannot disagree with what the database considers the
-    same row, so a second run finds the first run's work instead of colliding with it.
-    Anything extra in the key is a guess — keying a list on its budget as well as its
-    position made a balance change look like a new list and hit the constraint.
+    constraint — a faction's name, an operative's (kill_team, name), a weapon's
+    (operative, name, category). Keeping those two identical is the whole trick: the
+    lookup cannot disagree with what the database considers the same row, so a second run
+    finds the first run's work instead of colliding with it. Anything extra in the key is
+    a guess, and anything missing collapses two source rows into one.
+
+    A selection list does NOT come through here: its only stable identity is its print
+    position, which an upsert cannot follow. `_seed_composition` replaces that subtree.
 
     A `None` in `keys` is matched with `IS NULL`, which is how the universal ploys and
     equipment (`kill_team_id = NULL`) are found. SQLAlchemy would render `column == None`
@@ -227,15 +301,21 @@ def _shape(lists) -> list:
     Options come back from the database in no particular order, so both sides are sorted
     -- lists by position, options by operative name, each unique within its parent.
     """
+    # Sorted on the position and the operative name alone -- both unique within their
+    # parent, so the ordering never reaches `restriction_text`, which is nullable and
+    # would raise `TypeError` against a string instead of comparing.
     return sorted(
         (
-            position,
-            budget,
-            label,
-            restriction,
-            tuple(sorted(options, key=lambda option: option[0])),
-        )
-        for position, budget, label, restriction, options in lists
+            (
+                position,
+                budget,
+                label,
+                restriction,
+                tuple(sorted(options, key=lambda option: option[0])),
+            )
+            for position, budget, label, restriction, options in lists
+        ),
+        key=lambda row: row[0],
     )
 
 
@@ -256,8 +336,16 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
     cascade) and write the payload's. A team whose composition matches is not touched at
     all, which is the common case on a re-run.
     """
+    if "selection_lists" not in data:
+        # Absent is NOT empty. The scraper raises rather than emitting a team without the
+        # section (that team lands in `skipped`), so a missing key means a partial or
+        # hand-made payload -- and reading it as "this team has no composition" would
+        # delete every list and option the team has, reported as a tidy replace. An
+        # explicit `[]` still means "replace it with nothing", which is a statement.
+        return
+
     wanted = []
-    for listing in data.get("selection_lists", []):
+    for listing in data["selection_lists"]:
         options = []
         for option in listing.get("options", []):
             if option["operative"] not in operatives:
@@ -401,6 +489,7 @@ def seed(session: Session, data: dict) -> dict[str, int]:
     counts = dict.fromkeys(COUNT_KEYS, 0)
     if not data.get("kill_teams"):
         raise SeedError("killteam.json lists no kill teams — run `make scrape-kt` first")
+    _check_no_duplicates(data)
 
     try:
         for team in data["kill_teams"]:
