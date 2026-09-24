@@ -600,6 +600,48 @@ def test_a_keyword_cap_is_read_as_its_own_rule():
     assert _lists()[-1].keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
 
 
+def test_a_cap_is_matched_by_words_because_the_pages_disagree_about_keywords():
+    # Battleclade's datacards print "COMBAT, SERVITOR" -- two comma-separated keywords --
+    # while Pathfinders prints "WEAPONS EXPERT" as one. Both are capped by a sentence
+    # naming the phrase, so matching compares WORDS, as name resolution does.
+    two_keywords = KeywordCap(keyword="COMBAT SERVITOR", max_operatives=3)
+    one_keyword = KeywordCap(keyword="WEAPONS EXPERT", max_operatives=2)
+
+    assert two_keywords.matches(["BATTLECLADE", "COMBAT", "SERVITOR"])
+    assert one_keyword.matches(["PATHFINDER", "WEAPONS EXPERT"])
+    # and the other way round, since the pages are inconsistent in both directions
+    assert two_keywords.matches(["BATTLECLADE", "COMBAT SERVITOR"])
+
+
+def test_a_cap_does_not_match_an_operative_without_every_word():
+    cap = KeywordCap(keyword="COMBAT SERVITOR", max_operatives=3)
+
+    assert not cap.matches(["BATTLECLADE", "GUN", "SERVITOR"])
+    assert not cap.matches([])
+
+
+def test_a_cap_matching_nobody_on_the_page_raises():
+    # A cap that can never trigger means the phrase was misread, and it would leave
+    # `validate` approving rosters it should refuse -- silently, which is worse than
+    # failing the team.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span></td></tr></table>
+    </div>
+    <div class="BreakInsideAvoid"><h2>Operatives</h2>
+    <ul class="redTriangle"><li>2 THINGS selected from the following list:
+      <ul class="redCircle2"><li><span class="kwb kwbo">A CARD</span></li></ul>
+    </li></ul>
+    Your kill team can only include up to two NOBODY operatives.
+    </div>
+    """
+    with pytest.raises(CompositionNotParsed, match="matches no operative"):
+        parse_composition(html)
+
+
 def test_only_the_list_the_sentence_belongs_to_is_capped():
     # The sentence is printed after the whole composition and says "this list".
     assert all(option.max_selections is None for option in _lists()[0].options)

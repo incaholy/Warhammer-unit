@@ -28,6 +28,7 @@ where 40k has Aeldari as a subfaction *under* Xenos.
 """
 
 import re
+from collections.abc import Iterable
 from copy import copy
 from dataclasses import dataclass, field
 
@@ -684,10 +685,23 @@ class CompositionNotParsed(ValueError):
 
 @dataclass(frozen=True)
 class KeywordCap:
-    """A cap on operatives carrying a keyword, as `KTSelectionRestriction` stores it."""
+    """A cap on operatives carrying a keyword, as `KTSelectionRestriction` stores it.
+
+    `keyword` is the phrase as printed, and matching it is by WORDS rather than by
+    string, because the pages are not consistent about which is which: Battleclade's
+    datacards print "COMBAT, SERVITOR" -- two keywords, comma-separated -- while
+    Pathfinders prints "WEAPONS EXPERT" as one. Both are capped by a sentence naming the
+    phrase, so an operative satisfies a cap when every word of the phrase appears among
+    the words of its keywords.
+    """
 
     keyword: str
     max_operatives: int
+
+    def matches(self, keywords: Iterable[str]) -> bool:
+        """Whether an operative carrying `keywords` counts towards this cap."""
+        carried = {word for keyword in keywords for word in _words(keyword)}
+        return bool(carried) and set(_words(self.keyword)) <= carried
 
 
 @dataclass(frozen=True)
@@ -966,12 +980,23 @@ def parse_composition(html: str) -> list[SelectionList]:
             )
             for option in last.options
         ]
+        caps = _keyword_caps(sentence)
+        # A cap nobody can trigger means the phrase was misread, and a cap that
+        # silently never applies is worse than none: `validate` would approve rosters
+        # it should refuse. Checked against EVERY operative on the page, not just this
+        # list's -- the sentence says "your kill team" (Brood Brother caps BROODCOVEN,
+        # which its Magus and Patriarch carry from a different list).
+        for cap in caps:
+            if not any(cap.matches(carried) for carried in keywords_of.values()):
+                raise CompositionNotParsed(
+                    f"the cap on {cap.keyword!r} matches no operative's keywords on this page"
+                )
         lists[-1] = SelectionList(
             label=last.label,
             budget=last.budget,
             position=last.position,
             options=options,
             restriction_text=sentence,
-            keyword_caps=_keyword_caps(sentence),
+            keyword_caps=caps,
         )
     return lists

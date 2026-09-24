@@ -268,7 +268,13 @@ become data:
   free.
 - *"Your kill team can only include up to two GUNNER operatives"* →
   `KTSelectionRestriction`. 12 of the parsed teams state one, and a list may carry
-  several.
+  several. **Matched by words, not strings**: the pages disagree about what counts as
+  one keyword — Battleclade's datacards print "COMBAT, SERVITOR" (two, comma-separated)
+  while Pathfinders prints "WEAPONS EXPERT" (one), and both are capped by a sentence
+  naming the phrase. An operative counts towards a cap when every word of the phrase
+  appears among the words of its keywords. A cap matching no operative on the page
+  raises: the phrase was misread, and a cap that never applies would leave `validate`
+  approving rosters it should refuse.
 
 A number word the parser does not know raises rather than defaulting, since a silently
 wrong cap approves illegal rosters.
