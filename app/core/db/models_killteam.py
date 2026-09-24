@@ -142,17 +142,26 @@ class KTOperative(TimestampMixin, table=True):
     offered_by: list["KTSelectionOption"] = Relationship(back_populates="operative", cascade_delete=True)
 
 
-def _range_for_category(context) -> int:
-    """The default `range` for a weapon whose caller gave none.
+def default_range(category: str | None) -> int:
+    """The `range` a weapon profile gets when its page prints no `Range x` rule.
 
-    A context-sensitive column default: one column, a value that depends on this
-    row's `category`. SQL's `DEFAULT` takes a single value and cannot look at another
-    column, and a SQLModel `model_validator` is not an option either -- table models
-    skip validation, so a validator never runs. This does run, on every ORM and Core
-    insert, and lives in the models file where the schema is documented.
+    Public because two callers need the same answer: the column default below, and the
+    seed, which has to write this value EXPLICITLY when a source that used to print a
+    range stops printing one. A column default only fires on INSERT, so a seed that
+    merely omitted the field would leave the withdrawn number frozen in place.
     """
-    params = context.get_current_parameters()
-    return 1 if params.get("category") == "melee" else 2
+    return 1 if category == "melee" else 2
+
+
+def _range_for_category(context) -> int:
+    """`default_range` as a context-sensitive column default.
+
+    One column, a value that depends on this row's `category`. SQL's `DEFAULT` takes a
+    single value and cannot look at another column, and a SQLModel `model_validator` is
+    not an option either -- table models skip validation, so a validator never runs.
+    This does run, on every ORM and Core insert.
+    """
+    return default_range(context.get_current_parameters().get("category"))
 
 
 class KTWeapon(TimestampMixin, table=True):
@@ -236,6 +245,10 @@ class KTAbility(TimestampMixin, table=True):
     operative: KTOperative = Relationship(back_populates="abilities")
 
 
+DEFAULT_PLOY_CP_COST = 1
+"""What a ploy costs when its page prints no cost. Shared with the seed, as above."""
+
+
 class KTPloy(TimestampMixin, table=True):
     """A ploy: a CP-priced option a player may use during a game.
 
@@ -275,9 +288,12 @@ class KTPloy(TimestampMixin, table=True):
     )
     name: str = Field(max_length=128)
     kind: str = Field(max_length=16)  # "strategy" | "firefight"
-    # The datacard pages do not print costs, so this is what a ploy costs unless the
-    # source says otherwise (Command Re-roll is 1 CP).
-    cp_cost: int = Field(default=1)
+    # Most pages print no cost, so this is what a ploy costs unless the source says
+    # otherwise -- the core rules print Command Re-roll's, and Blades of Khaine prints
+    # its four firefight ploys' inline. As with `KTWeapon.range`, the seed writes this
+    # value explicitly rather than relying on the default, so a cost the source stops
+    # printing reverts instead of sticking.
+    cp_cost: int = Field(default=DEFAULT_PLOY_CP_COST)
     description: str
 
     kill_team: KillTeam | None = Relationship(back_populates="ploys")
