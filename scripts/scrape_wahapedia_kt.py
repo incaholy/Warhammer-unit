@@ -469,9 +469,15 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
     suffix+shortest, prefix, same words, card-contains-entry, entry-contains-card, and
     finally the last word.
 
-    The tie-break is "fewest extra words": `GUNNER` matches `Spectre Gunner`,
-    `Spectre Heavy Gunner` and `Spectre Stub-Gunner`, and the first is meant -- the
-    others are their own entries and match themselves exactly.
+    The tie-break is "fewest extra words", and WHICH SIDE the extras are on decides the
+    direction. Where the card is the longer side, the shortest card is meant: `GUNNER`
+    matches `Spectre Gunner`, `Spectre Heavy Gunner` and `Spectre Stub-Gunner`, and the
+    plain one is it -- the others are their own entries and match themselves exactly.
+    Where the ENTRY is the longer side the opposite holds, because a card that uses more
+    of the entry's words is the more specific reading: `VOID-DANCER TROUPE LEAD PLAYER`
+    matches both `Player` and `Lead Player`, and taking the shortest offered a Player on
+    the line that requires the Lead Player. Over all 48 teams 12 entries reach a
+    tie-break; 11 are on the card side, and this is the one on the entry side.
 
     `strict=False` returns None for a line that matches NOTHING, which is how a caller
     asks "is this line an operative at all?". An ambiguous line still raises: it is
@@ -491,25 +497,27 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
     joined = " ".join(entry_words)
     as_set = set(entry_words)
 
+    # (matcher, how to break a tie): `min` where the CARD carries the extra words, `max`
+    # where the ENTRY does -- see the docstring.
     rules = (
-        lambda card: _words(card) == entry_words,
-        lambda card: " ".join(_words(card)).endswith(" " + joined),
-        lambda card: " ".join(_words(card)).startswith(joined + " "),
-        lambda card: set(_words(card)) == as_set,
-        lambda card: set(_words(card)) >= as_set,
+        (lambda card: _words(card) == entry_words, min),
+        (lambda card: " ".join(_words(card)).endswith(" " + joined), min),
+        (lambda card: " ".join(_words(card)).startswith(joined + " "), min),
+        (lambda card: set(_words(card)) == as_set, min),
+        (lambda card: set(_words(card)) >= as_set, min),
         # The other direction: the ENTRY carries a prefix the card does not.
         # "INQUISITORIAL AGENT INTERROGATOR" against the card "Interrogator Agent".
-        lambda card: bool(_words(card)) and as_set >= set(_words(card)),
-        lambda card: bool(_words(card)) and _words(card)[-1] == entry_words[-1],
+        (lambda card: bool(_words(card)) and as_set >= set(_words(card)), max),
+        (lambda card: bool(_words(card)) and _words(card)[-1] == entry_words[-1], min),
     )
-    for matches in rules:
+    for matches, prefer in rules:
         hits = [card for card in datacards if matches(card)]
         if len(hits) == 1:
             return hits[0]
         if len(hits) > 1:
-            shortest = min(hits, key=lambda card: len(_words(card)))
-            if sum(1 for card in hits if len(_words(card)) == len(_words(shortest))) == 1:
-                return shortest
+            winner = prefer(hits, key=lambda card: len(_words(card)))
+            if sum(1 for card in hits if len(_words(card)) == len(_words(winner))) == 1:
+                return winner
             # Raised even when `strict=False`. A line matching several datacards IS
             # naming an operative -- we just cannot say which -- so returning None
             # would make the caller drop it as though it were a weapon loadout. Hunter

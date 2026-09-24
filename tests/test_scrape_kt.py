@@ -816,3 +816,19 @@ def test_a_run_that_parses_nothing_leaves_the_payload_file_untouched(monkeypatch
 
     assert exit_info.value.code == 1
     assert payload_file.read_text(encoding="utf-8") == '{"kill_teams": ["the good payload"]}'
+
+
+def test_the_most_specific_card_wins_when_the_entry_carries_the_extra_words():
+    # The other side of the tie-break above. Here the ENTRY is the longer side, so the
+    # card using more of its words is the more specific reading -- taking the shortest
+    # offered a Player on the line that requires the Lead Player, and left the Lead
+    # Player unfieldable.
+    troupe = ["Lead Player", "Death Jester", "Player", "Shadowseer"]
+
+    assert resolve_operative("VOID-DANCER TROUPE LEAD PLAYER", troupe) == "Lead Player"
+    # and the plain entry still resolves to the plain card
+    assert resolve_operative("PLAYER", troupe) == "Player"
+    # the pre-existing entry-side case is unaffected: the card has no extra words to lose
+    assert resolve_operative("INQUISITORIAL AGENT INTERROGATOR", ["Interrogator Agent"]) == (
+        "Interrogator Agent"
+    )
