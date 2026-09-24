@@ -123,7 +123,7 @@ seed: check-db-url ## Load the datasheet catalog from scripts/data/datasheets.js
 scrape: ## Scrape Wahapedia datasheets into scripts/data/datasheets.json (then run make seed).
 	@$(PYTHON) -m scripts.scrape_wahapedia
 
-seed-kt: check-db-url ## Load the Kill Team catalog from scripts/data/killteam.json (idempotent).
+seed-kt: check-db-url ## Load the Kill Team catalog from scripts/data/killteam.json (re-runnable; refreshes changed rows).
 	@$(PYTHON) -m scripts.seed_killteam
 
 scrape-kt: ## Scrape Wahapedia Kill Team into scripts/data/killteam.json (gitignored; then make seed-kt).

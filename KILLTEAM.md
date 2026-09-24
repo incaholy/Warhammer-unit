@@ -82,9 +82,17 @@ divided by path:
   scraped content is committed to a public repo.
 - Output goes to `scripts/data/killteam.json`, which is **gitignored**. The 40k
   equivalent ended up tracked; this one is not.
-- `scripts/seed_killteam.py`: idempotent, natural-key upserts, `SeedError` / `_ref`
-  pattern from `scripts/seed_datasheets.py`.
-- `make scrape-kt`, `make seed-kt`.
+- `scripts/seed_killteam.py`: natural-key upserts that also **refresh** a row the
+  source changed, `SeedError` / `_ref` pattern from `scripts/seed_datasheets.py`. One
+  exception: a team's **composition is replaced as a whole**, because a selection
+  list's identity is its print position, so a page that gains or reorders a line
+  shifts every list rather than changing one. Rows the source *removes* elsewhere are
+  left behind until K4 decides how rosters referencing them are handled.
+- `make scrape-kt`, `make seed-kt`. The page cache has no expiry, so
+  `make scrape-kt-fresh` is what picks up a **changed** page.
+- Teams whose page needs a human decision are listed in the payload's `skipped` and
+  reported by both tools rather than silently missing (K6: Hunter Clade,
+  Inquisitorial Agent).
 
 **Which teams: discovered, not configured.** The site's nav is one small standalone
 file (`nav.html`, assembled by JS, which is why a page's own HTML does not contain
