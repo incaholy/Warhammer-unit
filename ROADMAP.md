@@ -561,7 +561,8 @@ K1 tables. Confirms the K1 columns against real pages.
 ## K3. Catalog routes
 
 **Status: Planned.** Read-only routes under `/api/v1/kill-team` (factions, kill
-teams, operatives), public read and admin write like the 40k catalog.
+teams, operatives), public read and admin write like the 40k catalog — players never
+write to the scraped data (KILLTEAM.md decision #21).
 
 ## K4. Roster
 
@@ -572,9 +573,11 @@ since the rules pick it per battle.
 ## K5. Game tracker
 
 **Status: Planned.** Games created from a roster: turning points, CP, VP, and each
-operative's wounds, order and activation, with undo. Also this battle's equipment, and
-the operatives that equipment or a team rule adds or transforms mid-battle
-(KILLTEAM.md decisions #17–#20).
+operative's wounds, order and activation, with undo. Each game copies the whole
+datacard it plays with (decision #22), so the screen can show what a unit can do beside
+what is true of it now, and a re-scrape cannot change a battle in progress. Also this
+battle's equipment, the actions each operative has used, and the operatives that
+equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#23).
 
 ## K6. Widen to every kill team
 

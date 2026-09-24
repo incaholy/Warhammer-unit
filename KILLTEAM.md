@@ -24,7 +24,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 3 | Data source | Wahapedia, same two-stage scrape → seed as 40k | One pipeline shape to maintain |
 | 4 | Edition | 2024 | Current edition |
 | 5 | Players | One player per game; opponent's VP entered by hand | No sharing, permissions or live sync in v1 |
-| 6 | Game stats | **Snapshot** operative stats into the game at creation | A re-scrape must not change a game in progress |
+| 6 | Game stats | **Snapshot** operative stats into the game at creation — widened to the whole datacard by decision #22 | A re-scrape must not change a game in progress |
 | 7 | Game updates | **Absolute values** (`wounds: 7`), never deltas | Retry-safe on a flaky table-side connection (same reasoning as R12) |
 | 8 | History / undo | Current state in columns **plus** an append-only event log | Simple reads; undo reverts the last event. Not full event sourcing |
 | 9 | Concurrent edits | `version` column, stale write → 409 | Two tabs can't silently overwrite each other; 409 handling already exists |
@@ -37,8 +37,11 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 16 | Composition | A kill team's composition is **budgeted selection lists** (`KTSelectionList` → `KTSelectionOption`), not a headcount with a leader. An option carries its `cost` in selections, how many `models` it fields, and its own `max_selections` cap | The pages never say "leader": they say "1 X operative", then "4 X operatives selected from the following list". A budget of 1 over one option *is* required; over several it is "choose one". Weighted costs (Brood Brother's Magus counts as two selections) and pairs ("2 PSYCHIC FAMILIAR … still counts as one selection") cannot be expressed by a count and a flag |
 | 17 | Equipment | Equipment is picked **per game**, not per roster: `KTGameEquipment` with `UNIQUE(game_id, equipment_id)`, and the allowance (4 pieces, more for some teams) is checked there | The rules choose equipment for each battle and reveal it during play. On the roster it would make a roster mean "a roster for one battle", and re-playing the same team would mean a second roster |
 | 18 | A game's operatives | The set is **not fixed at creation**. Two operations change it during a battle: **add** (`source = equipment` or `rule`) and **transform** (one datacard becomes another) | Two teams need it already. MUTOID VERMIN equipment adds four Gellerpox vermin "for the battle", and Chaos Cult's Mutation turns a Devotee into a Mutant and then a Torment. Both are per-battle, so neither belongs on a roster |
-| 19 | Transform | **In place**: the row keeps its id, tokens, order and board status, its catalog pointer moves, and its stats are re-snapshotted. The event log carries the history | It is the same miniature on the table, so the game screen needs nothing new. A second row plus `replaces_id` would give lineage and cheap undo, at the cost of a status the UI must filter everywhere |
+| 19 | Transform | **In place**: the row keeps its id, tokens, order and board status, its catalog pointer moves, and its datacard is re-snapshotted (stats, weapons and abilities — decision #22). The event log carries the history | It is the same miniature on the table, so the game screen needs nothing new. A second row plus `replaces_id` would give lineage and cheap undo, at the cost of a status the UI must filter everywhere |
 | 20 | Which operatives a roster may take | `KTOperative.availability`: `roster` (the default) or `in_battle` | The vermin and Chaos Cult's Mutant / Torment are real datacards that **no selection list offers**, and that is correct — they arrive mid-battle. The flag says so explicitly, instead of the scraper's guard inferring it from rule text, and it is the list the game screen's "add an operative" picker needs |
+| 21 | The catalog | **Reference data, read-only to players**: public read, admin write, and a game or roster NEVER writes to a `kt_*` catalog table. Everything that changes during play — wounds, order, activation, tokens, actions used, equipment, CP, VP — lives on the game's own rows | The scrape is someone else's content and the single source of truth for what an operative *can do*. A player editing it would change every other game and roster that reads it, and the next `make seed-kt` would silently undo the edit anyway |
+| 22 | What a game snapshots | The **whole datacard**, not just the stat line: stats, weapon profiles, abilities and the text of the equipment taken, copied into the game as display-only JSON. Extends decision #6 | #6's reason applies to all of it, and the seed now REWRITES a catalog row when the source changes it (create-once would have been safe). Reading profiles live would let a balance update change a weapon mid-battle. It also makes a game self-contained: it keeps working if the catalog later drops that operative |
+| 23 | Actions | `KTGameOperative.actions_used`: a list of `{name, turning_point}` entries, appended as players mark them | Unique actions are abilities on the datacard, and their limits differ (once per battle, once per turning point). Recording *what was used and when* lets the screen show both without the tracker knowing any rule — decision #1 again, and the same shape as `tokens` |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -354,11 +357,22 @@ allowed more.
 
 ## Game tracker
 
+**The catalog is read-only; a game owns everything that changes** (decision #21). The
+scraped tables answer "what can this operative do?" and nothing in a game or a roster
+writes to them: a player editing a datacard would change every other game reading it,
+and the next `make seed-kt` would rewrite it back. So a game COPIES what it needs
+(decision #22) and then only ever writes its own rows.
+
+That copy is what the game screen reads, which has three consequences worth stating:
+a balance update to the source cannot change a battle in progress, a finished game
+still shows the datacard as it was played, and a game survives the catalog dropping an
+operative — the open question the seed leaves for K4 is about **rosters**, not games.
+
 | Table | Holds |
 |---|---|
 | `KTGame` | owner, roster, opponent name, status (setup / in progress / finished), turning point (1–4), phase (strategy / firefight), initiative, CP, VP by source, opponent VP, **markers** (JSON list), `version` |
-| `KTGameOperative` | **snapshot** of the operative's stats, current wounds, order (engage / conceal), activated this TP, **status** (reserve / on board / incapacitated), **tokens** (JSON list); plus the catalog operative it is a snapshot of, `source` (roster / equipment / rule) and `added_in_turning_point` (NULL for the roster's own) |
-| `KTGameEquipment` | the pieces picked for **this battle** (decision #17): FK game, FK equipment, `revealed` — `UNIQUE(game_id, equipment_id)` |
+| `KTGameOperative` | **snapshot** of the whole datacard (decision #22): stats, plus `weapons` and `abilities` as display-only JSON. Then the state: current wounds, order (engage / conceal), activated this TP, **status** (reserve / on board / incapacitated), **tokens** and `actions_used` (JSON lists). Plus the catalog operative it is a snapshot of, `source` (roster / equipment / rule) and `added_in_turning_point` (NULL for the roster's own) |
+| `KTGameEquipment` | the pieces picked for **this battle** (decision #17): FK game, FK equipment, its `text` snapshotted like an operative's, `revealed` — `UNIQUE(game_id, equipment_id)` |
 | `KTGameEvent` | append-only: type, turning point, payload (JSON) |
 
 Service-enforced bookkeeping (→ 400 `VALIDATION`), not rules:
@@ -366,6 +380,9 @@ Service-enforced bookkeeping (→ 400 `VALIDATION`), not rules:
 - wounds within `0..max`; `0` sets status to incapacitated
 - one activation per operative per turning point; advancing clears activations
 - CP never negative; no turning point past 4
+- an action recorded against an operative must be one its **snapshot** lists, and
+  carries the turning point it was used in (decision #23). How often each may be used
+  is a rule, so it is shown, not enforced
 
 **Tokens, markers and reserve.** Teams put tokens on operatives (Raveners: Poison,
 Heightened Senses, …) and markers on the killzone (Raveners: Tunnel markers 0–4), and
@@ -383,7 +400,7 @@ operatives to change after the game has started, and they need it in two differe
 | Team | What the rules do | What the tracker does |
 |---|---|---|
 | Gellerpox Infected | Revealing the **MUTOID VERMIN** equipment adds four vermin operatives for the battle | **add** four `KTGameOperative` rows with `source = equipment`, chosen from the team's `in_battle` datacards (Cursemite, Eyestinger Swarm, Sludge-Grub) |
-| Chaos Cult | **Mutation** turns a Devotee into a Mutant, and a Mutant into a Torment, during the battle | **transform** the row in place: its catalog pointer moves and its stats are re-snapshotted, keeping its tokens and board status |
+| Chaos Cult | **Mutation** turns a Devotee into a Mutant, and a Mutant into a Torment, during the battle | **transform** the row in place: its catalog pointer moves and its datacard is re-snapshotted, keeping its tokens, actions used and board status |
 
 Both are recorded in the event log (`operative_added`, `operative_transformed`, payload
 naming the datacards and the reason), so `undo` works on them like anything else and the
@@ -402,7 +419,7 @@ rostered (decision #20).
 Endpoints under `/api/v1/me/kill-team/games/...`:
 
 - `POST` (from a roster), `GET` list / detail
-- `PATCH .../operatives/{id}` — wounds, order, activated
+- `PATCH .../operatives/{id}` — wounds, order, activated, tokens, actions used
 - `POST .../operatives` — add one (decision #18): the catalog operative and a `source`
 - `PATCH .../operatives/{id}` with `becomes_operative_id` — transform it (decision #19)
 - `POST .../equipment` / `DELETE .../equipment/{id}` — this battle's picks
@@ -416,6 +433,13 @@ Endpoints under `/api/v1/me/kill-team/games/...`:
 Catalog browse → roster builder → game screen. The game screen is phone-first for
 table-side use: large touch targets, one card per operative, turning point / CP / VP
 always visible.
+
+An operative's card shows both halves at once: what it **can do**, from the game's own
+snapshot of the datacard — weapon profiles, abilities and unique actions, keywords — and
+what is **true of it now**: wounds left, order, whether it has activated, its tokens and
+the actions it has used. Nothing on that screen edits the catalog (decision #21), and it
+reads the snapshot rather than the catalog API, so a game needs no catalog request once
+it has started.
 
 ## Branching
 
