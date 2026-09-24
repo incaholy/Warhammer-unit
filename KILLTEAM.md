@@ -42,6 +42,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 21 | The catalog | **Reference data, read-only to players**: public read, admin write, and a game or roster NEVER writes to a `kt_*` catalog table. Everything that changes during play — wounds, order, activation, tokens, actions used, equipment, CP, VP — lives on the game's own rows | The scrape is someone else's content and the single source of truth for what an operative *can do*. A player editing it would change every other game and roster that reads it, and the next `make seed-kt` would silently undo the edit anyway |
 | 22 | What a game snapshots | The **whole datacard**, not just the stat line: stats, weapon profiles, abilities and the text of the equipment taken, copied into the game as display-only JSON. Extends decision #6 | #6's reason applies to all of it, and the seed now REWRITES a catalog row when the source changes it (create-once would have been safe). Reading profiles live would let a balance update change a weapon mid-battle. It also makes a game self-contained: it keeps working if the catalog later drops that operative |
 | 23 | Actions | `KTGameOperative.actions_used`: a list of `{name, turning_point}` entries, appended as players mark them | Unique actions are abilities on the datacard, and their limits differ (once per battle, once per turning point). Recording *what was used and when* lets the screen show both without the tracker knowing any rule — decision #1 again, and the same shape as `tokens` |
+| 24 | Reference at the table | A game also snapshots its **team's** reference: the kill team's rules, its own ploys and the universal ones. With #22's datacards and equipment text, a battle needs **no catalog request** once it has started, and the game screen can show any datacard in full as a reference | A player reads the printed card mid-battle — every weapon profile, every ability, the ploys they might spend CP on. Leaving those in the catalog would mean a screen that mixes live and snapshotted data, and a re-scrape changing a ploy's wording mid-game. It is static for the game's whole life, so it is embedded in the game detail response and never invalidates |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -368,9 +369,19 @@ a balance update to the source cannot change a battle in progress, a finished ga
 still shows the datacard as it was played, and a game survives the catalog dropping an
 operative — the open question the seed leaves for K4 is about **rosters**, not games.
 
+**The datacard is reference, and reference is part of the game** (decision #24). At the
+table a player reads the card itself: the stat line, every weapon profile with its
+ATK / HIT / DMG and weapon rules, the abilities and unique actions in full, the
+keywords. So the game carries all of it, together with the team's rules, its ploys and
+the universal ones, and the text of the equipment taken. Between them a battle needs no
+catalog request at all — which also means one payload, no request per card opened, and
+nothing that can change under the players mid-game. Which ploys have been spent is the
+team-level twin of `actions_used`: `ploys_used` keeps `{name, turning_point}` entries, so
+the CP column has a readable history beside it.
+
 | Table | Holds |
 |---|---|
-| `KTGame` | owner, roster, opponent name, status (setup / in progress / finished), turning point (1–4), phase (strategy / firefight), initiative, CP, VP by source, opponent VP, **markers** (JSON list), `version` |
+| `KTGame` | owner, roster, opponent name, status (setup / in progress / finished), turning point (1–4), phase (strategy / firefight), initiative, CP, VP by source, opponent VP, **markers** and `ploys_used` (JSON lists), the team's snapshotted `rules` and `ploys` (decision #24), `version` |
 | `KTGameOperative` | **snapshot** of the whole datacard (decision #22): stats, plus `weapons` and `abilities` as display-only JSON. Then the state: current wounds, order (engage / conceal), activated this TP, **status** (reserve / on board / incapacitated), **tokens** and `actions_used` (JSON lists). Plus the catalog operative it is a snapshot of, `source` (roster / equipment / rule) and `added_in_turning_point` (NULL for the roster's own) |
 | `KTGameEquipment` | the pieces picked for **this battle** (decision #17): FK game, FK equipment, its `text` snapshotted like an operative's, `revealed` — `UNIQUE(game_id, equipment_id)` |
 | `KTGameEvent` | append-only: type, turning point, payload (JSON) |
@@ -418,14 +429,15 @@ rostered (decision #20).
 
 Endpoints under `/api/v1/me/kill-team/games/...`:
 
-- `POST` (from a roster), `GET` list / detail
+- `POST` (from a roster), `GET` list / detail — detail carries the game's own reference
+  (decision #24), so the game screen loads once and needs no catalog call
+- `PATCH /{id}` — CP, VP, markers, ploys used
 - `PATCH .../operatives/{id}` — wounds, order, activated, tokens, actions used
 - `POST .../operatives` — add one (decision #18): the catalog operative and a `source`
 - `PATCH .../operatives/{id}` with `becomes_operative_id` — transform it (decision #19)
 - `POST .../equipment` / `DELETE .../equipment/{id}` — this battle's picks
 - `PATCH .../equipment/{id}` — reveal it
 - `POST .../advance` — next phase / turning point; the server applies resets
-- `PATCH /{id}` — CP, VP
 - `POST .../undo` — revert the last event
 
 ## Frontend
@@ -440,6 +452,16 @@ what is **true of it now**: wounds left, order, whether it has activated, its to
 the actions it has used. Nothing on that screen edits the catalog (decision #21), and it
 reads the snapshot rather than the catalog API, so a game needs no catalog request once
 it has started.
+
+Two levels of detail, because both are wanted at different moments. The list of
+operatives is compact enough to see the whole team at a glance — name, wounds, order,
+activated — and **any card opens to the full datacard** as printed, for the moment a
+player needs to check a weapon rule or an ability mid-activation. A team tab holds the
+rest of the reference: the kill team's rules, its ploys with their CP costs, and the
+equipment picked for this battle. Read-only, from the snapshot, with the operative's
+current state shown beside the stats it started with — a card is a reference sheet and a
+status sheet at once, which is what a printed datacard plus a handful of dice tokens does
+on the table.
 
 ## Branching
 

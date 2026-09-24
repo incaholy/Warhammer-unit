@@ -577,7 +577,9 @@ operative's wounds, order and activation, with undo. Each game copies the whole
 datacard it plays with (decision #22), so the screen can show what a unit can do beside
 what is true of it now, and a re-scrape cannot change a battle in progress. Also this
 battle's equipment, the actions each operative has used, and the operatives that
-equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#23).
+equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#24).
+The game screen doubles as the reference sheet: any operative opens to its full datacard,
+and the team's rules and ploys travel with the game, so a battle needs no catalog call.
 
 ## K6. Widen to every kill team
 
