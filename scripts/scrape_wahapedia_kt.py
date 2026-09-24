@@ -724,7 +724,6 @@ class SelectionList:
     position: int
     options: list[SelectionOption] = field(default_factory=list)
     restriction_text: str | None = None
-    keyword_caps: list[KeywordCap] = field(default_factory=list)
 
 
 def _restriction_sentence(top: Tag) -> str | None:
@@ -805,6 +804,20 @@ def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
     return SelectionOption(operative=operative, cost=cost, models=models, loadout_options=variants)
 
 
+@dataclass(frozen=True)
+class Composition:
+    """What a roster may contain: the budgeted lists, plus the team's keyword caps.
+
+    The caps sit here rather than on a list because the sentence scopes them that way --
+    "your kill team can only include up to one GRAVIS operative", beside a repeat clause
+    that says "each operative on this list once". Brood Brother caps BROODCOVEN, whose
+    operatives are offered by a different list than the one the sentence follows.
+    """
+
+    lists: list[SelectionList]
+    keyword_caps: list[KeywordCap] = field(default_factory=list)
+
+
 def _keyword_caps(sentence: str) -> list[KeywordCap]:
     """Caps on a SET of operatives, from "can only include up to two GUNNER operatives".
 
@@ -831,7 +844,7 @@ def _repeat_exceptions(sentence: str) -> set[str]:
     return {_clean(word).strip().upper() for word in listed if _clean(word).strip()}
 
 
-def parse_composition(html: str) -> list[SelectionList]:
+def parse_composition(html: str) -> Composition:
     """The kill team's selection lists, in printed order.
 
     Three shapes appear across the 48 teams:
@@ -957,6 +970,7 @@ def parse_composition(html: str) -> list[SelectionList]:
         raise CompositionNotParsed("the composition list is empty")
 
     sentence = _restriction_sentence(top)
+    caps: list[KeywordCap] = []
     if sentence:
         # Printed after the whole composition and referring to "this list", so it
         # belongs to the last one. Two clauses are read out of it: how often an
@@ -980,7 +994,7 @@ def parse_composition(html: str) -> list[SelectionList]:
             )
             for option in last.options
         ]
-        caps = _keyword_caps(sentence)
+        caps = _keyword_caps(sentence)  # team-wide; see `Composition`
         # A cap nobody can trigger means the phrase was misread, and a cap that
         # silently never applies is worse than none: `validate` would approve rosters
         # it should refuse. Checked against EVERY operative on the page, not just this
@@ -997,6 +1011,5 @@ def parse_composition(html: str) -> list[SelectionList]:
             position=last.position,
             options=options,
             restriction_text=sentence,
-            keyword_caps=caps,
         )
-    return lists
+    return Composition(lists=lists, keyword_caps=caps)

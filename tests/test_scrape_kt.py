@@ -435,8 +435,12 @@ def test_an_empty_entry_is_not_an_operative():
 # ---- Composition: the budgeted selection lists (decision #16) ----
 
 
-def _lists():
+def _composition():
     return parse_composition(COMPOSITION)
+
+
+def _lists():
+    return _composition().lists
 
 
 def _options(index: int):
@@ -597,7 +601,10 @@ def test_an_exempt_keyword_stays_uncapped():
 def test_a_keyword_cap_is_read_as_its_own_rule():
     # "can only include up to one EMBER operative" caps a SET of operatives, which no
     # per-option limit can express: two different entries both carry EMBER.
-    assert _lists()[-1].keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
+    # On the COMPOSITION, not a list: the sentence says "your kill team", and Brood
+    # Brother caps a keyword carried by operatives from a different list than the one
+    # the sentence follows, so a list-scoped cap could never have applied.
+    assert _composition().keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
 
 
 def test_a_cap_is_matched_by_words_because_the_pages_disagree_about_keywords():
@@ -642,10 +649,10 @@ def test_a_cap_matching_nobody_on_the_page_raises():
         parse_composition(html)
 
 
-def test_only_the_list_the_sentence_belongs_to_is_capped():
-    # The sentence is printed after the whole composition and says "this list".
+def test_only_the_list_the_sentence_belongs_to_has_its_repeats_capped():
+    # The repeat clause says "each operative on this list", so it applies to the list the
+    # sentence follows -- unlike the keyword cap, which is team-wide.
     assert all(option.max_selections is None for option in _lists()[0].options)
-    assert _lists()[0].keyword_caps == []
 
 
 def test_an_unknown_quantity_in_a_cap_raises():

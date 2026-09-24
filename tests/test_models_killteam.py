@@ -560,31 +560,31 @@ def test_a_keyword_cap_is_a_rule_about_a_SET_of_operatives(
     listing = make_kt_selection_list(kill_team=watch, budget=5)
     make_kt_selection_option(selection_list=listing, operative=bombard, max_selections=1)
     make_kt_selection_option(selection_list=listing, operative=demolisher, max_selections=1)
-    make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=1)
-    session.refresh(listing)
+    make_kt_selection_restriction(kill_team=watch, keyword="GRAVIS", max_operatives=1)
+    session.refresh(watch)
 
-    assert [(r.keyword, r.max_operatives) for r in listing.restrictions] == [("GRAVIS", 1)]
+    # Scoped to the TEAM: the sentence says "your kill team", and Brood Brother caps a
+    # keyword its operatives carry from a different list than the one it follows.
+    assert [(r.keyword, r.max_operatives) for r in watch.keyword_caps] == [("GRAVIS", 1)]
     # The keywords the rule is evaluated against are already on the operatives.
     assert all("GRAVIS" in o.operative.keywords for o in listing.options)
 
 
-def test_a_list_may_carry_several_keyword_caps(
-    session, make_kt_selection_restriction, make_kt_selection_list
-):
+def test_a_team_may_carry_several_keyword_caps(session, make_kt_selection_restriction, make_kill_team):
     # Inquisitorial Agent states caps for GUN SERVITOR, SUBDUCTOR and GUNNER.
-    listing = make_kt_selection_list()
-    make_kt_selection_restriction(selection_list=listing, keyword="GUNNER", max_operatives=2)
-    make_kt_selection_restriction(selection_list=listing, keyword="SUBDUCTOR", max_operatives=2)
+    team = make_kill_team()
+    make_kt_selection_restriction(kill_team=team, keyword="GUNNER", max_operatives=2)
+    make_kt_selection_restriction(kill_team=team, keyword="SUBDUCTOR", max_operatives=2)
 
-    assert {r.keyword for r in listing.restrictions} == {"GUNNER", "SUBDUCTOR"}
+    assert {r.keyword for r in team.keyword_caps} == {"GUNNER", "SUBDUCTOR"}
 
 
-def test_one_keyword_is_capped_once_per_list(session, make_kt_selection_list, make_kt_selection_restriction):
+def test_one_keyword_is_capped_once_per_team(session, make_kill_team, make_kt_selection_restriction):
     # Two caps for one keyword would be a parse that read the same sentence twice.
-    listing = make_kt_selection_list()
-    make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=1)
+    team = make_kill_team()
+    make_kt_selection_restriction(kill_team=team, keyword="GRAVIS", max_operatives=1)
     with pytest.raises(IntegrityError):
-        make_kt_selection_restriction(selection_list=listing, keyword="GRAVIS", max_operatives=2)
+        make_kt_selection_restriction(kill_team=team, keyword="GRAVIS", max_operatives=2)
 
 
 def test_a_cap_of_zero_is_rejected(session, make_kt_selection_restriction):
@@ -593,13 +593,11 @@ def test_a_cap_of_zero_is_rejected(session, make_kt_selection_restriction):
         make_kt_selection_restriction(max_operatives=0)
 
 
-def test_deleting_a_list_takes_its_restrictions(
-    session, make_kt_selection_list, make_kt_selection_restriction
-):
-    listing = make_kt_selection_list()
-    make_kt_selection_restriction(selection_list=listing)
+def test_deleting_a_kill_team_takes_its_keyword_caps(session, make_kill_team, make_kt_selection_restriction):
+    team = make_kill_team()
+    make_kt_selection_restriction(kill_team=team)
 
-    session.delete(listing)
+    session.delete(team)
     session.commit()
 
     assert session.exec(select(KTSelectionRestriction)).all() == []

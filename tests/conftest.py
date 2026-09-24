@@ -480,12 +480,12 @@ def make_kt_selection_option(session, make_kt_selection_list, make_kt_operative)
 
 
 @pytest.fixture
-def make_kt_selection_restriction(session, make_kt_selection_list):
-    def _make(selection_list=None, **overrides):
-        selection_list = selection_list or make_kt_selection_list()
+def make_kt_selection_restriction(session, make_kill_team):
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
         data = dict(keyword="GRAVIS", max_operatives=1)
         data.update(overrides)
-        restriction = KTSelectionRestriction(selection_list_id=selection_list.id, **data)
+        restriction = KTSelectionRestriction(kill_team_id=kill_team.id, **data)
         session.add(restriction)
         session.commit()
         session.refresh(restriction)

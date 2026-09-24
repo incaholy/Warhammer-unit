@@ -119,7 +119,7 @@ against: Raveners.
 | `KTOperative` | name, APL, move, save, wounds, keywords; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it |
 | `KTSelectionList` | label (as printed), `budget` in selections, `position`, `restriction_text`; FK kill team |
 | `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**); `kill_team_id` + composite FKs to its list and operative |
-| `KTSelectionRestriction` | `keyword`, `max_operatives`; FK list — a cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
+| `KTSelectionRestriction` | `keyword`, `max_operatives`; FK **kill team** — a team-wide cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative. A name is unique **per category** — one weapon can print both profiles |
 | `KTAbility` | name, text (includes unique actions); FK operative |
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
@@ -233,7 +233,7 @@ most common — so nothing about size is hardcoded.
 | An option costing two selections | `KTSelectionOption.cost` | Brood Brother's Magus |
 | Two models for one selection | `KTSelectionOption.models` | "2 PSYCHIC FAMILIAR … still counts as one selection" |
 | A cap on repeats | `KTSelectionOption.max_selections` | 1 per specialist, NULL for Warriors |
-| A cap on a **set** of operatives | `KTSelectionRestriction` (keyword + limit) | Deathwatch: "up to one GRAVIS operative" |
+| A team-wide cap on a **set** of operatives | `KTSelectionRestriction` (keyword + limit), on the kill team | Deathwatch: "up to one GRAVIS operative" |
 
 The cap sits on the **option**, not the operative: it is stated by the list, and two
 lists can offer the same operative on different terms.
@@ -267,8 +267,12 @@ become data:
   38 carry an exemption clause; across the teams that is 252 options capped and 168 left
   free.
 - *"Your kill team can only include up to two GUNNER operatives"* →
-  `KTSelectionRestriction`. 12 of the parsed teams state one, and a list may carry
-  several. **Matched by words, not strings**: the pages disagree about what counts as
+  `KTSelectionRestriction`, scoped to the **kill team**. The two clauses have different
+  scopes and the sentence says so: the repeat clause reads "each operative on *this
+  list*", the cap reads "your *kill team*". Brood Brother proves it — its BROODCOVEN cap
+  matches the Magus, Patriarch and Primus, which a *different* list offers than the one
+  the sentence follows, so a list-scoped cap could never have applied. 12 of the parsed
+  teams state one, and a team may carry several. **Matched by words, not strings**: the pages disagree about what counts as
   one keyword — Battleclade's datacards print "COMBAT, SERVITOR" (two, comma-separated)
   while Pathfinders prints "WEAPONS EXPERT" (one), and both are capped by a sentence
   naming the phrase. An operative counts towards a cap when every word of the phrase

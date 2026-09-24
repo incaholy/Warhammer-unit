@@ -12,8 +12,8 @@ Built in slices (ROADMAP K1). This module currently holds:
                         │             └→ KTAbility
                         ├→ KTPloy       (kill_team_id NULL = every team can use it)
                         ├→ KTEquipment  (same: NULL = the universal list)
-                        └→ KTSelectionList ─┬→ KTSelectionOption → KTOperative
-                                            └→ KTSelectionRestriction
+                        ├→ KTSelectionList → KTSelectionOption → KTOperative
+                        └→ KTSelectionRestriction  (team-wide keyword caps)
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -79,6 +79,10 @@ class KillTeam(TimestampMixin, table=True):
     # Its own equipment only; the universal list (kill_team_id NULL) is nobody's.
     equipment: list["KTEquipment"] = Relationship(back_populates="kill_team", cascade_delete=True)
     selection_lists: list["KTSelectionList"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    # Team-wide, not per list: see KTSelectionRestriction.
+    keyword_caps: list["KTSelectionRestriction"] = Relationship(
+        back_populates="kill_team", cascade_delete=True
+    )
 
 
 class KillTeamRule(TimestampMixin, table=True):
@@ -366,9 +370,6 @@ class KTSelectionList(TimestampMixin, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"overlaps": "offered_by"},
     )
-    restrictions: list["KTSelectionRestriction"] = Relationship(
-        back_populates="selection_list", cascade_delete=True
-    )
 
 
 class KTSelectionOption(TimestampMixin, table=True):
@@ -445,7 +446,7 @@ class KTSelectionOption(TimestampMixin, table=True):
 
 
 class KTSelectionRestriction(TimestampMixin, table=True):
-    """A cap on how many operatives CARRYING A KEYWORD a list may contribute.
+    """A cap on how many operatives CARRYING A KEYWORD a kill team may include.
 
     Deathwatch: "your kill team can only include each operative on this list once, and
     can only include up to one GRAVIS operative." The first half is per-option
@@ -460,19 +461,29 @@ class KTSelectionRestriction(TimestampMixin, table=True):
     the teams.
 
     Evaluated against `KTOperative.keywords`, which the catalog already stores, so the
-    rule needs nothing beyond the keyword and its limit. A list may carry several.
+    rule needs nothing beyond the keyword and its limit. A team may carry several.
+
+    Scoped to the KILL TEAM rather than a list, because that is what the sentence says:
+    "your kill team can only include up to one GRAVIS operative", where the repeat clause
+    beside it says "each operative on this list once". Brood Brother is the proof -- it
+    caps BROODCOVEN, and the operatives carrying that keyword are offered by a different
+    list than the one the sentence follows, so a list-scoped cap could never have applied.
+
+    The keyword is the phrase as printed, matched by WORDS: Battleclade's datacards carry
+    COMBAT and SERVITOR separately while its cap names "COMBAT SERVITOR", and Pathfinders
+    carries "WEAPONS EXPERT" as one (`KeywordCap.matches` in the scraper).
     """
 
     __tablename__ = "kt_selection_restrictions"
     __table_args__ = (
-        UniqueConstraint("selection_list_id", "keyword"),
+        UniqueConstraint("kill_team_id", "keyword"),
         CheckConstraint("max_operatives >= 1", name="ck_kt_selection_restriction_max"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    selection_list_id: UUID = Field(foreign_key="kt_selection_lists.id", ondelete="CASCADE", index=True)
+    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
     # Stored as keywords are: upper case, as printed on a datacard.
     keyword: str = Field(max_length=128, index=True)
     max_operatives: int
 
-    selection_list: KTSelectionList = Relationship(back_populates="restrictions")
+    kill_team: KillTeam = Relationship(back_populates="keyword_caps")
