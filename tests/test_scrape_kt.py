@@ -14,6 +14,7 @@ from scripts.scrape_wahapedia_kt import (
     KeywordCap,
     NavEntry,
     OperativeNotResolved,
+    core_rules_url,
     parse_composition,
     parse_equipment,
     parse_nav,
@@ -21,6 +22,7 @@ from scripts.scrape_wahapedia_kt import (
     parse_ploys,
     parse_team_rules,
     resolve_operative,
+    scrape,
     universal_equipment_url,
 )
 
@@ -695,3 +697,102 @@ def test_a_line_whose_operatives_cannot_be_found_fails_loudly():
     """
     with pytest.raises(CompositionNotParsed, match="no operatives found"):
         parse_composition(html)
+
+
+# ---------------------------------------------------------------------------
+# The run itself (`scrape`): which failures are skipped, and which must not be.
+# ---------------------------------------------------------------------------
+
+
+def _serving(pages: dict[str, str], *, seen: list | None = None):
+    """A stand-in for `fetch` that answers from `pages`, keyed by a substring of the URL."""
+
+    def fake_fetch(url: str, *, refresh: bool = False, **_: object) -> str:
+        if seen is not None:
+            seen.append((url, refresh))
+        # longest fragment first, so a per-team override beats the catch-all
+        for fragment in sorted(pages, key=len, reverse=True):
+            if fragment in url:
+                return pages[fragment]
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    return fake_fetch
+
+
+def _pages(**overrides: str) -> dict[str, str]:
+    pages = {
+        "nav.html": FIXTURE,
+        "universal-equipment": UNIVERSAL_EQUIPMENT,
+        "core-rules": TEAM,  # its ploys become the universal ones
+        "kill-teams/": COMPOSITION,  # a whole team page: datacards + composition
+    }
+    return {**pages, **overrides}
+
+
+def test_an_ambiguous_page_is_skipped_and_named_while_the_rest_are_kept(monkeypatch):
+    # Hunter Clade and Inquisitorial Agent really do need a human decision (K6), and
+    # holding the other 46 teams hostage to them would be the wrong trade -- so they are
+    # skipped. The skip goes into the payload, not just onto the terminal, so `make
+    # seed-kt` can say the catalog it is loading is knowingly incomplete.
+    pages = _pages()
+    pages["kill-teams/rust-wardens"] = "<html><body>nothing recognisable</body></html>"
+    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(pages))
+
+    payload = scrape()
+
+    assert [team["name"] for team in payload["kill_teams"]] == [
+        "Hollow Sentinels",
+        "Ashen Choir",
+        "Tidewalkers",
+    ]
+    assert [entry["team"] for entry in payload["skipped"]] == ["Rust Wardens"]
+    assert "Operatives" in payload["skipped"][0]["reason"]
+    # the rest of the run still happened
+    assert payload["universal_equipment"]
+    assert payload["kill_teams"][0]["selection_lists"]
+
+
+def test_a_failure_that_is_not_an_ambiguity_fails_the_whole_run(monkeypatch):
+    # The other half of the trade. A missing section, an unreadable stat or an HTTP error
+    # means the site or the parsers changed; reporting that as "skipped 46 teams" would
+    # hand the seed a quietly thinner catalog.
+    def exploding_fetch(url: str, *, refresh: bool = False, **_: object) -> str:
+        if "rust-wardens" in url:
+            raise RuntimeError("503 from the site")
+        return _serving(_pages())(url, refresh=refresh)
+
+    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", exploding_fetch)
+
+    with pytest.raises(RuntimeError, match="503"):
+        scrape()
+
+
+def test_refresh_reaches_every_fetch(monkeypatch):
+    # Without this the cache has no expiry, so a re-run can never see a CHANGED page and
+    # the seed's whole update path is unreachable.
+    seen: list = []
+    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(_pages(), seen=seen))
+
+    scrape(refresh=True)
+
+    assert seen and all(refresh for _, refresh in seen)
+
+
+def test_the_core_rules_page_is_discovered_from_the_nav():
+    assert core_rules_url(FIXTURE) == "https://wahapedia.ru/kill-team3/the-rules/core-rules/"
+
+
+def test_a_nav_without_a_core_rules_link_is_a_failure():
+    with pytest.raises(ValueError, match="no core rules link"):
+        core_rules_url("<html><body><a href='/kill-team3/kill-teams/x'>X</a></body></html>")
+
+
+def test_a_look_alike_rules_page_is_not_mistaken_for_the_core_rules():
+    # The patterns are anchored, and `find` takes the first match in document order, so an
+    # unanchored one would silently prefer whichever look-alike the nav listed first.
+    nav = """<html><body>
+      <a href="/kill-team3/the-rules/core-rules-commentary">Commentary</a>
+      <a href="/kill-team3/the-rules/core-rules">Core Rules</a>
+    </body></html>"""
+
+    assert core_rules_url(nav) == "https://wahapedia.ru/kill-team3/the-rules/core-rules/"

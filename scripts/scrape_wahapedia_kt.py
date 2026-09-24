@@ -5,8 +5,9 @@ then `make seed-kt` loads it. The fetch layer is **cached and polite** -- reused
 that module, so there is one place that talks to the site -- and every parse layer is
 a **pure function** tested against a synthetic fixture.
 
-    python -m scripts.scrape_wahapedia_kt      # (parsers land per KILLTEAM.md → K2)
-    make scrape-kt
+    python -m scripts.scrape_wahapedia_kt              # writes scripts/data/killteam.json
+    python -m scripts.scrape_wahapedia_kt --refresh   # ...ignoring the page cache
+    make scrape-kt / make scrape-kt-fresh
 
 Which kill teams? All of them, discovered rather than configured. The site's
 navigation lives in one small standalone file (`nav.html`, loaded by JS, which is why
@@ -27,16 +28,23 @@ Kill Team lists Aeldari as an alliance above Craftworlds, Corsairs and Harlequin
 where 40k has Aeldari as a subfaction *under* Xenos.
 """
 
+import argparse
+import json
 import re
+import sys
 from collections.abc import Iterable
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
 
 from scripts.scrape_wahapedia import _stat_int, fetch
 
 NAV_URL = "https://wahapedia.ru/kill-team3/nav.html"
+# Gitignored: it is a copy of someone else's content, and the 40k equivalent
+# (scripts/data/datasheets.json) ended up tracked. `make seed-kt` reads it.
+DATA_PATH = Path(__file__).parent / "data" / "killteam.json"
 # Trailing slash on purpose: the site 301s the slash-less form, and `fetch()` caches
 # by the URL it was asked for, so the canonical form is what keeps a run from paying
 # 48 redirects before the cache can help.
@@ -125,26 +133,6 @@ def parse_nav(html: str) -> list[NavEntry]:
 def discover() -> list[NavEntry]:
     """Every kill team the site currently lists, via the cached fetch layer."""
     return parse_nav(fetch(NAV_URL))
-
-
-def main() -> None:
-    """Report what the site lists. The per-team page parsers land next (KILLTEAM.md
-    → K2); until they do, this is the discovery half, and it writes no JSON."""
-    entries = discover()
-    factions: dict[str, list[str]] = {}
-    for entry in entries:
-        factions.setdefault(entry.faction, []).append(entry.name)
-
-    for faction in sorted(factions):
-        print(f"{faction}:")
-        for name in factions[faction]:
-            print(f"  {name}")
-    print(f"\n{len(entries)} kill teams across {len(factions)} factions")
-    print("Page parsing is not implemented yet, so no JSON was written.")
-
-
-if __name__ == "__main__":
-    main()
 
 
 # ---------------------------------------------------------------------------
@@ -397,18 +385,25 @@ class Equipment:
     description: str
 
 
+# "COMMAND RE-ROLL 1CP" -- the core rules page prints a ploy's cost inside its name,
+# where the kill team pages print none at all.
+_PLOY_COST = re.compile(r"\s*(\d+)\s*CP$", re.IGNORECASE)
+
+
 @dataclass(frozen=True)
 class Ploy:
-    """A ploy, as `KTPloy` stores it, minus the CP cost.
+    """A ploy, as `KTPloy` stores it.
 
-    The pages print no cost, so `cp_cost` is left to the column's default of 1 --
-    the same split as a weapon's `range`: the parser reports what the page said, and
-    a default that applies to everything lives in one place.
+    `cp_cost` is None unless the page states one, and the seed fills in the default of 1
+    -- the same split as a weapon's `range`. Most pages print no cost at all; the core
+    rules print Command Re-roll's inside its name, and Blades of Khaine prints its four
+    firefight ploys' the same way.
     """
 
     name: str
     kind: str
     description: str
+    cp_cost: int | None = None
 
 
 def _section(soup: BeautifulSoup, title: str) -> list[Tag]:
@@ -598,16 +593,21 @@ def parse_ploys(html: str) -> list[Ploy]:
         block = name_el.find_parent("div", class_="stratWrapper")
         if block is None:
             continue
+        printed = _clean(name_el.get_text(" ", strip=True))
+        cost = _PLOY_COST.search(printed)
         ploys.append(
             Ploy(
-                name=_clean(name_el.get_text(" ", strip=True)),
+                name=_PLOY_COST.sub("", printed).strip(),
                 kind=kind,
                 description=_rule_text(block, name_el),
+                cp_cost=int(cost.group(1)) if cost else None,
             )
         )
     return ploys
 
 
+# Anchored, not substring matches: an unanchored `core-rules` would also match a future
+# `core-rules-commentary`, and `find` returns whichever comes first in the document.
 def universal_equipment_url(nav_html: str) -> str:
     """The universal equipment page, discovered from the nav rather than hardcoded.
 
@@ -615,12 +615,29 @@ def universal_equipment_url(nav_html: str) -> str:
     stays `NAV_URL`.
     """
     soup = BeautifulSoup(nav_html, "html.parser")
-    link = soup.find("a", href=re.compile(r"universal-equipment"))
+    link = soup.find("a", href=re.compile(r"/kill-team3/the-rules/universal-equipment/?$"))
     if link is None:
         raise ValueError(f"no universal equipment link in the nav — has {NAV_URL} changed?")
     href = link["href"]
     if not href.endswith("/"):
         href += "/"  # the site 301s the slash-less form; `fetch()` caches by URL
+    return f"https://wahapedia.ru{href}"
+
+
+def core_rules_url(nav_html: str) -> str:
+    """The core rules page, discovered from the nav like everything else.
+
+    It carries the ploys every kill team may use -- today just Command Re-roll, which the
+    model stores with no kill team. Whatever is marked as a ploy there becomes universal,
+    so a section added to that page widens the universal list rather than being ignored.
+    """
+    soup = BeautifulSoup(nav_html, "html.parser")
+    link = soup.find("a", href=re.compile(r"/kill-team3/the-rules/core-rules/?$"))
+    if link is None:
+        raise ValueError(f"no core rules link in the nav — has {NAV_URL} changed?")
+    href = link["href"]
+    if not href.endswith("/"):
+        href += "/"
     return f"https://wahapedia.ru{href}"
 
 
@@ -1013,3 +1030,122 @@ def parse_composition(html: str) -> Composition:
             restriction_text=sentence,
         )
     return Composition(lists=lists, keyword_caps=caps)
+
+
+def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
+    """Everything one kill team's page holds, in the seed's shape.
+
+    Operative names are the DATACARD's, here and in the selection options, so the seed
+    resolves nothing: `resolve_operative` already did that while both halves of the page
+    were in hand.
+    """
+    html = fetch(entry.url, refresh=refresh)
+    composition = parse_composition(html)
+    return {
+        "name": entry.name,
+        "faction": entry.faction,
+        "rules": [asdict(rule) for rule in parse_team_rules(html)],
+        "ploys": [asdict(ploy) for ploy in parse_ploys(html)],
+        "equipment": [asdict(item) for item in parse_equipment(html)],
+        "operatives": [asdict(operative) for operative in parse_operatives(html)],
+        "selection_lists": [asdict(lst) for lst in composition.lists],
+        "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
+    }
+
+
+def scrape(*, refresh: bool = False) -> dict:
+    """The whole catalog, with the teams that could not be read named in `skipped`.
+
+    A team whose page is AMBIGUOUS is skipped rather than failing the run: 46 of the 48
+    parse, and holding those 46 hostage to Hunter Clade's and Inquisitorial Agent's
+    ambiguous composition entries would be the wrong trade (both are K6 work).
+
+    Only the two ambiguity errors are caught, deliberately. They mean "this page needs a
+    human decision"; anything else -- a missing section, an unreadable stat, an HTTP
+    failure -- means the parsers or the site changed, and that must surface as a failed
+    run rather than as 46 quietly thinner teams.
+
+    `skipped` goes INTO the payload so the seed can report it too. A caller that only
+    printed it would leave `make seed-kt` announcing success over a catalog it knows is
+    incomplete.
+    """
+    nav_html = fetch(NAV_URL, refresh=refresh)
+    payload: dict = {
+        "kill_teams": [],
+        "universal_ploys": [],
+        "universal_equipment": [],
+        "skipped": [],
+    }
+
+    for entry in parse_nav(nav_html):
+        try:
+            payload["kill_teams"].append(scrape_team(entry, refresh=refresh))
+        except (CompositionNotParsed, OperativeNotResolved) as exc:
+            payload["skipped"].append({"team": entry.name, "reason": str(exc)})
+
+    # Available to every kill team, so stored with no kill team: Command Re-roll from
+    # the core rules, and the universal equipment list.
+    payload["universal_ploys"] = [
+        asdict(p) for p in parse_ploys(fetch(core_rules_url(nav_html), refresh=refresh))
+    ]
+    payload["universal_equipment"] = [
+        asdict(item) for item in parse_equipment(fetch(universal_equipment_url(nav_html), refresh=refresh))
+    ]
+    return payload
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="re-request every page instead of reading the cache, so a changed page is seen",
+    )
+    args = parser.parse_args()
+
+    payload = scrape(refresh=args.refresh)
+    teams = payload["kill_teams"]
+    if not teams:
+        # The file is gitignored, so overwriting a good one with `{"kill_teams": []}`
+        # loses it for good. Nothing parsed means the site or the parsers changed.
+        print(
+            f"no kill teams parsed -- {DATA_PATH} left untouched. The site or the parsers changed.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATA_PATH.write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
+
+    print(f"{len(teams)} kill teams written to {DATA_PATH}")
+    # Every section is counted, including the three that come back empty rather than
+    # raising (rules, ploys, equipment) -- a zero here is the only sign that a renamed
+    # class stopped matching.
+    print(
+        f"  {sum(len(t['operatives']) for t in teams)} operatives, "
+        f"{sum(len(o['weapons']) for t in teams for o in t['operatives'])} weapons, "
+        f"{sum(len(o['abilities']) for t in teams for o in t['operatives'])} abilities"
+    )
+    print(
+        f"  {sum(len(t['rules']) for t in teams)} team rules, "
+        f"{sum(len(t['ploys']) for t in teams)} ploys, "
+        f"{sum(len(t['equipment']) for t in teams)} equipment"
+    )
+    print(
+        f"  {sum(len(t['selection_lists']) for t in teams)} selection lists, "
+        f"{sum(len(sel['options']) for t in teams for sel in t['selection_lists'])} options, "
+        f"{sum(len(t['keyword_caps']) for t in teams)} keyword caps"
+    )
+    print(
+        f"  {len(payload['universal_ploys'])} universal ploys, "
+        f"{len(payload['universal_equipment'])} universal equipment"
+    )
+    if payload["skipped"]:
+        print(f"\nskipped {len(payload['skipped'])} team(s) -- ambiguous pages, left for K6:")
+        for entry in payload["skipped"]:
+            print(f"  {entry['team']}: {entry['reason']}")
+    print("\nNow run: make seed-kt")
+
+
+if __name__ == "__main__":
+    main()
