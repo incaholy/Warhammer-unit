@@ -445,7 +445,7 @@ def _options(index: int):
 def test_each_printed_line_becomes_a_budgeted_list_in_order():
     lists = _lists()
 
-    assert [(lst.position, lst.budget) for lst in lists] == [(0, 1), (1, 4), (2, 1)]
+    assert [(lst.position, lst.budget) for lst in lists] == [(0, 1), (1, 4), (2, 1), (3, 3)]
     assert lists[0].label == "1 HOLLOW WARDEN operative"
 
 
@@ -522,10 +522,55 @@ def test_the_restriction_sentence_is_kept_verbatim():
     # read from it next. Kept whole so a human can check that reading.
     restriction = _lists()[-1].restriction_text
 
-    assert _lists()[-1].position == 2
+    # Attached to the LAST list in print order, which is what "this list" refers to
+    # when the sentence is printed after the whole composition.
+    assert _lists()[-1].position == 3
     assert restriction is not None
     assert "each operative on this list once" in restriction
     assert "up to one EMBER operative" in restriction
+
+
+def test_a_nested_list_becomes_its_own_list():
+    # Two teams print a second list INSIDE the first rather than beside it: Blades of
+    # Khaine nests it under the leader line, and Hunter Clade wraps it in a div inside
+    # the same `ul`, so it is neither a direct child nor a descendant of another line.
+    # Both used to fold their operatives into the budget-1 line above -- silently
+    # offering a one-operative team, which is the worst kind of wrong.
+    nested = _lists()[3]
+
+    assert nested.budget == 3
+    assert {option.operative for option in nested.options} == {
+        "Hollow Ash Prophet",
+        "Hollow Ember Wisp",
+    }
+
+
+def test_a_nested_lists_operatives_do_not_leak_into_the_line_above():
+    # An entry belongs to its NEAREST enclosing list.
+    assert len(_lists()[2].options) == 1  # the line that contains the nested list
+
+
+def test_an_ambiguous_entry_stops_the_team_instead_of_vanishing():
+    # Hunter Clade prints "WARRIOR SICARIAN *", which matches both the Infiltrator and
+    # the Ruststalker Warrior; the footnote tells a human which. The parser asks
+    # "is this an operative?" leniently, and a lenient None would have dropped the
+    # entry as though it were a weapon loadout -- so ambiguity raises even then.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warrior</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Omega Warrior</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>2 THINGS selected from the following list:
+      <ul class="redCircle2"><li><span class="kwb kwbo">WARRIOR</span> *</li></ul>
+    </li></ul>
+    """
+    with pytest.raises(OperativeNotResolved, match="several datacards"):
+        parse_composition(html)
 
 
 def test_a_page_with_no_composition_fails_loudly():

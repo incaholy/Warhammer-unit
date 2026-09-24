@@ -482,8 +482,11 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
     `Spectre Heavy Gunner` and `Spectre Stub-Gunner`, and the first is meant -- the
     others are their own entries and match themselves exactly.
 
-    `strict=False` returns None instead of raising, which is how a caller asks "is
-    this line an operative at all?". That question cannot be answered from the markup:
+    `strict=False` returns None for a line that matches NOTHING, which is how a caller
+    asks "is this line an operative at all?". An ambiguous line still raises: it is
+    certainly naming an operative, and silently dropping it would lose a real entry.
+
+    That "is it an operative?" question cannot be answered from the markup:
     the site styles a keyword only on its FIRST appearance on a page, so
     `GUNNER with webber and gun butt` carries no styled span even though it names an
     operative, while `Autogun; gun butt` looks the same and does not. Resolving the
@@ -516,11 +519,14 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
             shortest = min(hits, key=lambda card: len(_words(card)))
             if sum(1 for card in hits if len(_words(card)) == len(_words(shortest))) == 1:
                 return shortest
-            if strict:
-                raise OperativeNotResolved(
-                    f"composition entry {entry!r} matches several datacards equally: {hits}"
-                )
-            return None
+            # Raised even when `strict=False`. A line matching several datacards IS
+            # naming an operative -- we just cannot say which -- so returning None
+            # would make the caller drop it as though it were a weapon loadout. Hunter
+            # Clade's "WARRIOR SICARIAN *" vanished that way, and its footnote is what
+            # tells a human which Warrior is meant.
+            raise OperativeNotResolved(
+                f"composition entry {entry!r} matches several datacards equally: {hits}"
+            )
     if strict:
         raise OperativeNotResolved(
             f"composition entry {entry!r} matches no datacard (candidates: {datacards})"
@@ -802,11 +808,43 @@ def parse_composition(html: str) -> list[SelectionList]:
     # than failing on its datacards.
     datacards = [operative.name for operative in parse_operatives(html)]
 
+    # Which items are LISTS rather than entries, at any depth. Two teams print a second
+    # list inside the first rather than beside it: Blades of Khaine nests "7 BLADES OF
+    # KHAINE operatives ..." under its leader line, and Hunter Clade wraps "9 HUNTER
+    # CLADE operatives ..." in a div inside the same `ul`, so it is neither a direct
+    # child nor a descendant of the first line. Both were silently folded into the
+    # budget-1 line above, offering a one-operative team.
+    items: list[Tag] = top.find_all("li")
+
+    def enclosing_items(node: Tag) -> list[Tag]:
+        return [item for ancestor in node.parents for item in items if ancestor is item]
+
+    line_nodes: list[Tag] = [
+        item
+        for item in items
+        # A list is either an item no other item contains (however it is wrapped), or
+        # one that says so in its own text.
+        if not enclosing_items(item) or _IS_NESTED_LIST.search(_own_text(item))
+    ]
+
+    def owner_of(entry: Tag) -> Tag | None:
+        """The line an entry belongs to: its NEAREST enclosing line. A nested list's
+        entries belong to that list, not to the line that contains it."""
+        for ancestor in entry.parents:
+            if any(ancestor is line for line in line_nodes):
+                return ancestor
+        return None
+
     lists: list[SelectionList] = []
-    for position, line in enumerate(top.find_all("li", recursive=False)):
+    for position, line in enumerate(line_nodes):
         label = _own_text(line)
+        own_entries = [
+            entry
+            for entry in items
+            if not any(entry is other for other in line_nodes) and owner_of(entry) is line
+        ]
         options: dict[str, SelectionOption] = {}
-        for entry in line.find_all("li"):
+        for entry in own_entries:
             option = _option_from(entry, datacards)
             if option is None:
                 continue

@@ -279,11 +279,22 @@ with one of the following options", budget 1). A count on a LINE is a budget; a 
 an ENTRY is models. Counts are read from the leading number only: "XV26 Stealth
 Battlesuit" would otherwise read as 26 operatives.
 
-47 of the 48 teams parse. **Inquisitorial Agent does not**, and raises rather than
-guessing: it prints "5 INQUISITORIAL AGENT operatives selected from the list above, or
-REQUISITIONED operatives from one group", which reuses another list's options and adds
-requisitioned groups. Handled per team when K6 widens; a wrong budget would seed a
-roster rule that looks right.
+A list line can be **nested**: Blades of Khaine prints its second list inside the
+leader line, and Hunter Clade wraps one in a `div` inside the same `ul`, so it is
+neither a direct child nor a descendant of another line. Both are read as their own
+lists, and an entry belongs to its *nearest* enclosing list.
+
+46 of the 48 teams parse. Two raise rather than guess, and both are handled per team when
+K6 widens:
+
+- **Inquisitorial Agent** prints "5 INQUISITORIAL AGENT operatives selected from the
+  list above, or REQUISITIONED operatives from one group" — it reuses another list's
+  options and adds requisitioned groups.
+- **Hunter Clade** prints "WARRIOR SICARIAN *", which matches both the Infiltrator and
+  the Ruststalker Warrior; the footnote is what tells a human which. An ambiguous entry
+  raises **even when the parser is only asking "is this an operative?"** — a lenient
+  "no" would drop it as though it were a weapon loadout, which is how it silently
+  vanished before.
 
 Also roster-level rather than catalog (K4): an equipment option cannot be selected
 twice in one game, and the allowance is 4 pieces with some teams allowed more.
