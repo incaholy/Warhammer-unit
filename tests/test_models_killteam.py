@@ -147,6 +147,26 @@ def test_weapon_category_is_one_of_two_values(session, make_kt_weapon):
         make_kt_weapon(category="thrown")
 
 
+def test_one_weapon_name_can_appear_once_per_category(session, make_kt_operative, make_kt_weapon):
+    # Sanctifiers' Missionary carries "Brazier of holy fire" as a ranged profile
+    # (Saturate, Torrent) and a melee one (Shock). One weapon, two profiles -- and the
+    # only case across the 48 teams, which is how a unique constraint per operative
+    # would have turned into a failed seed for exactly one team.
+    missionary = make_kt_operative(name="Sanctifier Missionary")
+    make_kt_weapon(operative=missionary, name="Brazier of holy fire", category="range")
+    make_kt_weapon(operative=missionary, name="Brazier of holy fire", category="melee")
+
+    session.refresh(missionary)
+    assert sorted(w.category for w in missionary.weapons) == ["melee", "range"]
+
+
+def test_the_same_name_twice_in_one_category_is_still_rejected(session, make_kt_weapon, make_kt_operative):
+    operative = make_kt_operative()
+    make_kt_weapon(operative=operative, name="Bolt pistol", category="range")
+    with pytest.raises(IntegrityError):
+        make_kt_weapon(operative=operative, name="Bolt pistol", category="range")
+
+
 def test_damage_is_stored_as_normal_and_crit(session, make_kt_weapon):
     # The page prints "4/5"; splitting it once here beats parsing a string on every
     # read in the roster and the game tracker.

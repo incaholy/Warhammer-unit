@@ -120,7 +120,7 @@ against: Raveners.
 | `KTSelectionList` | label (as printed), `budget` in selections, `position`, `restriction_text`; FK kill team |
 | `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**); `kill_team_id` + composite FKs to its list and operative |
 | `KTSelectionRestriction` | `keyword`, `max_operatives`; FK list — a cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
-| `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative |
+| `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSON); FK operative. A name is unique **per category** — one weapon can print both profiles |
 | `KTAbility` | name, text (includes unique actions); FK operative |
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
 | `KTEquipment` | name, text; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |

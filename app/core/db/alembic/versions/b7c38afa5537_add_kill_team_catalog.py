@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: f4fdff075fee
+Revision ID: b7c38afa5537
 Revises: 44441c6a9671
-Create Date: 2026-09-23 16:20:55.438255
+Create Date: 2026-09-23 17:44:46.824505
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'f4fdff075fee'
+revision: str = 'b7c38afa5537'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -186,7 +186,7 @@ def upgrade() -> None:
     sa.CheckConstraint('range >= 1', name='ck_kt_weapon_range'),
     sa.ForeignKeyConstraint(['operative_id'], ['kt_operatives.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('operative_id', 'name')
+    sa.UniqueConstraint('operative_id', 'name', 'category')
     )
     op.create_index(op.f('ix_kt_weapons_operative_id'), 'kt_weapons', ['operative_id'], unique=False)
     # ### end Alembic commands ###

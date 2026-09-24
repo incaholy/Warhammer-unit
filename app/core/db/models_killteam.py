@@ -158,6 +158,9 @@ class KTWeapon(TimestampMixin, table=True):
     a datacard lists its own profiles, and two operatives' weapons of the same name
     can differ.
 
+    An operative may carry the same weapon NAME twice, once per category: a brazier
+    that can be fired and swung is one weapon with two profiles.
+
     A 2024 profile is ATK / HIT / DMG / WR, where DMG is split into normal and
     critical. Damage is stored as the two integers the page prints, not as its "4/5"
     string, because the roster and the game tracker compare and sum them.
@@ -165,7 +168,12 @@ class KTWeapon(TimestampMixin, table=True):
 
     __tablename__ = "kt_weapons"
     __table_args__ = (
-        UniqueConstraint("operative_id", "name"),
+        # Per CATEGORY, not per operative: one weapon can print a ranged and a melee
+        # profile under one name. Sanctifiers' Missionary carries "Brazier of holy fire"
+        # both ways -- ranged with Saturate and Torrent, melee with Shock -- and it is
+        # the only such case across the 48 teams, which is exactly the kind of single
+        # exception a unique constraint turns into a failed seed.
+        UniqueConstraint("operative_id", "name", "category"),
         # The same two values as the 40k `Weapon.category`, so one vocabulary covers
         # both games.
         CheckConstraint("category IN ('range', 'melee')", name="ck_kt_weapon_category"),
