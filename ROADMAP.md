@@ -566,13 +566,18 @@ teams, operatives), public read and admin write like the 40k catalog.
 ## K4. Roster
 
 **Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
+Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
+since the rules pick it per battle.
 
 ## K5. Game tracker
 
 **Status: Planned.** Games created from a roster: turning points, CP, VP, and each
-operative's wounds, order and activation, with undo.
+operative's wounds, order and activation, with undo. Also this battle's equipment, and
+the operatives that equipment or a team rule adds or transforms mid-battle
+(KILLTEAM.md decisions #17–#20).
 
 ## K6. Widen to every kill team
 
 **Status: Planned.** Add the remaining kill teams to the scraper and fix the parser
-gaps they expose.
+gaps they expose — today Hunter Clade and Inquisitorial Agent (both raise rather than
+guess) and Gellerpox Infected's equipment-conditional second composition block.

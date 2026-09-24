@@ -35,6 +35,10 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 14 | Weapons and abilities | Belong to **one operative** (a plain FK), not shared through link tables the way 40k's `unit_weapons` / `unit_abilities` do | A datacard lists its own profiles, and the same weapon name on two operatives can carry different numbers; sharing would mean deduplicating on name *and* every stat |
 | 15 | Weapon range | One non-null `range` column: the number from a printed `Range x` weapon rule when there is one, otherwise **1 for melee, 2 for range**, filled by a context-sensitive column default | A 2024 profile prints ATK/HIT/DMG/WR and no range — distance appears only as a weapon rule — so the column needs a defined meaning rather than a blank |
 | 16 | Composition | A kill team's composition is **budgeted selection lists** (`KTSelectionList` → `KTSelectionOption`), not a headcount with a leader. An option carries its `cost` in selections, how many `models` it fields, and its own `max_selections` cap | The pages never say "leader": they say "1 X operative", then "4 X operatives selected from the following list". A budget of 1 over one option *is* required; over several it is "choose one". Weighted costs (Brood Brother's Magus counts as two selections) and pairs ("2 PSYCHIC FAMILIAR … still counts as one selection") cannot be expressed by a count and a flag |
+| 17 | Equipment | Equipment is picked **per game**, not per roster: `KTGameEquipment` with `UNIQUE(game_id, equipment_id)`, and the allowance (4 pieces, more for some teams) is checked there | The rules choose equipment for each battle and reveal it during play. On the roster it would make a roster mean "a roster for one battle", and re-playing the same team would mean a second roster |
+| 18 | A game's operatives | The set is **not fixed at creation**. Two operations change it during a battle: **add** (`source = equipment` or `rule`) and **transform** (one datacard becomes another) | Two teams need it already. MUTOID VERMIN equipment adds four Gellerpox vermin "for the battle", and Chaos Cult's Mutation turns a Devotee into a Mutant and then a Torment. Both are per-battle, so neither belongs on a roster |
+| 19 | Transform | **In place**: the row keeps its id, tokens, order and board status, its catalog pointer moves, and its stats are re-snapshotted. The event log carries the history | It is the same miniature on the table, so the game screen needs nothing new. A second row plus `replaces_id` would give lineage and cheap undo, at the cost of a status the UI must filter everywhere |
+| 20 | Which operatives a roster may take | `KTOperative.availability`: `roster` (the default) or `in_battle` | The vermin and Chaos Cult's Mutant / Torment are real datacards that **no selection list offers**, and that is correct — they arrive mid-battle. The flag says so explicitly, instead of the scraper's guard inferring it from rule text, and it is the list the game screen's "add an operative" picker needs |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -124,7 +128,7 @@ against: Raveners.
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
 | `KillTeam` | name; FK `KTFaction`. **No operative count** — see decision #16 |
 | `KillTeamRule` | name, text; FK kill team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts) |
-| `KTOperative` | name, APL, move, save, wounds, keywords; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it |
+| `KTOperative` | name, APL, move, save, wounds, keywords; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it — except for the datacards no list can offer, which get `availability` when K5 needs them (decision #20) |
 | `KTSelectionList` | label (as printed), `budget` in selections, `position`, `restriction_text`; FK kill team |
 | `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**); `kill_team_id` + composite FKs to its list and operative |
 | `KTSelectionRestriction` | `keyword`, `max_operatives`; FK **kill team** — a team-wide cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
@@ -157,16 +161,20 @@ the universal list is stored once with NULL, and a partial unique index keeps th
 universal names unique. Deleting a kill team takes its own equipment and leaves the
 universal list.
 
-Two rules recorded here because they belong to the **roster** (K4), not the catalog
-entry:
+Two rules recorded here because they belong to the **game** (decision #17), not the
+catalog entry:
 
 - **An option cannot be selected more than once in a game.** That is
-  `UNIQUE(roster_id, equipment_id)` on the roster's equipment, not something the
-  catalog can express.
+  `UNIQUE(game_id, equipment_id)` on `KTGameEquipment`, not something the catalog can
+  express.
 - **The allowance is 4 pieces**, and *some kill teams get more*. Deliberately not a
-  column yet: when K4 enforces it, either a constant with a per-team override or a
+  column yet: when K5 enforces it, either a constant with a per-team override or a
   `KillTeam.equipment_limit` column defaulting to 4, decided once the pages show how
   the exceptions are worded.
+
+Equipment is chosen for each battle and **revealed during** it, which is why it sits on
+the game rather than the roster, and why revealing a piece can change what is on the
+table — see "Operatives that join or change during a battle".
 
 Equipment whose effect is a weapon keeps its profile in the description for now,
 since `KTWeapon` belongs to an operative. If K2's pages show profiles worth
@@ -329,15 +337,28 @@ K6 widens:
   "no" would drop it as though it were a weapon loadout, which is how it silently
   vanished before.
 
-Also roster-level rather than catalog (K4): an equipment option cannot be selected
-twice in one game, and the allowance is 4 pieces with some teams allowed more.
+A third page shape is read but deliberately **not** modelled as a list: **Gellerpox
+Infected** prints a second `ul.redTriangle` under "If you selected the MUTOID VERMIN
+faction equipment:", offering a "specified number" of Cursemite, Eyestinger Swarm and
+Sludge-Grub. There is no budget on that line because the number lives in the equipment
+("add four ... for the battle"), and those operatives never enter through a roster, so
+they are `availability = in_battle` (decision #20) and the parser reads only the first
+block. Two consequences for K6: the conditional sentence is currently attached to the
+FIRST list's `restriction_text`, where it does not belong, and the second block's
+wording is worth keeping as display-only text so a human can see why those datacards
+are not offered.
+
+Equipment rules are game-level rather than catalog or roster (decision #17): an option
+cannot be selected twice in one game, and the allowance is 4 pieces with some teams
+allowed more.
 
 ## Game tracker
 
 | Table | Holds |
 |---|---|
 | `KTGame` | owner, roster, opponent name, status (setup / in progress / finished), turning point (1–4), phase (strategy / firefight), initiative, CP, VP by source, opponent VP, **markers** (JSON list), `version` |
-| `KTGameOperative` | **snapshot** of the operative's stats, current wounds, order (engage / conceal), activated this TP, **status** (reserve / on board / incapacitated), **tokens** (JSON list) |
+| `KTGameOperative` | **snapshot** of the operative's stats, current wounds, order (engage / conceal), activated this TP, **status** (reserve / on board / incapacitated), **tokens** (JSON list); plus the catalog operative it is a snapshot of, `source` (roster / equipment / rule) and `added_in_turning_point` (NULL for the roster's own) |
+| `KTGameEquipment` | the pieces picked for **this battle** (decision #17): FK game, FK equipment, `revealed` — `UNIQUE(game_id, equipment_id)` |
 | `KTGameEvent` | append-only: type, turning point, payload (JSON) |
 
 Service-enforced bookkeeping (→ 400 `VALIDATION`), not rules:
@@ -354,10 +375,38 @@ team-level markers on the game, and `status = reserve` an operative not yet on t
 board. It records that they exist; the players apply what they do. No team-specific
 columns, so a new team needs no migration.
 
+**Operatives that join or change during a battle.** Two teams need the roll of
+operatives to change after the game has started, and they need it in two different ways
+— so the tracker gets two generic operations rather than either team's rule
+(decision #18):
+
+| Team | What the rules do | What the tracker does |
+|---|---|---|
+| Gellerpox Infected | Revealing the **MUTOID VERMIN** equipment adds four vermin operatives for the battle | **add** four `KTGameOperative` rows with `source = equipment`, chosen from the team's `in_battle` datacards (Cursemite, Eyestinger Swarm, Sludge-Grub) |
+| Chaos Cult | **Mutation** turns a Devotee into a Mutant, and a Mutant into a Torment, during the battle | **transform** the row in place: its catalog pointer moves and its stats are re-snapshotted, keeping its tokens and board status |
+
+Both are recorded in the event log (`operative_added`, `operative_transformed`, payload
+naming the datacards and the reason), so `undo` works on them like anything else and the
+game screen can show what a model used to be.
+
+What stays with the players, per decision #1: Mutation's per-turning-point quota (2, 2,
+3, 4) and its control-range trigger, and which **Accursed Gift** is taken. The quota
+needs no column — "how many transforms this turning point" is a query over the event log
+— and a per-game choice like the Accursed Gift goes in a small `choices` JSON on the
+game rather than a column per rule.
+
+Validation stays bookkeeping, not rules: an added or transformed operative must be a
+datacard of **this game's kill team**, and an `in_battle` datacard can only be added, not
+rostered (decision #20).
+
 Endpoints under `/api/v1/me/kill-team/games/...`:
 
 - `POST` (from a roster), `GET` list / detail
 - `PATCH .../operatives/{id}` — wounds, order, activated
+- `POST .../operatives` — add one (decision #18): the catalog operative and a `source`
+- `PATCH .../operatives/{id}` with `becomes_operative_id` — transform it (decision #19)
+- `POST .../equipment` / `DELETE .../equipment/{id}` — this battle's picks
+- `PATCH .../equipment/{id}` — reveal it
 - `POST .../advance` — next phase / turning point; the server applies resets
 - `PATCH /{id}` — CP, VP
 - `POST .../undo` — revert the last event
