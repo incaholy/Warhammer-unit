@@ -439,3 +439,143 @@ def test_a_team_ploy_named_like_the_universal_one_stays_separate(session):
     assert rows[True].description == "Re-roll one die."  # the universal one
     assert rows[False].description == "The team's own version."
     assert rows[False].kind == "strategy"
+
+
+def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session):
+    # The regression that made a composition a replace rather than an upsert. A list is
+    # identified by its print position, so a new line at the top shifts every list down:
+    # upserting rewrote each surviving row with the NEXT list's label and budget while it
+    # kept its own options, leaving a budget-1 list offering two operatives, one of them
+    # costing more than the whole budget -- a composition never printed anywhere.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["operatives"].append(
+        {
+            "name": "Hollow Herald",
+            "apl": 2,
+            "move": 6,
+            "save": 4,
+            "wounds": 10,
+            "keywords": ["HOLLOW", "HERALD"],
+            "weapons": [],
+            "abilities": [],
+        }
+    )
+    for listing in payload["kill_teams"][0]["selection_lists"]:
+        listing["position"] += 1
+    payload["kill_teams"][0]["selection_lists"].insert(
+        0,
+        {
+            "label": "1 HOLLOW HERALD operative",
+            "budget": 1,
+            "position": 0,
+            "restriction_text": None,
+            "options": [
+                {
+                    "operative": "Hollow Herald",
+                    "cost": 1,
+                    "models": 1,
+                    "max_selections": None,
+                    "loadout_options": [],
+                }
+            ],
+        },
+    )
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [(row.position, row.budget, row.label) for row in lists] == [
+        (0, 1, "1 HOLLOW HERALD operative"),
+        (1, 1, "1 HOLLOW WARDEN operative"),
+        (2, 4, "4 HOLLOW operatives selected from the following list:"),
+    ]
+    # each list offers exactly what the payload says, with nothing left over
+    assert [[option.operative.name for option in row.options] for row in lists] == [
+        ["Hollow Herald"],
+        ["Hollow Warden"],
+        ["Hollow Sentinel"],
+    ]
+    assert len(session.exec(select(KTSelectionOption)).all()) == 3
+
+
+def test_two_lists_that_swap_positions_end_up_with_their_own_options(session):
+    # The strictest ordering case: without deleting before inserting, reusing
+    # (kill_team_id, position) inside one run hits the unique constraint.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    first, second = payload["kill_teams"][0]["selection_lists"]
+    first["position"], second["position"] = 1, 0
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [(row.position, row.budget) for row in lists] == [(0, 4), (1, 1)]
+    assert [[option.operative.name for option in row.options] for row in lists] == [
+        ["Hollow Sentinel"],
+        ["Hollow Warden"],
+    ]
+    assert len(session.exec(select(KTSelectionOption)).all()) == 2
+
+
+def test_a_withdrawn_list_and_option_are_removed_from_the_composition(session):
+    # Composition is replaced as a whole, so a line the source dropped goes with it --
+    # unlike the rest of the catalog, where a removed row is left behind for K4.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"].pop()
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    assert [row.position for row in session.exec(select(KTSelectionList)).all()] == [0]
+    assert len(session.exec(select(KTSelectionOption)).all()) == 1
+
+
+def test_an_unchanged_composition_is_left_alone(session):
+    # The comparison is the whole subtree, so the common case writes nothing: no delete,
+    # no insert, and the rows keep their ids.
+    seed(session, SAMPLE)
+    before = {row.position: row.id for row in session.exec(select(KTSelectionList)).all()}
+
+    counts = seed(session, copy.deepcopy(SAMPLE))
+
+    assert counts["compositions_replaced"] == 0
+    assert {row.position: row.id for row in session.exec(select(KTSelectionList)).all()} == before
+
+
+def test_a_changed_budget_replaces_the_composition(session):
+    # A budget change used to hit UNIQUE(kill_team_id, position) when the budget was part
+    # of the lookup key; now the whole composition is rewritten in place.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"][1]["budget"] = 5
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [(row.position, row.budget) for row in lists] == [(0, 1), (1, 5)]
+
+
+def test_a_changed_option_alone_replaces_the_composition(session):
+    # The comparison reaches into the options, not just the lists: a list whose label,
+    # budget and position are all unchanged still has to be rewritten when what it OFFERS
+    # changed -- a cost, a repeat cap or a printed loadout.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    option = payload["kill_teams"][0]["selection_lists"][1]["options"][0]
+    option["cost"] = 1
+    option["max_selections"] = None
+    option["loadout_options"] = ["with ash lash", "with ember brand"]
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    stored = session.exec(
+        select(KTSelectionOption).join(KTOperative).where(KTOperative.name == "Hollow Sentinel")
+    ).one()
+    assert (stored.cost, stored.models, stored.max_selections) == (1, 2, None)
+    assert stored.loadout_options == ["with ash lash", "with ember brand"]
