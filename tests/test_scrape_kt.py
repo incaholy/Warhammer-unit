@@ -11,6 +11,7 @@ import pytest
 
 from scripts.scrape_wahapedia_kt import (
     CompositionNotParsed,
+    KeywordCap,
     NavEntry,
     OperativeNotResolved,
     parse_composition,
@@ -542,6 +543,7 @@ def test_a_nested_list_becomes_its_own_list():
     assert {option.operative for option in nested.options} == {
         "Hollow Ash Prophet",
         "Hollow Ember Wisp",
+        "Hollow Sentinel",
     }
 
 
@@ -570,6 +572,56 @@ def test_an_ambiguous_entry_stops_the_team_instead_of_vanishing():
     </li></ul>
     """
     with pytest.raises(OperativeNotResolved, match="several datacards"):
+        parse_composition(html)
+
+
+def test_the_restriction_sentence_caps_repeats_at_one():
+    # "your kill team can only include each operative on this list once" -- 39 of the 42
+    # restriction sentences say this, and it is what KTSelectionOption.max_selections
+    # holds.
+    options = {option.operative: option for option in _lists()[-1].options}
+
+    assert options["Hollow Ash Prophet"].max_selections == 1
+    assert options["Hollow Ember Wisp"].max_selections == 1
+
+
+def test_an_exempt_keyword_stays_uncapped():
+    # "Other than SENTINEL operatives, ..." -- and the exemption is a KEYWORD matched
+    # against what the datacard carries, not an operative name: Raveners exempt WARRIOR
+    # and "Ravener Warrior" holds that keyword. 38 sentences carry such a clause.
+    options = {option.operative: option for option in _lists()[-1].options}
+
+    assert options["Hollow Sentinel"].max_selections is None
+
+
+def test_a_keyword_cap_is_read_as_its_own_rule():
+    # "can only include up to one EMBER operative" caps a SET of operatives, which no
+    # per-option limit can express: two different entries both carry EMBER.
+    assert _lists()[-1].keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
+
+
+def test_only_the_list_the_sentence_belongs_to_is_capped():
+    # The sentence is printed after the whole composition and says "this list".
+    assert all(option.max_selections is None for option in _lists()[0].options)
+    assert _lists()[0].keyword_caps == []
+
+
+def test_an_unknown_quantity_in_a_cap_raises():
+    # A silently wrong cap approves illegal rosters, so an unrecognised number word
+    # stops the team instead.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <div class="BreakInsideAvoid"><h2>Operatives</h2>
+    <ul class="redTriangle"><li>2 THINGS selected from the following list:
+      <ul class="redCircle2"><li><span class="kwb kwbo">A CARD</span></li></ul>
+    </li></ul>
+    Your kill team can only include up to seventeen CARD operatives.
+    </div>
+    """
+    with pytest.raises(CompositionNotParsed, match="unknown quantity"):
         parse_composition(html)
 
 

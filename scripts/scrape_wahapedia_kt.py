@@ -666,7 +666,13 @@ def parse_equipment(html: str) -> list[Equipment]:
 # Stealth Battlesuit" would otherwise be read as 26 operatives.
 # ---------------------------------------------------------------------------
 
-_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+# "your kill team can only include each operative on this list once"
+_ONCE_EACH = re.compile(r"only include each operative on this list once", re.IGNORECASE)
+# "Other than CREMATOR and WARRIOR operatives, ..." -- the exceptions to that
+_OTHER_THAN = re.compile(r"other than (.+?) operatives,", re.IGNORECASE | re.DOTALL)
+# "Your kill team can only include up to two GUNNER operatives."
+_KEYWORD_CAP = re.compile(r"include up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
 _COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
 _LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
 _IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
@@ -677,12 +683,21 @@ class CompositionNotParsed(ValueError):
 
 
 @dataclass(frozen=True)
+class KeywordCap:
+    """A cap on operatives carrying a keyword, as `KTSelectionRestriction` stores it."""
+
+    keyword: str
+    max_operatives: int
+
+
+@dataclass(frozen=True)
 class SelectionOption:
     """One operative a list offers, as `KTSelectionOption` stores it."""
 
     operative: str  # the canonical datacard name, via resolve_operative
     cost: int = 1
     models: int = 1
+    max_selections: int | None = None
     loadout_options: list[str] = field(default_factory=list)
 
 
@@ -695,6 +710,7 @@ class SelectionList:
     position: int
     options: list[SelectionOption] = field(default_factory=list)
     restriction_text: str | None = None
+    keyword_caps: list[KeywordCap] = field(default_factory=list)
 
 
 def _restriction_sentence(top: Tag) -> str | None:
@@ -775,6 +791,32 @@ def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
     return SelectionOption(operative=operative, cost=cost, models=models, loadout_options=variants)
 
 
+def _keyword_caps(sentence: str) -> list[KeywordCap]:
+    """Caps on a SET of operatives, from "can only include up to two GUNNER operatives".
+
+    13 of the 48 teams state one, and several state more than one (Inquisitorial Agent
+    caps GUN SERVITOR, SUBDUCTOR and GUNNER). A number word this parser does not know
+    raises rather than defaulting: a silently wrong cap approves illegal rosters.
+    """
+    caps: dict[str, int] = {}
+    for word, keyword in _KEYWORD_CAP.findall(sentence):
+        limit = _COUNT_WORDS.get(word.lower())
+        if limit is None:
+            raise CompositionNotParsed(f"unknown quantity {word!r} in a keyword cap: {sentence!r}")
+        caps[_clean(keyword).strip()] = limit
+    return [KeywordCap(keyword=keyword, max_operatives=limit) for keyword, limit in caps.items()]
+
+
+def _repeat_exceptions(sentence: str) -> set[str]:
+    """The keywords exempt from "each operative ... once", from "Other than CREMATOR and
+    WARRIOR operatives, ...". 38 of the 42 restriction sentences carry such a clause."""
+    match = _OTHER_THAN.search(sentence)
+    if match is None:
+        return set()
+    listed = re.split(r",| and ", match.group(1))
+    return {_clean(word).strip().upper() for word in listed if _clean(word).strip()}
+
+
 def parse_composition(html: str) -> list[SelectionList]:
     """The kill team's selection lists, in printed order.
 
@@ -806,7 +848,9 @@ def parse_composition(html: str) -> list[SelectionList]:
 
     # After the structural checks, so a page with no composition reports that rather
     # than failing on its datacards.
-    datacards = [operative.name for operative in parse_operatives(html)]
+    operatives = parse_operatives(html)
+    datacards = [operative.name for operative in operatives]
+    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
 
     # Which items are LISTS rather than entries, at any depth. Two teams print a second
     # list inside the first rather than beside it: Blades of Khaine nests "7 BLADES OF
@@ -897,16 +941,37 @@ def parse_composition(html: str) -> list[SelectionList]:
 
     if not lists:
         raise CompositionNotParsed("the composition list is empty")
+
     sentence = _restriction_sentence(top)
     if sentence:
         # Printed after the whole composition and referring to "this list", so it
-        # belongs to the last one.
+        # belongs to the last one. Two clauses are read out of it: how often an
+        # operative may repeat, and caps on whole sets of operatives.
         last = lists[-1]
+        exempt = _repeat_exceptions(sentence)
+        repeats_capped = bool(_ONCE_EACH.search(sentence))
+        options = [
+            SelectionOption(
+                operative=option.operative,
+                cost=option.cost,
+                models=option.models,
+                # "each operative on this list once" -- except the keywords the
+                # sentence exempts, which stay uncapped beyond the budget. The
+                # exemption is a KEYWORD, matched against what the datacard carries:
+                # Raveners exempt WARRIOR, and "Ravener Warrior" holds that keyword.
+                max_selections=1
+                if repeats_capped and not (exempt & keywords_of.get(option.operative, set()))
+                else option.max_selections,
+                loadout_options=option.loadout_options,
+            )
+            for option in last.options
+        ]
         lists[-1] = SelectionList(
             label=last.label,
             budget=last.budget,
             position=last.position,
-            options=last.options,
+            options=options,
             restriction_text=sentence,
+            keyword_caps=_keyword_caps(sentence),
         )
     return lists

@@ -258,6 +258,21 @@ two, which is why `KTSelectionRestriction` exists rather than a note in
 quarter of the teams. It is evaluated against `KTOperative.keywords`, which the catalog
 already holds, and a list may carry several caps (Inquisitorial Agent states three).
 
+**The restriction sentence is read, not just stored.** It carries two clauses, and both
+become data:
+
+- *"Other than CREMATOR and WARRIOR operatives, your kill team can only include each
+  operative on this list once"* → `max_selections = 1` on every option except those
+  whose datacard carries an exempted **keyword**. 39 of the 42 sentences cap repeats and
+  38 carry an exemption clause; across the teams that is 252 options capped and 168 left
+  free.
+- *"Your kill team can only include up to two GUNNER operatives"* →
+  `KTSelectionRestriction`. 12 of the parsed teams state one, and a list may carry
+  several.
+
+A number word the parser does not know raises rather than defaulting, since a silently
+wrong cap approves illegal rosters.
+
 **Loadouts are display only.** `loadout_options` keeps the printed variants for an
 entry ("with flamer and gun butt", "with webber and gun butt") and **nothing validates
 them**. Wyrmblade prints three `GUNNER with …` lines, and 12 of the 48 teams repeat an
