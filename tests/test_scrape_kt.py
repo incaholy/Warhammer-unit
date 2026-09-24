@@ -14,6 +14,7 @@ from scripts.scrape_wahapedia_kt import (
     KeywordCap,
     NavEntry,
     OperativeNotResolved,
+    composition_warnings,
     core_rules_url,
     main,
     parse_composition,
@@ -832,3 +833,93 @@ def test_the_most_specific_card_wins_when_the_entry_carries_the_extra_words():
     assert resolve_operative("INQUISITORIAL AGENT INTERROGATOR", ["Interrogator Agent"]) == (
         "Interrogator Agent"
     )
+
+
+# ---------------------------------------------------------------------------
+# `composition_warnings`: a mis-read composition seeds cleanly, so it has to be said
+# out loud. Synthetic teams, in the payload's shape.
+# ---------------------------------------------------------------------------
+
+
+def _scraped_team(**overrides) -> dict:
+    team = {
+        "name": "Hollow Vigil",
+        "rules": [{"name": "Ember Tide", "description": "Place one Ember marker."}],
+        "operatives": [
+            {"name": "Hollow Warden", "abilities": [{"name": "Vigil", "description": "Does a thing."}]},
+            {"name": "Hollow Sentinel", "abilities": []},
+        ],
+        "selection_lists": [
+            {
+                "label": "1 HOLLOW WARDEN operative",
+                "position": 0,
+                "options": [{"operative": "Hollow Warden"}],
+            },
+            {
+                "label": "4 HOLLOW operatives selected from the following list:",
+                "position": 1,
+                "options": [{"operative": "Hollow Sentinel"}],
+            },
+        ],
+    }
+    return {**team, **overrides}
+
+
+def test_a_team_whose_composition_offers_every_datacard_is_quiet():
+    assert composition_warnings(_scraped_team()) == []
+
+
+def test_a_datacard_no_list_offers_is_flagged():
+    # Gellerpox's three vermin: a second composition block the parser does not read, so
+    # those operatives cannot be fielded at all.
+    team = _scraped_team()
+    team["operatives"].append({"name": "Hollow Cinder Wisp", "abilities": []})
+
+    warnings = composition_warnings(team)
+
+    assert len(warnings) == 1
+    assert "no selection list offers 'Hollow Cinder Wisp'" in warnings[0]
+
+
+def test_a_datacard_a_rule_or_an_ability_names_is_not_flagged():
+    # Chaos Cult's Mutant and Torment are GAINED mid-game by "Accursed Gifts" and
+    # "Mutation", never selected, so no list offering them is correct.
+    team = _scraped_team()
+    team["operatives"].append({"name": "Hollow Revenant", "abilities": []})
+    team["rules"].append(
+        {"name": "Ashen Rebirth", "description": "Replace it with a HOLLOW REVENANT operative."}
+    )
+
+    assert composition_warnings(team) == []
+
+    # …and an ability counts the same way
+    team["rules"].pop()
+    team["operatives"][0]["abilities"].append(
+        {"name": "Rebirth", "description": "Set up a HOLLOW REVENANT operative."}
+    )
+    assert composition_warnings(team) == []
+
+
+def test_a_list_offering_a_less_specific_card_than_its_label_names_is_flagged():
+    # The mis-resolution the first check cannot see: `Player` IS offered, so no datacard
+    # goes unused, and only the label gives the game away.
+    team = _scraped_team(
+        operatives=[{"name": "Lead Player", "abilities": []}, {"name": "Player", "abilities": []}],
+        selection_lists=[
+            {
+                "label": "1 VOID-DANCER TROUPE LEAD PLAYER operative with one option",
+                "position": 0,
+                "options": [{"operative": "Player"}],
+            },
+            {
+                "label": "7 VOID-DANCER TROUPE operatives selected from the following list:",
+                "position": 1,
+                "options": [{"operative": "Player"}],
+            },
+        ],
+    )
+
+    warnings = composition_warnings(team)
+
+    assert [w for w in warnings if "which names 'Lead Player'" in w], warnings
+    assert any("no selection list offers 'Lead Player'" in w for w in warnings)

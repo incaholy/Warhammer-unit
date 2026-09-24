@@ -1035,6 +1035,58 @@ def parse_composition(html: str) -> Composition:
     return Composition(lists=lists, keyword_caps=caps)
 
 
+def composition_warnings(team: dict) -> list[str]:
+    """Things a human should look at in a scraped team. None of them is fatal.
+
+    Both checks exist because a mis-read composition is SILENT: it seeds cleanly, and
+    the result is a roster rule that looks right. They found three real problems in one
+    pass -- Gellerpox's three vermin (a second composition block the parser does not
+    read), Void-dancer's Lead Player (a tie-break that picked the wrong card), and Chaos
+    Cult's two rule-granted operatives, which turned out to be correct.
+
+    1. A datacard no list offers. That operative cannot be fielded, so either the page
+       grants it some other way or the composition was read wrongly. Operatives named by
+       a team RULE or an ABILITY are excluded: Chaos Cult's Mutant and Torment are
+       gained mid-game by "Accursed Gifts" and "Mutation", not selected. Equipment text
+       is deliberately NOT searched -- Gellerpox's vermin come from MUTOID VERMIN
+       equipment, and "equipment can add an operative" is a shape the model cannot hold
+       yet, so it should stay visible.
+
+    2. A list whose label names a datacard the list does not offer. This catches the
+       mis-resolutions the first check cannot: one that lands on a card offered
+       elsewhere leaves no unused datacard behind, and nothing else would notice.
+    """
+    warnings: list[str] = []
+    cards = [operative["name"] for operative in team["operatives"]]
+    offered = {option["operative"] for listing in team["selection_lists"] for option in listing["options"]}
+
+    prose = " ".join(
+        [rule["description"] for rule in team["rules"]]
+        + [ability["description"] for operative in team["operatives"] for ability in operative["abilities"]]
+    )
+    prose_words = set(_words(prose.upper()))
+    for card in cards:
+        card_words = set(_words(card.upper()))
+        if card in offered or not card_words or card_words <= prose_words:
+            continue
+        warnings.append(f"no selection list offers {card!r}, and no rule or ability names it")
+
+    for listing in team["selection_lists"]:
+        label_words = set(_words(listing["label"].upper()))
+        named = [card for card in cards if _words(card.upper()) and set(_words(card.upper())) <= label_words]
+        listed = {option["operative"] for option in listing["options"]}
+        # The MOST SPECIFIC card the label names, not just any of them: a label reading
+        # "... LEAD PLAYER operative" names both `Lead Player` and `Player`, and a list
+        # offering only the second is exactly the mis-resolution being looked for.
+        best = max(named, key=lambda card: len(_words(card)), default=None)
+        if best is not None and best not in listed:
+            warnings.append(
+                f"list {listing['position']} is labelled {listing['label'][:48]!r}, "
+                f"which names {best!r}, but it offers {sorted(listed)}"
+            )
+    return warnings
+
+
 def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
     """Everything one kill team's page holds, in the seed's shape.
 
@@ -1147,6 +1199,14 @@ def main() -> None:
         print(f"\nskipped {len(payload['skipped'])} team(s) -- ambiguous pages, left for K6:")
         for entry in payload["skipped"]:
             print(f"  {entry['team']}: {entry['reason']}")
+
+    # Not failures: the catalog is usable, but a silently mis-read composition seeds just
+    # as cleanly as a correct one, so anything suspicious is said out loud.
+    flagged = [(team["name"], warning) for team in teams for warning in composition_warnings(team)]
+    if flagged:
+        print(f"\n{len(flagged)} composition(s) to check by hand:")
+        for name, warning in flagged:
+            print(f"  {name}: {warning}")
     print("\nNow run: make seed-kt")
 
 
