@@ -26,9 +26,17 @@ autogenerate, `tests/conftest.py` for the test schema.
 from uuid import UUID, uuid4
 
 from sqlalchemy import JSON, CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
 from app.core.db.models import TimestampMixin
+
+# A list of short strings: an operative's keywords, a weapon's rules, an option's printed
+# loadouts. JSONB on Postgres and plain JSON on SQLite (the test tier), because `json`
+# cannot carry a GIN index -- so a "which operatives have this keyword?" filter would have
+# no way to be indexed, and a keyword is exactly the sort of thing a catalog gets filtered
+# by. Declared once and shared: the three columns hold the same shape for the same reason.
+STRING_LIST = JSON().with_variant(JSONB(), "postgresql")
 
 
 class KTFaction(TimestampMixin, table=True):
@@ -70,18 +78,46 @@ class KillTeam(TimestampMixin, table=True):
     # A rule only exists as part of its kill team, so it goes with it: the FK
     # cascades in the database, and `cascade_delete` makes the ORM do the same when
     # the kill team is deleted through a session.
-    rules: list["KillTeamRule"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    # Every collection below states its ORDER. Rows have none of their own, so without
+    # this each list comes back in whatever the storage happens to give -- which held by
+    # luck while nothing had disturbed the heap, and a single `VACUUM FULL` changes. Where
+    # the page's own order is worth keeping it is a `position` column (decision #25);
+    # elsewhere the name is the order a reader expects.
+    rules: list["KillTeamRule"] = Relationship(
+        back_populates="kill_team",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KillTeamRule.name"},
+    )
     # Cascades two levels: an operative's weapons and abilities go with it.
-    operatives: list["KTOperative"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    operatives: list["KTOperative"] = Relationship(
+        back_populates="kill_team",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTOperative.name"},
+    )
     # A team's own ploys only. The universal ones (kill_team_id NULL) belong to no
     # team, so they are not in this list and are not deleted with one.
-    ploys: list["KTPloy"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    ploys: list["KTPloy"] = Relationship(
+        back_populates="kill_team",
+        cascade_delete=True,
+        # As the pages group them: strategy before firefight, then by name.
+        sa_relationship_kwargs={"order_by": "KTPloy.kind, KTPloy.name"},
+    )
     # Its own equipment only; the universal list (kill_team_id NULL) is nobody's.
-    equipment: list["KTEquipment"] = Relationship(back_populates="kill_team", cascade_delete=True)
-    selection_lists: list["KTSelectionList"] = Relationship(back_populates="kill_team", cascade_delete=True)
+    equipment: list["KTEquipment"] = Relationship(
+        back_populates="kill_team",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTEquipment.name"},
+    )
+    selection_lists: list["KTSelectionList"] = Relationship(
+        back_populates="kill_team",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTSelectionList.position"},
+    )
     # Team-wide, not per list: see KTSelectionRestriction.
     keyword_caps: list["KTSelectionRestriction"] = Relationship(
-        back_populates="kill_team", cascade_delete=True
+        back_populates="kill_team",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTSelectionRestriction.keyword"},
     )
 
 
@@ -134,11 +170,21 @@ class KTOperative(TimestampMixin, table=True):
     save: int
     wounds: int
 
-    keywords: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
+    keywords: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
 
     kill_team: KillTeam = Relationship(back_populates="operatives")
-    weapons: list["KTWeapon"] = Relationship(back_populates="operative", cascade_delete=True)
-    abilities: list["KTAbility"] = Relationship(back_populates="operative", cascade_delete=True)
+    # In the order the card prints them (decision #25), which is the whole point of the
+    # `position` column: a datacard read at the table has to look like the datacard.
+    weapons: list["KTWeapon"] = Relationship(
+        back_populates="operative",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTWeapon.position"},
+    )
+    abilities: list["KTAbility"] = Relationship(
+        back_populates="operative",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTAbility.position"},
+    )
     offered_by: list["KTSelectionOption"] = Relationship(back_populates="operative", cascade_delete=True)
 
 
@@ -197,6 +243,7 @@ class KTWeapon(TimestampMixin, table=True):
             "attacks >= 0 AND hit >= 0 AND normal_damage >= 0 AND crit_damage >= 0",
             name="ck_kt_weapon_stats_non_negative",
         ),
+        CheckConstraint("position >= 0", name="ck_kt_weapon_position"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -222,7 +269,15 @@ class KTWeapon(TimestampMixin, table=True):
     # "Rending", "Silent", "Range 3", "Piercing 1" -- names with their parameters, as
     # printed. `Range x` is also lifted into `range` above; it stays here because the
     # rules list is what the datacard shows.
-    weapon_rules: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
+    weapon_rules: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+
+    # Where the datacard prints this profile (decision #25). Rows have no inherent order,
+    # and alphabetical is not a datacard: a card lists ranged profiles then melee, and the
+    # same name can appear in both (Sanctifiers' brazier), so sorting by name interleaves
+    # the two halves of one weapon. Deliberately NOT unique per operative -- the seed
+    # rewrites positions in place when a page reorders its profiles, and a unique
+    # constraint would collide with whichever row has not moved yet.
+    position: int = Field(default=0)
 
     operative: KTOperative = Relationship(back_populates="weapons")
 
@@ -235,12 +290,16 @@ class KTAbility(TimestampMixin, table=True):
     """
 
     __tablename__ = "kt_abilities"
-    __table_args__ = (UniqueConstraint("operative_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("operative_id", "name"),
+        CheckConstraint("position >= 0", name="ck_kt_ability_position"),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     operative_id: UUID = Field(foreign_key="kt_operatives.id", ondelete="CASCADE", index=True)
     name: str = Field(max_length=128)
     description: str
+    position: int = Field(default=0)  # print order, as on the card (decision #25)
 
     operative: KTOperative = Relationship(back_populates="abilities")
 
@@ -384,7 +443,7 @@ class KTSelectionList(TimestampMixin, table=True):
     options: list["KTSelectionOption"] = Relationship(
         back_populates="selection_list",
         cascade_delete=True,
-        sa_relationship_kwargs={"overlaps": "offered_by"},
+        sa_relationship_kwargs={"overlaps": "offered_by", "order_by": "KTSelectionOption.position"},
     )
 
 
@@ -437,6 +496,7 @@ class KTSelectionOption(TimestampMixin, table=True):
             "max_selections IS NULL OR max_selections >= 1",
             name="ck_kt_selection_option_max_selections",
         ),
+        CheckConstraint("position >= 0", name="ck_kt_selection_option_position"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -451,7 +511,10 @@ class KTSelectionOption(TimestampMixin, table=True):
     max_selections: int | None = Field(default=None)
     # Display only. See the class docstring: not validated, and not the record of what
     # a roster took.
-    loadout_options: list[str] = Field(default_factory=list, sa_type=JSON, nullable=False)
+    loadout_options: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+    # The order the page lists this option in, so a roster builder offers them as printed
+    # (decision #25). `KTSelectionList` already carries its own `position`.
+    position: int = Field(default=0)
 
     selection_list: KTSelectionList = Relationship(
         back_populates="options", sa_relationship_kwargs={"overlaps": "offered_by"}

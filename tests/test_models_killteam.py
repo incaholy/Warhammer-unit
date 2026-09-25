@@ -601,3 +601,103 @@ def test_deleting_a_kill_team_takes_its_keyword_caps(session, make_kill_team, ma
     session.commit()
 
     assert session.exec(select(KTSelectionRestriction)).all() == []
+
+
+# ---------------------------------------------------------------------------
+# Print order (decision #25). Rows have no order of their own, so every one of these
+# collections says how it is sorted — and for a datacard that has to be the card's own
+# order, not alphabetical.
+# ---------------------------------------------------------------------------
+
+
+def test_an_operatives_weapons_come_back_in_the_cards_order(session, make_kt_operative, make_kt_weapon):
+    # Written out of order on purpose: insertion order is what the storage happens to
+    # return, and it held by luck until a `VACUUM FULL` or a rewritten row moved one.
+    warden = make_kt_operative(name="Warden")
+    make_kt_weapon(warden, name="Fists", category="melee", position=3)
+    make_kt_weapon(warden, name="Bolt rifle", category="range", position=0)
+    make_kt_weapon(warden, name="Chainsword", category="melee", position=2)
+    make_kt_weapon(warden, name="Plasma pistol", category="range", position=1)
+    session.expire_all()
+
+    assert [w.name for w in warden.weapons] == ["Bolt rifle", "Plasma pistol", "Chainsword", "Fists"]
+    # …which alphabetical would not give, and a card lists ranged before melee
+    assert [w.name for w in warden.weapons] != sorted(w.name for w in warden.weapons)
+
+
+def test_an_operatives_abilities_come_back_in_the_cards_order(session, make_kt_operative, make_kt_ability):
+    warden = make_kt_operative(name="Warden")
+    make_kt_ability(warden, name="Zealous Charge", position=1)
+    make_kt_ability(warden, name="Ember Strike", position=0)
+    session.expire_all()
+
+    assert [a.name for a in warden.abilities] == ["Ember Strike", "Zealous Charge"]
+
+
+def test_a_lists_options_come_back_in_print_order(
+    session, make_kill_team, make_kt_selection_list, make_kt_operative, make_kt_selection_option
+):
+    team = make_kill_team(name="Hollow Vigil")
+    listing = make_kt_selection_list(team, position=0)
+    second = make_kt_operative(kill_team=team, name="Sentinel")
+    first = make_kt_operative(kill_team=team, name="Warden")
+    make_kt_selection_option(listing, second, position=1)
+    make_kt_selection_option(listing, first, position=0)
+    session.expire_all()
+
+    assert [o.operative.name for o in listing.options] == ["Warden", "Sentinel"]
+
+
+def test_a_teams_selection_lists_come_back_in_print_order(session, make_kill_team, make_kt_selection_list):
+    team = make_kill_team(name="Hollow Vigil")
+    make_kt_selection_list(team, position=2, label="third")
+    make_kt_selection_list(team, position=0, label="first")
+    make_kt_selection_list(team, position=1, label="second")
+    session.expire_all()
+
+    assert [row.label for row in team.selection_lists] == ["first", "second", "third"]
+
+
+def test_a_teams_ploys_come_back_grouped_by_kind(session, make_kill_team, make_kt_ploy):
+    # As the pages group them, which is how a player reads them: the ones played in the
+    # Strategy phase, then the ones played during activations.
+    team = make_kill_team(name="Hollow Vigil")
+    make_kt_ploy(team, name="ZEAL", kind="firefight")
+    make_kt_ploy(team, name="ASH", kind="strategy")
+    make_kt_ploy(team, name="EMBER", kind="firefight")
+    session.expire_all()
+
+    assert [(p.kind, p.name) for p in team.ploys] == [
+        ("firefight", "EMBER"),
+        ("firefight", "ZEAL"),
+        ("strategy", "ASH"),
+    ]
+
+
+def test_a_negative_position_is_refused(session, make_kt_operative):
+    operative = make_kt_operative()
+    session.add(
+        KTWeapon(
+            operative_id=operative.id,
+            name="Backwards",
+            category="melee",
+            attacks=4,
+            hit=3,
+            normal_damage=4,
+            crit_damage=5,
+            position=-1,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_two_profiles_may_share_a_position(session, make_kt_operative, make_kt_weapon):
+    # Deliberately NOT unique per operative: the seed rewrites positions in place when a
+    # page reorders its profiles, and a unique constraint would collide with whichever row
+    # has not moved yet — the same trap that made a selection list's budget part of its key.
+    warden = make_kt_operative(name="Warden")
+    make_kt_weapon(warden, name="One", position=0)
+    make_kt_weapon(warden, name="Two", position=0)  # no error
+
+    assert len(warden.weapons) == 2

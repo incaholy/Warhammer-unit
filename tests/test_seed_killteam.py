@@ -658,3 +658,58 @@ def test_a_payload_naming_the_same_thing_twice_is_refused(session, edit, message
         seed(session, payload)
 
     assert session.exec(select(KillTeam)).all() == []
+
+
+def test_the_payloads_order_becomes_the_stored_print_order(session):
+    # The payload lists a datacard's profiles in the order the page prints them, so the
+    # index IS the print order (decision #25). Stored, because rows have none of their own.
+    seed(session, SAMPLE)
+
+    warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
+    assert [(w.category, w.position) for w in warden.weapons] == [("range", 0), ("melee", 1)]
+    assert [a.position for a in warden.abilities] == [0]
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [o.position for o in lists[0].options] == [0]
+
+
+def test_a_reordered_datacard_moves_the_positions(session):
+    # The page swaps a profile's place. Nothing about either weapon's data changed, so
+    # without `position` the seed would report "nothing changed" and keep serving the old
+    # order for good — which is exactly what it did before the column existed.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["operatives"][0]["weapons"].reverse()
+
+    counts = seed(session, payload)
+
+    assert counts["updated"] == 2  # both profiles moved
+    assert counts["weapons"] == 0  # and neither was duplicated
+    warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
+    assert [(w.category, w.position) for w in warden.weapons] == [("melee", 0), ("range", 1)]
+
+
+def test_a_reordered_option_list_is_replaced(session):
+    # Options come with their list, so a reorder goes through the composition replace.
+    payload = copy.deepcopy(SAMPLE)
+    listing = payload["kill_teams"][0]["selection_lists"][1]
+    listing["options"].append(
+        {
+            "operative": "Hollow Warden",
+            "cost": 1,
+            "models": 1,
+            "max_selections": 1,
+            "loadout_options": [],
+        }
+    )
+    seed(session, payload)
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [o.operative.name for o in lists[1].options] == ["Hollow Sentinel", "Hollow Warden"]
+
+    reordered = copy.deepcopy(payload)
+    reordered["kill_teams"][0]["selection_lists"][1]["options"].reverse()
+    counts = seed(session, reordered)
+
+    assert counts["compositions_replaced"] == 1
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [o.operative.name for o in lists[1].options] == ["Hollow Warden", "Hollow Sentinel"]
+    assert [o.position for o in lists[1].options] == [0, 1]

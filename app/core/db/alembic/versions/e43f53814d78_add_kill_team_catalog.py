@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: c33185d6ee0d
+Revision ID: e43f53814d78
 Revises: 44441c6a9671
-Create Date: 2026-09-23 17:52:54.446038
+Create Date: 2026-09-24 18:39:38.396355
 
 """
 from typing import Sequence, Union
@@ -10,10 +10,10 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 import sqlmodel
-
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'c33185d6ee0d'
+revision: str = 'e43f53814d78'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -76,7 +76,7 @@ def upgrade() -> None:
     sa.Column('move', sa.Integer(), nullable=False),
     sa.Column('save', sa.Integer(), nullable=False),
     sa.Column('wounds', sa.Integer(), nullable=False),
-    sa.Column('keywords', sa.JSON(), nullable=False),
+    sa.Column('keywords', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.CheckConstraint('apl >= 1', name='ck_kt_operative_apl'),
     sa.CheckConstraint('move >= 0 AND save >= 0 AND wounds >= 0', name='ck_kt_operative_stats_non_negative'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
@@ -141,6 +141,8 @@ def upgrade() -> None:
     sa.Column('operative_id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
+    sa.CheckConstraint('position >= 0', name='ck_kt_ability_position'),
     sa.ForeignKeyConstraint(['operative_id'], ['kt_operatives.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('operative_id', 'name')
@@ -156,10 +158,12 @@ def upgrade() -> None:
     sa.Column('cost', sa.Integer(), nullable=False),
     sa.Column('models', sa.Integer(), nullable=False),
     sa.Column('max_selections', sa.Integer(), nullable=True),
-    sa.Column('loadout_options', sa.JSON(), nullable=False),
+    sa.Column('loadout_options', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
     sa.CheckConstraint('cost >= 1', name='ck_kt_selection_option_cost'),
     sa.CheckConstraint('max_selections IS NULL OR max_selections >= 1', name='ck_kt_selection_option_max_selections'),
     sa.CheckConstraint('models >= 1', name='ck_kt_selection_option_models'),
+    sa.CheckConstraint('position >= 0', name='ck_kt_selection_option_position'),
     sa.ForeignKeyConstraint(['kill_team_id', 'operative_id'], ['kt_operatives.kill_team_id', 'kt_operatives.id'], name='fk_kt_selection_option_operative_same_team', ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['kill_team_id', 'selection_list_id'], ['kt_selection_lists.kill_team_id', 'kt_selection_lists.id'], name='fk_kt_selection_option_list_same_team', ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -180,9 +184,11 @@ def upgrade() -> None:
     sa.Column('hit', sa.Integer(), nullable=False),
     sa.Column('normal_damage', sa.Integer(), nullable=False),
     sa.Column('crit_damage', sa.Integer(), nullable=False),
-    sa.Column('weapon_rules', sa.JSON(), nullable=False),
+    sa.Column('weapon_rules', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
     sa.CheckConstraint("category IN ('range', 'melee')", name='ck_kt_weapon_category'),
     sa.CheckConstraint('attacks >= 0 AND hit >= 0 AND normal_damage >= 0 AND crit_damage >= 0', name='ck_kt_weapon_stats_non_negative'),
+    sa.CheckConstraint('position >= 0', name='ck_kt_weapon_position'),
     sa.CheckConstraint('range >= 1', name='ck_kt_weapon_range'),
     sa.ForeignKeyConstraint(['operative_id'], ['kt_operatives.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),

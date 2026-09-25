@@ -260,7 +260,10 @@ def _seed_operative(session: Session, team: KillTeam, data: dict, counts: dict) 
         name=data["name"],
     )
 
-    for weapon in data.get("weapons", []):
+    # `enumerate` is the print order: the payload lists a datacard's profiles in the order
+    # the page prints them, and `position` is what keeps that once a row can be rewritten
+    # (decision #25). Without it the order read back is whatever the storage gives.
+    for index, weapon in enumerate(data.get("weapons", [])):
         printed = weapon["range"]
         _upsert(
             session,
@@ -276,19 +279,20 @@ def _seed_operative(session: Session, team: KillTeam, data: dict, counts: dict) 
                 "normal_damage": weapon["normal_damage"],
                 "crit_damage": weapon["crit_damage"],
                 "weapon_rules": weapon["rules"],
+                "position": index,
             },
             operative_id=operative.id,
             name=weapon["name"],
             category=weapon["category"],
         )
 
-    for ability in data.get("abilities", []):
+    for index, ability in enumerate(data.get("abilities", [])):
         _upsert(
             session,
             KTAbility,
             counts,
             "abilities",
-            {"description": ability["description"]},
+            {"description": ability["description"], "position": index},
             operative_id=operative.id,
             name=ability["name"],
         )
@@ -347,7 +351,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
     wanted = []
     for listing in data["selection_lists"]:
         options = []
-        for option in listing.get("options", []):
+        for index, option in enumerate(listing.get("options", [])):
             if option["operative"] not in operatives:
                 # The scraper resolved this name against this page's datacards, so a
                 # miss here means the payload is inconsistent -- not something to guess
@@ -363,6 +367,10 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                     option["models"],
                     option["max_selections"],
                     tuple(option["loadout_options"]),
+                    # Its print order, compared too: a list offering the same options in a
+                    # new order HAS changed, and storing the order is pointless if such a
+                    # change does not land.
+                    index,
                 )
             )
         wanted.append(
@@ -389,6 +397,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                     option.models,
                     option.max_selections,
                     tuple(option.loadout_options),
+                    option.position,
                 )
                 for option in row.options
             ],
@@ -412,7 +421,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
         )
         session.add(row)
         session.flush()  # so the options have a list id
-        for name, cost, models, max_selections, loadouts in options:
+        for name, cost, models, max_selections, loadouts, index in options:
             session.add(
                 KTSelectionOption(
                     selection_list_id=row.id,
@@ -424,6 +433,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                     models=models,
                     max_selections=max_selections,
                     loadout_options=list(loadouts),
+                    position=index,
                 )
             )
 
