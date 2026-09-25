@@ -209,7 +209,7 @@ def test_abilities_and_unique_actions_come_back_together():
     # the text rather than acting on it.
     warden = _by_name()["Hollow Sentinel Warden"]
 
-    assert [a.name for a in warden.abilities] == ["Warden's Vigil", "EMBER STRIKE"]
+    assert [a.name for a in warden.abilities] == ["Warden's Vigil", "EMBER STRIKE", "EMBER BEACON"]
 
 
 def test_an_ability_keeps_its_rule_text_without_repeating_its_name():
@@ -923,3 +923,103 @@ def test_a_list_offering_a_less_specific_card_than_its_label_names_is_flagged():
 
     assert [w for w in warnings if "which names 'Lead Player'" in w], warnings
     assert any("no selection list offers 'Lead Player'" in w for w in warnings)
+
+
+def test_a_unique_action_keeps_the_conditions_printed_beside_its_effect():
+    # A datacard prints an action's effect and then the conditions on performing it, in
+    # two sibling divs. Reading only `actionEffect` dropped the conditions from 597 blocks
+    # across the site -- and an action shown without them reads as unconditional, which on
+    # a reference sheet is worse than showing nothing.
+    strike = {a.name: a for a in _by_name()["Hollow Sentinel Warden"].abilities}["EMBER STRIKE"]
+
+    assert "inflict D3 damage" in strike.description
+    assert "cannot perform this action while within Engagement Range" in strike.description
+
+
+def test_a_unique_action_keeps_its_final_full_stop():
+    # The description was assembled with `f"{cost}. {body}".strip(". ")`, which strips
+    # from BOTH ends -- so 168 descriptions lost their closing full stop and read as
+    # though they had been cut off mid-sentence.
+    strike = {a.name: a for a in _by_name()["Hollow Sentinel Warden"].abilities}["EMBER STRIKE"]
+
+    assert strike.description.startswith("1AP.")
+    assert strike.description.endswith(".")
+
+
+def test_an_action_whose_body_carries_no_class_still_keeps_its_text():
+    # Pathfinders wrap the body in a plain <div>, and keying on `actionEffect` left ten
+    # MARKERLIGHT rows whose whole description was "1AP".
+    beacon = {a.name: a for a in _by_name()["Hollow Sentinel Warden"].abilities}["EMBER BEACON"]
+
+    assert beacon.description == '1AP. Place one EMBER marker within 3" of this operative.'
+
+
+def test_the_sites_keyword_markers_are_stripped_from_text():
+    # 14 real rows carry the site's templating around a keyword ("your <KY>OBELISK</KY>
+    # markers"). The keyword is content; the markers are not, and they would either
+    # vanish into a client's HTML or be rendered literally.
+    beacon = {a.name: a for a in _by_name()["Hollow Sentinel Warden"].abilities}["EMBER BEACON"]
+
+    assert "EMBER marker" in beacon.description
+    assert "<KY>" not in beacon.description and "</KY>" not in beacon.description
+
+
+def _composition_with(datacards: list[tuple[str, list[str]]], entries: list[str], sentence: str):
+    """A one-list composition over synthetic datacards, for the restriction rules."""
+    cards = "".join(
+        f"""
+        <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+          <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>{name}</div></h3></div></td>
+          <td class="pCell">APL<div class="dsStat">2</div></td>
+        </tr></table>
+        <table class="dsKeywords"><tr><td>
+          {", ".join(f'<span class="tt kwbu">{keyword}</span>' for keyword in keywords)}
+        </td></tr></table></div>"""
+        for name, keywords in datacards
+    )
+    items = "".join(f"<li>{entry}</li>" for entry in entries)
+    html = f"""
+    {cards}
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>4 THINGS selected from the following list:
+      <ul class="redCircle2">{items}</ul>
+    </li></ul>
+    {sentence}
+    """
+    return parse_composition(html)
+
+
+def test_an_exemption_split_across_two_keywords_still_exempts():
+    # Battleclade's datacards print "COMBAT, SERVITOR" as two comma-separated keywords
+    # while the sentence names "COMBAT SERVITOR", so comparing whole strings matched
+    # nothing: every option was capped at 1 and list 2 became budget 8 over five options
+    # capped at one each -- a list no legal roster can satisfy.
+    composition = _composition_with(
+        [
+            ("Alpha Combat Servitor", ["CLADE", "COMBAT", "SERVITOR"]),
+            ("Alpha Gun Servitor", ["CLADE", "GUN", "SERVITOR"]),
+        ],
+        ["COMBAT SERVITOR", "GUN SERVITOR"],
+        "Other than COMBAT SERVITOR operatives, your kill team can only include each"
+        " operative on this list once.",
+    )
+    options = {option.operative: option for option in composition.lists[0].options}
+
+    assert options["Alpha Combat Servitor"].max_selections is None
+    assert options["Alpha Gun Servitor"].max_selections == 1
+
+
+def test_an_exemption_does_not_match_part_of_a_longer_keyword():
+    # The other half of the same rule. Kommandos print "BREACHA BOY" as ONE keyword and
+    # exempt "BOY" operatives: only the plain Boy may be taken repeatedly, and every
+    # specialist is still once-only. Matching by words alone exempted all seven of them,
+    # and Kasrkin's DEMO-TROOPER and Hearthkyn's JUMP PACK WARRIOR the same way.
+    composition = _composition_with(
+        [("Alpha Boy", ["KREW", "BOY"]), ("Alpha Breacha Boy", ["KREW", "BREACHA BOY"])],
+        ["BOY", "BREACHA BOY"],
+        "Other than BOY operatives, your kill team can only include each operative on this list once.",
+    )
+    options = {option.operative: option for option in composition.lists[0].options}
+
+    assert options["Alpha Boy"].max_selections is None
+    assert options["Alpha Breacha Boy"].max_selections == 1

@@ -62,7 +62,19 @@
     <div class="BreakInsideAvoid">
       <div class="stratWrapper BreakInsideAvoid">
         <h3 class="h_actions_ds">EMBER STRIKE<span>1AP</span></h3>
-        <div><div class="actionEffect">Select one enemy operative within 2" and inflict D3 damage.</div></div>
+        <!-- Effect then conditions, as the page prints them. Reading only the effect
+             dropped every "cannot perform this while ..." clause. -->
+        <div>
+          <div class="actionEffect">Select one enemy operative within 2" and inflict D3 damage.</div>
+          <div class="actionConditions">This operative cannot perform this action while within Engagement Range of an enemy operative.</div>
+        </div>
+      </div>
+      <!-- Pathfinders' pages wrap an action's body in a plain <div> with no class, so a
+           parser keying on `actionEffect` kept only the AP cost. The text also carries
+           the site's escaped `<KY>` keyword markers, as 14 real rows do. -->
+      <div class="stratWrapper BreakInsideAvoid">
+        <h3 class="h_actions_ds">EMBER BEACON<span>1AP</span></h3>
+        <div>Place one &lt;KY&gt;EMBER&lt;/KY&gt; marker within 3" of this operative.</div>
       </div>
     </div>
   </div>

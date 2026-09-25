@@ -89,9 +89,14 @@ def _soup(html: str) -> BeautifulSoup:
     return soup
 
 
+# The site's templating leaks these around keywords in 14 rows of text ("your <KY>OBELISK
+# </KY> <KY>NODE</KY> markers"). The keyword itself is wanted; the markers are not.
+_PSEUDO_TAGS = re.compile(r"</?KY>")
+
+
 def _clean(text: str) -> str:
-    """One nav label as we store it: no &nbsp; padding, no curly quotes."""
-    return text.replace("\xa0", " ").translate(_TYPOGRAPHIC).strip()
+    """Text as we store it: no &nbsp; padding, no curly quotes, no `<KY>` markers."""
+    return _PSEUDO_TAGS.sub("", text.replace("\xa0", " ")).translate(_TYPOGRAPHIC).strip()
 
 
 def parse_nav(html: str) -> list[NavEntry]:
@@ -303,9 +308,18 @@ def _abilities(frame: Tag) -> list[Ability]:
         if cost:
             cost.extract()  # so the name is not "TOXIC LUNGE1AP"
         name = _clean(heading.get_text(" ", strip=True))
-        effect = block.find("div", class_="actionEffect")
-        body = _clean(effect.get_text(" ", strip=True)) if effect else ""
-        description = f"{cost_text}. {body}".strip(". ") if cost_text else body
+        # Effect THEN conditions, the order the page prints them. Reading only the effect
+        # dropped every "you cannot perform this action while ..." clause, which turns a
+        # conditional action into an unconditional one on a reference sheet.
+        parts = [block.find("div", class_=cls) for cls in ("actionEffect", "actionConditions")]
+        body = " ".join(_clean(part.get_text(" ", strip=True)) for part in parts if part is not None)
+        if not body:
+            # Pathfinders wraps an action's body in a plain <div> with no class, so keying
+            # on `actionEffect` left ten MARKERLIGHT rows reading just "1AP".
+            body = _clean(block.get_text(" ", strip=True)).removeprefix(name).lstrip(" :.").strip()
+        # Joined rather than stripped: `.strip(". ")` also took the body's final full stop,
+        # so 168 descriptions read as though they had been cut off.
+        description = f"{cost_text}. {body}" if cost_text and body else (body or cost_text)
         abilities.append(Ability(name=name, description=re.sub(r"\s+", " ", description).strip()))
 
     return abilities
@@ -703,6 +717,32 @@ class CompositionNotParsed(ValueError):
     """A composition line does not match a shape this parser knows."""
 
 
+def _carries(phrase: str, keywords: Iterable[str]) -> bool:
+    """Whether an operative's `keywords` carry the keyword phrase `phrase`.
+
+    A restriction sentence names keywords as prose, and two page habits have to be
+    satisfied at once -- either rule alone gets real teams wrong.
+
+    A phrase may be SPLIT ACROSS KEYWORDS. Battleclade's datacards print "COMBAT,
+    SERVITOR" as two keywords while the sentence names "COMBAT SERVITOR", so comparing
+    whole strings matches nothing -- which left Battleclade with a budget of 8 over five
+    options capped at one each, a list no legal roster can satisfy.
+
+    But a phrase must not match PART of a keyword. Kommandos print "BREACHA BOY" as one
+    keyword and exempt "BOY" operatives: only the plain Boy may be taken repeatedly, and
+    a Breacha Boy is still once-only. Plain word-subset matching exempted all seven
+    specialists, and Kasrkin's DEMO-TROOPER and Hearthkyn's JUMP PACK WARRIOR the same
+    way.
+
+    So: the phrase must be covered by keywords that each fit INSIDE it. "COMBAT
+    SERVITOR" is covered by the keywords COMBAT and SERVITOR; "BOY" is not covered by
+    "BREACHA BOY", which carries a word the phrase does not.
+    """
+    wanted = set(_words(phrase))
+    covered = {word for keyword in keywords for word in _words(keyword) if set(_words(keyword)) <= wanted}
+    return bool(wanted) and wanted <= covered
+
+
 @dataclass(frozen=True)
 class KeywordCap:
     """A cap on operatives carrying a keyword, as `KTSelectionRestriction` stores it.
@@ -720,8 +760,7 @@ class KeywordCap:
 
     def matches(self, keywords: Iterable[str]) -> bool:
         """Whether an operative carrying `keywords` counts towards this cap."""
-        carried = {word for keyword in keywords for word in _words(keyword)}
-        return bool(carried) and set(_words(self.keyword)) <= carried
+        return _carries(self.keyword, keywords)
 
 
 @dataclass(frozen=True)
@@ -1005,10 +1044,12 @@ def parse_composition(html: str) -> Composition:
                 models=option.models,
                 # "each operative on this list once" -- except the keywords the
                 # sentence exempts, which stay uncapped beyond the budget. The
-                # exemption is a KEYWORD, matched against what the datacard carries:
-                # Raveners exempt WARRIOR, and "Ravener Warrior" holds that keyword.
+                # exemption is a KEYWORD, matched against what the datacard carries by
+                # WORDS (see `_carries`): Raveners exempt WARRIOR and "Ravener Warrior"
+                # holds it, while Battleclade exempts the two-word COMBAT SERVITOR.
                 max_selections=1
-                if repeats_capped and not (exempt & keywords_of.get(option.operative, set()))
+                if repeats_capped
+                and not any(_carries(phrase, keywords_of.get(option.operative, set())) for phrase in exempt)
                 else option.max_selections,
                 loadout_options=option.loadout_options,
             )
