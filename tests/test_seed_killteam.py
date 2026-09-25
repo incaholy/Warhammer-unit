@@ -90,6 +90,7 @@ SAMPLE = {
                 {
                     "label": "1 HOLLOW WARDEN operative",
                     "budget": 1,
+                    "shape": "budgeted",
                     "position": 0,
                     "restriction_text": None,
                     "options": [
@@ -105,6 +106,7 @@ SAMPLE = {
                 {
                     "label": "4 HOLLOW operatives selected from the following list:",
                     "budget": 4,
+                    "shape": "budgeted",
                     "position": 1,
                     "restriction_text": "Other than SENTINEL operatives, once each.",
                     "options": [
@@ -254,6 +256,7 @@ def test_an_option_naming_an_unknown_operative_stops_the_seed(session):
                     {
                         "label": "1 X",
                         "budget": 1,
+                        "shape": "single",
                         "position": 0,
                         "options": [{"operative": "Nobody", "cost": 1, "models": 1}],
                     }
@@ -469,6 +472,7 @@ def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session)
         {
             "label": "1 HOLLOW HERALD operative",
             "budget": 1,
+            "shape": "budgeted",
             "position": 0,
             "restriction_text": None,
             "options": [
@@ -732,3 +736,19 @@ def test_a_chosen_rules_group_is_stored(session):
     rules = {r.name: r for r in session.exec(select(KillTeamRule)).all()}
     assert rules["Ember Tide"].group is None
     assert rules["THE RISING EMBER"].group == "Warden Ember Techniques"
+
+
+def test_a_lists_shape_is_stored_and_a_changed_shape_replaces_it(session):
+    # `budget` means selections on a `budgeted` or `single` line and MODELS on a `fixed`
+    # one, so the shape has to travel with the number (decision #29).
+    seed(session, SAMPLE)
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [row.shape for row in lists] == ["budgeted", "budgeted"]
+
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"][0]["shape"] = "fixed"
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert [row.shape for row in lists] == ["fixed", "budgeted"]

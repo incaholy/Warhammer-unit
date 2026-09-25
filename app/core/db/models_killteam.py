@@ -425,6 +425,9 @@ class KTSelectionList(TimestampMixin, table=True):
     __tablename__ = "kt_selection_lists"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "position"),
+        # The three shapes a page prints, and the vocabulary a reader can rely on
+        # (decision #29). Same style as `KTWeapon.category` and `KTPloy.kind`.
+        CheckConstraint("shape IN ('budgeted', 'fixed', 'single')", name="ck_kt_selection_list_shape"),
         # As above: the target of a composite foreign key from `KTSelectionOption`.
         UniqueConstraint("kill_team_id", "id", name="uq_kt_selection_list_team_id"),
         CheckConstraint("budget >= 1", name="ck_kt_selection_list_budget"),
@@ -435,8 +438,18 @@ class KTSelectionList(TimestampMixin, table=True):
     kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
     # As printed, so a roster builder can show the page's own wording.
     label: str = Field(max_length=256)
-    # Selections this list may spend, NOT models: an option may cost more than one.
+    # What the line's number counts, which DEPENDS ON `shape` (decision #29):
+    #   budgeted  "4 RAVENER operatives selected from the following list"  -> selections
+    #   single    "BOSS NOB operative with one of the following options"   -> selections (1)
+    #   fixed     "Every GELLERPOX INFECTED operative in the following list" -> MODELS
+    # A selection is not a model: an option may field several (a pair of familiars) or
+    # cost several (Brood Brother's Magus). Two lists in the catalog are `fixed`, and
+    # reading their budget as selections is how a counter says "7 of 9" for a roster the
+    # page states as nine models.
     budget: int
+    # Which printed shape the line is. Stored rather than re-derived from the label,
+    # because the label is prose and the parser already knows.
+    shape: str = Field(max_length=16, index=True)
     position: int  # print order
     restriction_text: str | None = Field(default=None)
 

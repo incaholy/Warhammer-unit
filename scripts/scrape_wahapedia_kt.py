@@ -34,7 +34,7 @@ import re
 import sys
 from collections.abc import Iterable
 from copy import copy
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
@@ -807,6 +807,11 @@ class SelectionList:
     label: str
     budget: int
     position: int
+    # Which of the three printed shapes this line is (decision #29). It was computed to
+    # work out the budget and then thrown away -- but it is also what the budget MEANS:
+    # selections for `budgeted` and `single`, models for `fixed`. No default: an unstated
+    # shape is a bug, and a default is what hid one here.
+    shape: str
     options: list[SelectionOption] = field(default_factory=list)
     restriction_text: str | None = None
 
@@ -1034,11 +1039,14 @@ def parse_composition(html: str) -> Composition:
 
         count = _LEADING_COUNT.match(label)
         if count:
-            budget = int(count.group(1))  # shape A
+            budget, shape = int(count.group(1)), "budgeted"  # shape A
         elif label.lower().startswith("every"):
-            budget = sum(option.models for option in options.values())  # shape B
+            # Shape B states a fixed roster, so the number is a count of MODELS, not of
+            # selections -- the one place `budget` changes unit, which is why the shape
+            # is stored rather than inferred by a reader (decision #29).
+            budget, shape = sum(option.models for option in options.values()), "fixed"
         else:
-            budget = 1  # shape C: an unnumbered line naming one operative
+            budget, shape = 1, "single"  # shape C: an unnumbered line naming one operative
 
         if not options:
             raise CompositionNotParsed(f"no operatives found for composition line {label!r}")
@@ -1047,6 +1055,7 @@ def parse_composition(html: str) -> Composition:
                 label=label,
                 budget=budget,
                 position=position,
+                shape=shape,
                 options=list(options.values()),
             )
         )
@@ -1092,13 +1101,11 @@ def parse_composition(html: str) -> Composition:
                 raise CompositionNotParsed(
                     f"the cap on {cap.keyword!r} matches no operative's keywords on this page"
                 )
-        lists[-1] = SelectionList(
-            label=last.label,
-            budget=last.budget,
-            position=last.position,
-            options=options,
-            restriction_text=sentence,
-        )
+        # `replace` rather than a fresh SelectionList: this rebuild exists only to apply
+        # the repeat caps, and listing the fields by hand silently dropped `shape` the
+        # moment it was added -- Gellerpox has one list, so its only list is the last one,
+        # and it came back mislabelled as `budgeted` while its budget counted models.
+        lists[-1] = replace(last, options=options, restriction_text=sentence)
     return Composition(lists=lists, keyword_caps=caps)
 
 

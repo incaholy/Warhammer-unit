@@ -444,7 +444,10 @@ def make_kt_selection_list(session, make_kill_team):
     def _make(kill_team=None, **overrides):
         kill_team = kill_team or make_kill_team()
         data = dict(
-            label=f"{next(_counter)} operatives selected from the following list", budget=4, position=0
+            shape="budgeted",
+            label=f"{next(_counter)} operatives selected from the following list",
+            budget=4,
+            position=0,
         )
         data.update(overrides)
         selection_list = KTSelectionList(kill_team_id=kill_team.id, **data)

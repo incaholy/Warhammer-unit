@@ -1048,3 +1048,57 @@ def test_an_exemption_does_not_match_part_of_a_longer_keyword():
 
     assert options["Alpha Boy"].max_selections is None
     assert options["Alpha Breacha Boy"].max_selections == 1
+
+
+def test_each_composition_line_carries_the_shape_it_was_printed_in():
+    # The shape was computed to work out the budget and then thrown away -- but it is also
+    # what the budget MEANS (decision #29). `budgeted` is a line that PRINTS its number,
+    # however small ("1 HOLLOW WARDEN operative"); `single` is an unnumbered line naming one
+    # operative ("XV9 EMBER SUIT operative"), which is an implicit 1.
+    shapes = [(lst.position, lst.shape, lst.budget) for lst in _lists()]
+
+    assert shapes == [(0, "budgeted", 1), (1, "budgeted", 4), (2, "single", 1), (3, "budgeted", 3)]
+
+
+def test_a_fixed_roster_line_says_so_rather_than_looking_budgeted():
+    # "Every X operative in the following list" is a fixed roster, so its number counts
+    # MODELS, not selections. Two real teams print it, and a reader that assumed selections
+    # reported "7 of 9 spent" for a roster the page states as nine models.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
+      <ul class="redCircle2"><li>4 SWARM</li></ul>
+    </li></ul>
+    """
+    listing = parse_composition(html).lists[0]
+
+    assert listing.shape == "fixed"
+    assert listing.budget == 4  # the models, which is what the page states
+    assert sum(option.models for option in listing.options) == 4
+
+
+def test_the_repeat_cap_rebuild_keeps_the_line_intact():
+    # The restriction sentence rebuilds the LAST list to apply its repeat caps, and listing
+    # the fields by hand dropped `shape` the moment it was added: Gellerpox has one list, so
+    # its only list is the last, and it came back labelled `budgeted` while its budget
+    # counted models. `replace` copies every field, so a new one cannot go missing again.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
+      <ul class="redCircle2"><li>4 SWARM</li></ul>
+    </li></ul>
+    Your kill team can only include each operative on this list once.
+    """
+    listing = parse_composition(html).lists[-1]
+
+    assert listing.shape == "fixed"  # not clobbered by the rebuild
+    assert listing.restriction_text is not None
+    assert listing.options[0].max_selections == 1  # the rebuild still did its job

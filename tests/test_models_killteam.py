@@ -701,3 +701,12 @@ def test_two_profiles_may_share_a_position(session, make_kt_operative, make_kt_w
     make_kt_weapon(warden, name="Two", position=0)  # no error
 
     assert len(warden.weapons) == 2
+
+
+def test_a_selection_list_shape_outside_the_vocabulary_is_refused(session, make_kill_team):
+    # Same style as a weapon's category and a ploy's kind: three shapes a page prints, and
+    # a reader can rely on the vocabulary (decision #29).
+    team = make_kill_team()
+    session.add(KTSelectionList(kill_team_id=team.id, label="1 X", budget=1, position=0, shape="whatever"))
+    with pytest.raises(IntegrityError):
+        session.commit()

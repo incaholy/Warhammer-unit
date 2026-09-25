@@ -568,7 +568,9 @@ write to the scraped data (KILLTEAM.md decision #21).
 
 **Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
 Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
-since the rules pick it per battle.
+since the rules pick it per battle. Composition is checked, never enforced (decision
+#28): `validate` reports problems, including "this list carries a printed rule we do not
+model", and a save is never blocked.
 
 ## K5. Game tracker
 

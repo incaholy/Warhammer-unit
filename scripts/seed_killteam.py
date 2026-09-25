@@ -38,7 +38,7 @@ killteam.json shape:
                                              "hit", "normal_damage", "crit_damage",
                                              "rules" }, ... ],
                             "abilities": [ { "name", "description" }, ... ] }, ... ],
-          "selection_lists": [ { "label", "budget", "position", "restriction_text",
+          "selection_lists": [ { "label", "budget", "position", "shape", "restriction_text",
                                  "options": [ { "operative", "cost", "models",
                                                 "max_selections",
                                                 "loadout_options" }, ... ] }, ... ],
@@ -299,7 +299,7 @@ def _seed_operative(session: Session, team: KillTeam, data: dict, counts: dict) 
     return operative
 
 
-def _shape(lists) -> list:
+def _comparable(lists) -> list:
     """A composition as one comparable value, independent of row order.
 
     Options come back from the database in no particular order, so both sides are sorted
@@ -315,9 +315,10 @@ def _shape(lists) -> list:
                 budget,
                 label,
                 restriction,
+                shape,
                 tuple(sorted(options, key=lambda option: option[0])),
             )
-            for position, budget, label, restriction, options in lists
+            for position, budget, label, restriction, shape, options in lists
         ),
         key=lambda row: row[0],
     )
@@ -379,6 +380,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                 listing["budget"],
                 listing["label"],
                 listing.get("restriction_text"),
+                listing["shape"],
                 options,
             )
         )
@@ -390,6 +392,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
             row.budget,
             row.label,
             row.restriction_text,
+            row.shape,
             [
                 (
                     option.operative.name,
@@ -404,20 +407,21 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
         )
         for row in existing
     ]
-    if _shape(stored) == _shape(wanted):
+    if _comparable(stored) == _comparable(wanted):
         return
 
     for row in existing:
         session.delete(row)
     session.flush()  # the DELETEs must land before an INSERT reuses (kill_team_id, position)
 
-    for position, budget, label, restriction, options in wanted:
+    for position, budget, label, restriction, shape, options in wanted:
         row = KTSelectionList(
             kill_team_id=team.id,
             position=position,
             budget=budget,
             label=label,
             restriction_text=restriction,
+            shape=shape,
         )
         session.add(row)
         session.flush()  # so the options have a list id
