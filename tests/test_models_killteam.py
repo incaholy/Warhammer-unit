@@ -658,20 +658,82 @@ def test_a_teams_selection_lists_come_back_in_print_order(session, make_kill_tea
     assert [row.label for row in team.selection_lists] == ["first", "second", "third"]
 
 
-def test_a_teams_ploys_come_back_grouped_by_kind(session, make_kill_team, make_kt_ploy):
-    # As the pages group them, which is how a player reads them: the ones played in the
-    # Strategy phase, then the ones played during activations.
+def test_a_teams_ploys_come_back_in_the_pages_order(session, make_kill_team, make_kt_ploy):
+    # The pages print Strategy Ploys before Firefight Ploys, and ordering by `kind` reversed
+    # that for all 46 teams -- "firefight" sorts before "strategy". The page's order is the
+    # only one that gets both the grouping and the order within a group right.
     team = make_kill_team(name="Hollow Vigil")
-    make_kt_ploy(team, name="ZEAL", kind="firefight")
-    make_kt_ploy(team, name="ASH", kind="strategy")
-    make_kt_ploy(team, name="EMBER", kind="firefight")
+    make_kt_ploy(team, name="ZEAL", kind="firefight", position=3)
+    make_kt_ploy(team, name="ASH", kind="strategy", position=0)
+    make_kt_ploy(team, name="EMBER", kind="firefight", position=2)
+    make_kt_ploy(team, name="CINDER", kind="strategy", position=1)
     session.expire_all()
 
     assert [(p.kind, p.name) for p in team.ploys] == [
+        ("strategy", "ASH"),
+        ("strategy", "CINDER"),
         ("firefight", "EMBER"),
         ("firefight", "ZEAL"),
-        ("strategy", "ASH"),
     ]
+
+
+def test_a_teams_operatives_keep_the_leader_first(session, make_kill_team, make_kt_operative):
+    # A page prints the leader first, and in 44 of the 46 teams that is not the
+    # alphabetically first operative -- Raveners print Prime before Felltalon.
+    team = make_kill_team(name="Hollow Vigil")
+    make_kt_operative(kill_team=team, name="Warden", position=2)
+    make_kt_operative(kill_team=team, name="Prime", position=0)
+    make_kt_operative(kill_team=team, name="Ash Prophet", position=1)
+    session.expire_all()
+
+    assert [o.name for o in team.operatives] == ["Prime", "Ash Prophet", "Warden"]
+
+
+def test_a_teams_rules_keep_their_printed_order_and_their_groups_together(
+    session, make_kill_team, make_kill_team_rule
+):
+    # Two reasons the name is not enough. Raveners print Burrow, Tunnel, Predatory
+    # Instincts, and alphabetical order separates Burrow from the Tunnel rule that refers
+    # to it. And now that a team's chosen options are rules with a `group` (decision #27),
+    # alphabetical order interleaves the three Aspects, so a reader cannot see one set.
+    team = make_kill_team(name="Hollow Vigil")
+    make_kill_team_rule(team, name="Burrow", position=0)
+    make_kill_team_rule(team, name="Tunnel", position=1)
+    make_kill_team_rule(team, name="Predatory Instincts", position=2)
+    make_kill_team_rule(team, name="ASH ON THE WIND", group="Ember Techniques", position=3)
+    make_kill_team_rule(team, name="THE RISING EMBER", group="Ember Techniques", position=4)
+    session.expire_all()
+
+    assert [r.name for r in team.rules] == [
+        "Burrow",
+        "Tunnel",
+        "Predatory Instincts",
+        "ASH ON THE WIND",
+        "THE RISING EMBER",
+    ]
+
+
+def test_a_teams_equipment_keeps_the_pages_order(session, make_kill_team, make_kt_equipment):
+    team = make_kill_team(name="Hollow Vigil")
+    make_kt_equipment(team, name="ZEAL CHARM", position=1)
+    make_kt_equipment(team, name="ASH TOKEN", position=0)
+    session.expire_all()
+
+    assert [q.name for q in team.equipment] == ["ASH TOKEN", "ZEAL CHARM"]
+
+
+def test_a_rule_always_belongs_to_a_kill_team(session, make_kill_team, make_kt_ploy):
+    # "Astartes" is printed by seven different kill teams and "Rifles" by two, so a reader
+    # seeing a rule needs to know whose it is. A rule is never universal: `kill_team_id` is
+    # NOT NULL, which is the difference from a ploy, where NULL means every team may use it.
+    session.add(KillTeamRule(name="Astartes", description="Does something."))
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+    # …while a ploy with no kill team is the universal case, and legal
+    universal = make_kt_ploy(kill_team=None, name="COMMAND RE-ROLL")
+    assert universal.kill_team_id is None
 
 
 def test_a_negative_position_is_refused(session, make_kt_operative):

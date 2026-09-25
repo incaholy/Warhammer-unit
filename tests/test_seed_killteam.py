@@ -752,3 +752,57 @@ def test_a_lists_shape_is_stored_and_a_changed_shape_replaces_it(session):
     assert counts["compositions_replaced"] == 1
     lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
     assert [row.shape for row in lists] == ["fixed", "budgeted"]
+
+
+def test_every_collection_keeps_the_payloads_order(session):
+    # One convention, no per-table judgement (decision #25): the payload lists everything in
+    # the order the page prints it, and every child of a kill team stores that index.
+    payload = copy.deepcopy(SAMPLE)
+    team = payload["kill_teams"][0]
+    team["rules"].append({"name": "Ashen Vigil", "description": "Second rule.", "group": None})
+    team["equipment"].append({"name": "Ash Token", "description": "Second piece."})
+
+    seed(session, payload)
+
+    stored = session.exec(select(KillTeam)).one()
+    assert [(r.position, r.name) for r in stored.rules] == [(0, "Ember Tide"), (1, "Ashen Vigil")]
+    # the page prints ASHEN ADVANCE (strategy) first, which ordering by `kind` reversed
+    assert [(p.position, p.name) for p in stored.ploys] == [(0, "ASHEN ADVANCE"), (1, "EMBER GUARD")]
+    assert [(q.position, q.name) for q in stored.equipment] == [(0, "Cinder Charm"), (1, "Ash Token")]
+    assert [(o.position, o.name) for o in stored.operatives] == [
+        (0, "Hollow Warden"),
+        (1, "Hollow Sentinel"),
+    ]
+    # and the universal rows carry their own page order
+    universal = session.exec(select(KTEquipment).where(KTEquipment.kill_team_id.is_(None))).all()
+    assert [q.position for q in universal] == [0]
+
+
+def test_a_reordered_page_moves_every_position(session):
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["operatives"].reverse()
+    payload["kill_teams"][0]["ploys"].reverse()
+
+    counts = seed(session, payload)
+
+    assert counts["operatives"] == 0 and counts["ploys"] == 0  # updated, not duplicated
+    stored = session.exec(select(KillTeam)).one()
+    assert [o.name for o in stored.operatives] == ["Hollow Sentinel", "Hollow Warden"]
+    assert [p.name for p in stored.ploys] == ["EMBER GUARD", "ASHEN ADVANCE"]
+
+
+def test_a_rule_is_scoped_to_its_team_even_when_two_teams_print_the_same_name(session):
+    # "Astartes" is printed by seven kill teams and "Rifles" by two. Each is that team's own
+    # row -- never one shared rule -- so a reader always knows whose it is.
+    payload = copy.deepcopy(SAMPLE)
+    second = copy.deepcopy(payload["kill_teams"][0])
+    second["name"] = "Ashen Choir"
+    payload["kill_teams"].append(second)
+
+    seed(session, payload)
+
+    rules = session.exec(select(KillTeamRule).where(KillTeamRule.name == "Ember Tide")).all()
+    assert len(rules) == 2
+    assert {r.kill_team.name for r in rules} == {"Hollow Vigil", "Ashen Choir"}
+    assert all(r.kill_team_id is not None for r in rules)

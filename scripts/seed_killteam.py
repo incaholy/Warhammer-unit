@@ -243,7 +243,9 @@ def _ploy_values(ploy: dict) -> dict[str, Any]:
     }
 
 
-def _seed_operative(session: Session, team: KillTeam, data: dict, counts: dict) -> KTOperative:
+def _seed_operative(
+    session: Session, team: KillTeam, data: dict, counts: dict, position: int = 0
+) -> KTOperative:
     operative = _upsert(
         session,
         KTOperative,
@@ -255,14 +257,15 @@ def _seed_operative(session: Session, team: KillTeam, data: dict, counts: dict) 
             "save": data["save"],
             "wounds": data["wounds"],
             "keywords": data["keywords"],
+            "position": position,
         },
         kill_team_id=team.id,
         name=data["name"],
     )
 
-    # `enumerate` is the print order: the payload lists a datacard's profiles in the order
-    # the page prints them, and `position` is what keeps that once a row can be rewritten
-    # (decision #25). Without it the order read back is whatever the storage gives.
+    # `enumerate` is the print order throughout this module: every list in the payload is
+    # in the order the page prints it, and `position` is what keeps that once a row can be
+    # rewritten (decision #25). Without it the order read back is whatever storage gives.
     for index, weapon in enumerate(data.get("weapons", [])):
         printed = weapon["range"]
         _upsert(
@@ -454,7 +457,7 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
     faction = _upsert(session, KTFaction, counts, "factions", name=data["faction"])
     team = _upsert(session, KillTeam, counts, "kill_teams", {"faction_id": faction.id}, name=data["name"])
 
-    for rule in data.get("rules", []):
+    for index, rule in enumerate(data.get("rules", [])):
         _upsert(
             session,
             KillTeamRule,
@@ -462,28 +465,36 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             "rules",
             # `group` is the section a CHOSEN rule was printed under, NULL for an
             # always-on one (decision #27).
-            {"description": rule["description"], "group": rule["group"]},
+            {"description": rule["description"], "group": rule["group"], "position": index},
             kill_team_id=team.id,
             name=rule["name"],
         )
 
-    for ploy in data.get("ploys", []):
-        _upsert(session, KTPloy, counts, "ploys", _ploy_values(ploy), kill_team_id=team.id, name=ploy["name"])
+    for index, ploy in enumerate(data.get("ploys", [])):
+        _upsert(
+            session,
+            KTPloy,
+            counts,
+            "ploys",
+            _ploy_values(ploy) | {"position": index},
+            kill_team_id=team.id,
+            name=ploy["name"],
+        )
 
-    for item in data.get("equipment", []):
+    for index, item in enumerate(data.get("equipment", [])):
         _upsert(
             session,
             KTEquipment,
             counts,
             "equipment",
-            {"description": item["description"]},
+            {"description": item["description"], "position": index},
             kill_team_id=team.id,
             name=item["name"],
         )
 
     operatives = {
-        operative["name"]: _seed_operative(session, team, operative, counts)
-        for operative in data.get("operatives", [])
+        operative["name"]: _seed_operative(session, team, operative, counts, index)
+        for index, operative in enumerate(data.get("operatives", []))
     }
 
     _seed_composition(session, team, data, operatives, counts)
@@ -515,24 +526,24 @@ def seed(session: Session, data: dict) -> dict[str, int]:
         # index on those rows is what stops a second Command Re-roll; `kill_team_id=None`
         # here is matched with IS NULL, so these never collide with a team's own ploy of the
         # same name.
-        for ploy in data.get("universal_ploys", []):
+        for index, ploy in enumerate(data.get("universal_ploys", [])):
             _upsert(
                 session,
                 KTPloy,
                 counts,
                 "universal_ploys",
-                _ploy_values(ploy),
+                _ploy_values(ploy) | {"position": index},
                 kill_team_id=None,
                 name=ploy["name"],
             )
 
-        for item in data.get("universal_equipment", []):
+        for index, item in enumerate(data.get("universal_equipment", [])):
             _upsert(
                 session,
                 KTEquipment,
                 counts,
                 "universal_equipment",
-                {"description": item["description"]},
+                {"description": item["description"], "position": index},
                 kill_team_id=None,
                 name=item["name"],
             )

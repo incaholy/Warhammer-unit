@@ -78,35 +78,38 @@ class KillTeam(TimestampMixin, table=True):
     # A rule only exists as part of its kill team, so it goes with it: the FK
     # cascades in the database, and `cascade_delete` makes the ORM do the same when
     # the kill team is deleted through a session.
-    # Every collection below states its ORDER. Rows have none of their own, so without
-    # this each list comes back in whatever the storage happens to give -- which held by
-    # luck while nothing had disturbed the heap, and a single `VACUUM FULL` changes. Where
-    # the page's own order is worth keeping it is a `position` column (decision #25);
-    # elsewhere the name is the order a reader expects.
+    # ONE convention, no per-table judgement (decision #25): every child of a kill team
+    # carries `position` and is ordered by it, because the page's order is information
+    # everywhere -- the leader is printed first, Strategy Ploys before Firefight Ploys, a
+    # rule beside the rule that refers to it, and a team's chosen options grouped together.
+    # Rows have no order of their own, so without this each list comes back in whatever the
+    # storage gives, which held by luck until a `VACUUM FULL` or a rewritten row moved one.
+    #
+    # The single exception is `keyword_caps`, which are read out of a SENTENCE rather than a
+    # printed list, so they have no page order to keep; the keyword is their stable one.
     rules: list["KillTeamRule"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KillTeamRule.name"},
+        sa_relationship_kwargs={"order_by": "KillTeamRule.position"},
     )
     # Cascades two levels: an operative's weapons and abilities go with it.
     operatives: list["KTOperative"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KTOperative.name"},
+        sa_relationship_kwargs={"order_by": "KTOperative.position"},
     )
     # A team's own ploys only. The universal ones (kill_team_id NULL) belong to no
     # team, so they are not in this list and are not deleted with one.
     ploys: list["KTPloy"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        # As the pages group them: strategy before firefight, then by name.
-        sa_relationship_kwargs={"order_by": "KTPloy.kind, KTPloy.name"},
+        sa_relationship_kwargs={"order_by": "KTPloy.position"},
     )
     # Its own equipment only; the universal list (kill_team_id NULL) is nobody's.
     equipment: list["KTEquipment"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KTEquipment.name"},
+        sa_relationship_kwargs={"order_by": "KTEquipment.position"},
     )
     selection_lists: list["KTSelectionList"] = Relationship(
         back_populates="kill_team",
@@ -130,7 +133,10 @@ class KillTeamRule(TimestampMixin, table=True):
     """
 
     __tablename__ = "kt_kill_team_rules"
-    __table_args__ = (UniqueConstraint("kill_team_id", "name"),)
+    __table_args__ = (
+        UniqueConstraint("kill_team_id", "name"),
+        CheckConstraint("position >= 0", name="ck_kt_kill_team_rule_position"),
+    )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
@@ -142,6 +148,7 @@ class KillTeamRule(TimestampMixin, table=True):
     # Exodite Dragon Masters' 15 Upgrades by operative type, and the group is what says
     # which operatives may take which -- the name alone is not usable.
     group: str | None = Field(default=None, max_length=128, index=True)
+    position: int = Field(default=0)  # print order (decision #25)
 
     kill_team: KillTeam = Relationship(back_populates="rules")
 
@@ -176,6 +183,10 @@ class KTOperative(TimestampMixin, table=True):
     wounds: int
 
     keywords: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+    # Print order (decision #25). A page prints the LEADER first, in 44 of the 46 teams a
+    # different operative than the alphabetically first one, and which operative a team is
+    # built around is information.
+    position: int = Field(default=0)
 
     kill_team: KillTeam = Relationship(back_populates="operatives")
     # In the order the card prints them (decision #25), which is the whole point of the
@@ -342,6 +353,7 @@ class KTPloy(TimestampMixin, table=True):
         ),
         CheckConstraint("kind IN ('strategy', 'firefight')", name="ck_kt_ploy_kind"),
         CheckConstraint("cp_cost >= 0", name="ck_kt_ploy_cp_cost"),
+        CheckConstraint("position >= 0", name="ck_kt_ploy_position"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -359,6 +371,9 @@ class KTPloy(TimestampMixin, table=True):
     # printing reverts instead of sticking.
     cp_cost: int = Field(default=DEFAULT_PLOY_CP_COST)
     description: str
+    # Print order (decision #25). The pages print Strategy Ploys before Firefight Ploys,
+    # which ordering by `kind` reverses -- "firefight" sorts before "strategy".
+    position: int = Field(default=0)
 
     kill_team: KillTeam | None = Relationship(back_populates="ploys")
 
@@ -390,6 +405,7 @@ class KTEquipment(TimestampMixin, table=True):
             sqlite_where=text("kill_team_id IS NULL"),
             postgresql_where=text("kill_team_id IS NULL"),
         ),
+        CheckConstraint("position >= 0", name="ck_kt_equipment_position"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -399,6 +415,7 @@ class KTEquipment(TimestampMixin, table=True):
     )
     name: str = Field(max_length=128)
     description: str
+    position: int = Field(default=0)  # print order (decision #25)
 
     kill_team: KillTeam | None = Relationship(back_populates="equipment")
 
