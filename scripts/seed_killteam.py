@@ -30,7 +30,7 @@ killteam.json shape:
     {
       "kill_teams": [
         { "name", "faction",
-          "rules":      [ { "name", "description" }, ... ],
+          "rules":      [ { "name", "description", "group" }, ... ],
           "ploys":      [ { "name", "kind", "description", "cp_cost"? }, ... ],
           "equipment":  [ { "name", "description" }, ... ],
           "operatives": [ { "name", "apl", "move", "save", "wounds", "keywords",
@@ -456,7 +456,9 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             KillTeamRule,
             counts,
             "rules",
-            {"description": rule["description"]},
+            # `group` is the section a CHOSEN rule was printed under, NULL for an
+            # always-on one (decision #27).
+            {"description": rule["description"], "group": rule["group"]},
             kill_team_id=team.id,
             name=rule["name"],
         )

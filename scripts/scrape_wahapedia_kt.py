@@ -379,6 +379,10 @@ class TeamRule:
 
     name: str
     description: str
+    # The page section a CHOSEN rule belongs to (decision #27): Blades of Khaine print
+    # "Dire Avenger Aspect Techniques", Exodite Dragon Masters "Stonesinger Upgrade".
+    # None for an ordinary always-on faction rule.
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -591,6 +595,28 @@ def parse_team_rules(html: str) -> list[TeamRule]:
             TeamRule(
                 name=_clean(node.get_text(" ", strip=True)),
                 description=_rule_text(block, node),
+            )
+        )
+
+    # Two teams print what they CHOOSE in sections of their own, which this reader used
+    # to walk straight past: Blades of Khaine's three Aspect Technique sections (its whole
+    # mechanic) and Exodite Dragon Masters' three Upgrade sections -- 30 named blocks in
+    # all. They are rules, not ploys: not one of the 30 carries a CP cost. What makes them
+    # different is the SECTION, because "THE SLICING HURRICANE" only means anything as a
+    # Dire Avenger technique, so the heading becomes the rule's `group` (decision #27).
+    #
+    # Found by their own name class rather than by listing the sections, so a team that
+    # prints a section we have never seen is read too.
+    for name_el in soup.select("div.stratName.stratStrategicAsset"):
+        wrapper = name_el.find_parent("div", class_="stratWrapper")
+        heading = name_el.find_previous("h2")
+        if wrapper is None or heading is None:
+            continue
+        rules.append(
+            TeamRule(
+                name=_clean(name_el.get_text(" ", strip=True)),
+                description=_rule_text(wrapper, name_el),
+                group=_clean(heading.get_text(" ", strip=True)),
             )
         )
     return rules

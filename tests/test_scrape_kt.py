@@ -254,14 +254,38 @@ def test_a_page_with_no_datacards_fails_loudly():
 def test_team_rules_come_from_the_faction_rules_section():
     rules = parse_team_rules(TEAM)
 
-    assert [r.name for r in rules] == ["Ember Tide", "Hollow Resolve"]
+    assert [r.name for r in rules if r.group is None] == ["Ember Tide", "Hollow Resolve"]
+
+
+def test_a_chosen_option_is_a_rule_carrying_its_section_as_its_group():
+    # Blades of Khaine's whole mechanic lives in three "… Aspect Techniques" sections and
+    # Exodite Dragon Masters' in three "… Upgrade" sections -- 30 named blocks the reader
+    # used to walk past entirely, because it read only "Faction Rules" and only a bare h3.
+    # They are rules, not ploys: not one of the 30 prints a CP cost. The SECTION is the
+    # fact that matters, since a technique's name means nothing without knowing which
+    # operatives may take it.
+    grouped = [r for r in parse_team_rules(TEAM) if r.group is not None]
+
+    assert [(r.group, r.name) for r in grouped] == [
+        ("Warden Ember Techniques", "THE RISING EMBER"),
+        ("Warden Ember Techniques", "ASH ON THE WIND"),
+    ]
+    assert "first attack is critical" in grouped[0].description
+    assert "Flavour" not in grouped[0].description  # ShowFluff is dropped here too
+    assert not grouped[0].description.startswith("THE RISING EMBER")
+
+
+def test_an_always_on_faction_rule_has_no_group():
+    ember = {r.name: r for r in parse_team_rules(TEAM)}["Ember Tide"]
+
+    assert ember.group is None
 
 
 def test_a_rule_keeps_an_action_printed_inside_it():
     # Raveners print the Burrow ACTION within the Burrow rule. It is not an
     # operative's action, and `KillTeamRule` is name-and-text, so it stays in the
     # rule -- only the element carrying the rule's own NAME is removed.
-    ember = parse_team_rules(TEAM)[0]
+    ember = {r.name: r for r in parse_team_rules(TEAM)}["Ember Tide"]
 
     assert "STOKE" in ember.description
     assert "1AP" in ember.description
@@ -275,7 +299,8 @@ def test_flavour_text_is_left_out_of_every_rule():
 
 
 def test_a_rule_does_not_repeat_its_own_name():
-    assert not parse_team_rules(TEAM)[1].description.startswith("Hollow Resolve")
+    resolve = {r.name: r for r in parse_team_rules(TEAM)}["Hollow Resolve"]
+    assert not resolve.description.startswith("Hollow Resolve")
 
 
 def test_both_kinds_of_ploy_are_read_with_the_kind_the_rules_use():

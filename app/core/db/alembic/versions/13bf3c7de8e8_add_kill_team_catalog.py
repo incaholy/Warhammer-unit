@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: e43f53814d78
+Revision ID: 13bf3c7de8e8
 Revises: 44441c6a9671
-Create Date: 2026-09-24 18:39:38.396355
+Create Date: 2026-09-25 14:39:23.151779
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'e43f53814d78'
+revision: str = '13bf3c7de8e8'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -61,10 +61,12 @@ def upgrade() -> None:
     sa.Column('kill_team_id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('group', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=True),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('kill_team_id', 'name')
     )
+    op.create_index(op.f('ix_kt_kill_team_rules_group'), 'kt_kill_team_rules', ['group'], unique=False)
     op.create_index(op.f('ix_kt_kill_team_rules_kill_team_id'), 'kt_kill_team_rules', ['kill_team_id'], unique=False)
     op.create_table('kt_operatives',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -221,6 +223,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_kt_operatives_kill_team_id'), table_name='kt_operatives')
     op.drop_table('kt_operatives')
     op.drop_index(op.f('ix_kt_kill_team_rules_kill_team_id'), table_name='kt_kill_team_rules')
+    op.drop_index(op.f('ix_kt_kill_team_rules_group'), table_name='kt_kill_team_rules')
     op.drop_table('kt_kill_team_rules')
     op.drop_index('uq_kt_equipment_universal_name', table_name='kt_equipment', sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
     op.drop_index(op.f('ix_kt_equipment_kill_team_id'), table_name='kt_equipment')

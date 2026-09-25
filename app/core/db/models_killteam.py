@@ -137,6 +137,11 @@ class KillTeamRule(TimestampMixin, table=True):
     name: str = Field(max_length=128)
     # Same name as the 40k `Ability.description`, for the same kind of text.
     description: str
+    # The page section a CHOSEN rule was printed under, NULL for an always-on faction rule
+    # (decision #27). Blades of Khaine's 15 Aspect Techniques are grouped by Aspect and
+    # Exodite Dragon Masters' 15 Upgrades by operative type, and the group is what says
+    # which operatives may take which -- the name alone is not usable.
+    group: str | None = Field(default=None, max_length=128, index=True)
 
     kill_team: KillTeam = Relationship(back_populates="rules")
 

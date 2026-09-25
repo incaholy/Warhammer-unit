@@ -30,7 +30,7 @@ SAMPLE = {
         {
             "name": "Hollow Vigil",
             "faction": "Sentinels",
-            "rules": [{"name": "Ember Tide", "description": "Place one Ember marker."}],
+            "rules": [{"name": "Ember Tide", "description": "Place one Ember marker.", "group": None}],
             "ploys": [
                 {"name": "ASHEN ADVANCE", "kind": "strategy", "description": "Move further."},
                 # a printed cost, unlike the team pages
@@ -713,3 +713,22 @@ def test_a_reordered_option_list_is_replaced(session):
     lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
     assert [o.operative.name for o in lists[1].options] == ["Hollow Warden", "Hollow Sentinel"]
     assert [o.position for o in lists[1].options] == [0, 1]
+
+
+def test_a_chosen_rules_group_is_stored(session):
+    # A technique's name is not usable without the section it was printed under, because
+    # that is what says which operatives may take it (decision #27).
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["rules"].append(
+        {
+            "name": "THE RISING EMBER",
+            "description": "Its first attack is critical.",
+            "group": "Warden Ember Techniques",
+        }
+    )
+
+    seed(session, payload)
+
+    rules = {r.name: r for r in session.exec(select(KillTeamRule)).all()}
+    assert rules["Ember Tide"].group is None
+    assert rules["THE RISING EMBER"].group == "Warden Ember Techniques"
