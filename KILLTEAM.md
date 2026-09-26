@@ -48,6 +48,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 27 | Chosen options | A team's **grouped selectable options** are `KillTeamRule` rows carrying the page section as a nullable `group` (NULL = an always-on faction rule) | Blades of Khaine print their whole mechanic as three "… Aspect Techniques" sections and Exodite Dragon Masters theirs as three "… Upgrade" sections: 30 named blocks the scraper read nothing of, because it read only "Faction Rules" and only a bare `h3`. They are not ploys -- not one of the 30 prints a CP cost -- and `KillTeamRule` is already name-and-text belonging to a team. The group is the missing fact: "THE SLICING HURRICANE" means nothing without "Dire Avenger", which is what says who may take it. Which option a player CHOSE is a per-game record, and belongs with K5 beside the Accursed Gift |
 | 28 | Composition is DESCRIPTION | The catalog states what a page prints and **never decides legality**. `validate` reports; a save is never blocked; where a printed rule cannot be structured, the report carries the sentence and says so | Decision #1 already leaves rules to the players, and roster legality is a rule. Trying to encode it produced a list no roster could satisfy (Battleclade), a cost the column cannot hold (Kommandos' half selection), and six shapes no column fits — caps over a subset of options, caps keyed on a loadout, mutual exclusion, per-item caps, per-battle limits, a selection spent on a ploy discount. Each new team brings another. We never had correct legality, only numbers that looked authoritative, which is worse than none. The membership half — WHICH operatives a list offers — is a page fact and stays |
 | 29 | What a budget counts | `KTSelectionList.shape`: `budgeted` (the line prints its number), `single` (unnumbered, an implicit 1) or `fixed` ("Every X operative in the following list"). On a `fixed` line the number counts **models**, everywhere else **selections** | The parser already worked the shape out to compute the budget and then threw it away — so the one number whose unit changes was indistinguishable from the others. Two lists are `fixed` (Elucidian Starstrider and Gellerpox Infected, both budget 9 over 6–7 selections), and reading them as selections is how a counter reports "7 of 9" for a roster the page states as nine models. Stored rather than re-derived, because the label is prose |
+| 30 | Composition notes | The footnotes and callouts printed around a composition are `KillTeam.composition_notes`, a list of paragraphs in printed order. A list's `restriction_text` keeps only the sentence that follows it. Footnote MARKERS are dropped from labels and entries | One field used to hold four things: the repeat clause, a footnote body, a designer's-note box and (Kasrkin) a glossary aside — 342 characters and six sentences — attached to whichever list happened to precede them in the DOM. 13 teams stored a body on a list, 3 of them the wrong one, and 7 where no marker survived to say which entries it was about. The page marks the boundaries itself, which makes the split exact rather than a guess: a `sup` or `span.ast` marker STARTS a note, and a `Corner25` callout is a note of its own. Notes go on the team because that is where the page prints them — under the whole composition — and it is the only attachment that is never wrong. Caps are read from the sentence AND its notes, since Brood Brother state their BROODCOVEN cap in a footnote |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -135,7 +136,7 @@ against: Raveners.
 | Table | Holds |
 |---|---|
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
-| `KillTeam` | name; FK `KTFaction`. **No operative count** — see decision #16 |
+| `KillTeam` | name, `composition_notes` (decision #30); FK `KTFaction`. **No operative count** — see decision #16 |
 | `KillTeamRule` | name, text, nullable `group` (decision #27), `position`; FK kill team — **never NULL**, so a rule always names its team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts), and the grouped options two teams choose from |
 | `KTOperative` | name, APL, move, save, wounds, keywords (JSONB, decision #26); FK kill team. Whether a roster may take it, and how often, belongs to the list offering it — except for the datacards no list can offer, which get `availability` when K5 needs them (decision #20) |
 | `KTSelectionList` | label (as printed), `budget` (in selections, or models when `shape` is `fixed` — decision #29), `shape`, `position`, `restriction_text`; FK kill team |
@@ -317,8 +318,9 @@ snapshotted into a game at K5. Which combinations are *legal* is a rule, and dec
 #1 leaves rules to the players — so the catalog says what an operative can use and
 stops there.
 
-`restriction_text` on a list likewise keeps the sentence its caps were read from, for a
-human to check the parse against.
+`restriction_text` on a list keeps the sentence its caps were read from, for a human to
+check the parse against — only that sentence, since the footnotes and callouts printed
+around the composition are the team's `composition_notes` (decision #30).
 
 **Parsing it.** The section is one `ul.redTriangle`, three levels deep: a list, its
 operatives, and each operative's printed loadouts. Three shapes appear across the 48

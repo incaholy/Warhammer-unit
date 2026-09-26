@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 57b47ab8238a
+Revision ID: 004c5ea4bb1e
 Revises: 44441c6a9671
-Create Date: 2026-09-25 16:38:18.530249
+Create Date: 2026-09-25 17:23:09.831345
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '57b47ab8238a'
+revision: str = '004c5ea4bb1e'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -36,6 +36,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('faction_id', sa.Uuid(), nullable=False),
+    sa.Column('composition_notes', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.ForeignKeyConstraint(['faction_id'], ['kt_factions.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

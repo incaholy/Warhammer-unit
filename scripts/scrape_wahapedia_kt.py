@@ -94,9 +94,17 @@ def _soup(html: str) -> BeautifulSoup:
 _PSEUDO_TAGS = re.compile(r"</?KY>")
 
 
+# `get_text(" ")` joins inline elements with a space, so a page that styles part of a
+# sentence leaves one before the punctuation that follows: "SQUIG , BREAKA" where the
+# keyword is a span, and "the following list :" once a `<sup>` marker is removed.
+_SPACED_PUNCTUATION = re.compile(r"\s+([:;,.!?])")
+
+
 def _clean(text: str) -> str:
-    """Text as we store it: no &nbsp; padding, no curly quotes, no `<KY>` markers."""
-    return _PSEUDO_TAGS.sub("", text.replace("\xa0", " ")).translate(_TYPOGRAPHIC).strip()
+    """Text as we store it: no &nbsp; padding, no curly quotes, no `<KY>` markers, and no
+    space left before punctuation by joining inline elements."""
+    text = _PSEUDO_TAGS.sub("", text.replace("\xa0", " ")).translate(_TYPOGRAPHIC)
+    return _SPACED_PUNCTUATION.sub(r"\1", text).strip()
 
 
 def parse_nav(html: str) -> list[NavEntry]:
@@ -447,8 +455,17 @@ def _own_element(el: Tag) -> Tag:
 
 
 def _own_text(el: Tag) -> str:
-    """`el`'s own text, its nested lists excluded."""
-    return re.sub(r"\s+", " ", _clean(_own_element(el).get_text(" ", strip=True))).strip()
+    """`el`'s own text, its nested lists and footnote markers excluded.
+
+    A marker is a REFERENCE to a note printed below, not part of the line: Death Korps
+    print "4 TROOPER operatives *" and Brood Brother a `<sup>3</sup>` before the colon,
+    which rendered into the stored label as "… the following list 3 :". The notes
+    themselves are kept, on the composition (decision #30).
+    """
+    own = _own_element(el)
+    for marker in own.find_all(["sup"]) + own.find_all("span", class_="ast"):
+        marker.extract()  # `_own_element` already works on a copy
+    return re.sub(r"\s+", " ", _clean(own.get_text(" ", strip=True))).strip()
 
 
 def _words(name: str) -> list[str]:
@@ -816,22 +833,52 @@ class SelectionList:
     restriction_text: str | None = None
 
 
-def _restriction_sentence(top: Tag) -> str | None:
-    """The sentence printed after the composition list, if any.
+def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
+    """The loose text printed around the composition, as (restriction sentence, notes).
 
-    It is a loose text node in the wrapper that holds the heading and the list --
-    Raveners' "Other than WARRIOR operatives, your kill team can only include each
-    operative on this list once." Kept verbatim; the caps and keyword limits are read
-    from it separately.
+    It used to be one blob. The wrapper's remaining text is a flat run of text nodes and
+    inline spans, so taking all of it gave one field holding four different things -- and
+    attached to whichever list happened to precede it. Kasrkin's was 342 characters and
+    six sentences: the repeat clause, a footnote body, and a glossary note defining
+    "hot-shot weapon". 13 teams stored a footnote body on a list, 3 of them on the wrong
+    one, and 7 where no marker survived to say which entries it was about.
+
+    The page marks the boundaries itself, which is what makes the split exact rather than
+    a guess: a `sup` or `span.ast` marker STARTS a note (it is a reference to the note
+    that follows), and a `div.Corner25` callout -- the page's "Designer's Note" box -- is
+    a note of its own. Everything before the first marker is the restriction sentence,
+    which is the half the repeat clause and the exemptions are read from.
+
+    Notes belong to the composition rather than to a list (decision #30): that is where
+    the page prints them, and it is the only attachment that is never wrong.
     """
     wrapper = top.parent
     if wrapper is None:
-        return None
+        return None, []
     clone = copy(wrapper)
     for el in clone.find_all(["ul", "h1", "h2", "h3"]):
         el.extract()
-    text = re.sub(r"\s+", " ", _clean(clone.get_text(" ", strip=True))).strip()
-    return text or None
+
+    segments: list[list[str]] = [[]]
+    for child in clone.children:
+        classes = child.get("class") or [] if hasattr(child, "get") else []
+        name = getattr(child, "name", None)
+        if name == "sup" or (name == "span" and "ast" in classes):
+            segments.append([])  # a marker: everything after it is its note
+            continue
+        text = child.get_text(" ", strip=True) if hasattr(child, "get_text") else str(child).strip()
+        if not text:
+            continue
+        if name == "div" and "Corner25" in classes:
+            segments.append([text])  # a callout box stands alone
+            segments.append([])
+            continue
+        segments[-1].append(text)
+
+    cleaned = [re.sub(r"\s+", " ", _clean(" ".join(parts))).strip() for parts in segments if any(parts)]
+    if not cleaned:
+        return None, []
+    return cleaned[0], cleaned[1:]
 
 
 def _loadouts(entry: Tag) -> list[str]:
@@ -906,6 +953,9 @@ class Composition:
 
     lists: list[SelectionList]
     keyword_caps: list[KeywordCap] = field(default_factory=list)
+    # The footnotes and callouts printed around the composition, in printed order
+    # (decision #30). Display only, like `restriction_text`.
+    notes: list[str] = field(default_factory=list)
 
 
 def _keyword_caps(sentence: str) -> list[KeywordCap]:
@@ -1063,7 +1113,7 @@ def parse_composition(html: str) -> Composition:
     if not lists:
         raise CompositionNotParsed("the composition list is empty")
 
-    sentence = _restriction_sentence(top)
+    sentence, notes = _composition_text(top)
     caps: list[KeywordCap] = []
     if sentence:
         # Printed after the whole composition and referring to "this list", so it
@@ -1090,7 +1140,10 @@ def parse_composition(html: str) -> Composition:
             )
             for option in last.options
         ]
-        caps = _keyword_caps(sentence)  # team-wide; see `Composition`
+        # Over the restriction sentence AND its notes: Brood Brother state their
+        # BROODCOVEN cap in a footnote, not in the sentence, and a cap is team-wide
+        # wherever it is printed (see `Composition`).
+        caps = _keyword_caps(" ".join([sentence, *notes]))
         # A cap nobody can trigger means the phrase was misread, and a cap that
         # silently never applies is worse than none: `validate` would approve rosters
         # it should refuse. Checked against EVERY operative on the page, not just this
@@ -1106,7 +1159,7 @@ def parse_composition(html: str) -> Composition:
         # moment it was added -- Gellerpox has one list, so its only list is the last one,
         # and it came back mislabelled as `budgeted` while its budget counted models.
         lists[-1] = replace(last, options=options, restriction_text=sentence)
-    return Composition(lists=lists, keyword_caps=caps)
+    return Composition(lists=lists, keyword_caps=caps, notes=notes)
 
 
 def composition_warnings(team: dict) -> list[str]:
@@ -1179,6 +1232,7 @@ def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
         "operatives": [asdict(operative) for operative in parse_operatives(html)],
         "selection_lists": [asdict(lst) for lst in composition.lists],
         "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
+        "composition_notes": composition.notes,
     }
 
 

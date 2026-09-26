@@ -42,7 +42,8 @@ killteam.json shape:
                                  "options": [ { "operative", "cost", "models",
                                                 "max_selections",
                                                 "loadout_options" }, ... ] }, ... ],
-          "keyword_caps":    [ { "keyword", "max_operatives" }, ... ] }, ...
+          "keyword_caps":    [ { "keyword", "max_operatives" }, ... ],
+          "composition_notes": [ "…", ... ] }, ...
       ],
       "universal_ploys":     [ { "name", "kind", "description", "cp_cost"? }, ... ],
       "universal_equipment": [ { "name", "description" }, ... ],
@@ -455,7 +456,14 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
 
 def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
     faction = _upsert(session, KTFaction, counts, "factions", name=data["faction"])
-    team = _upsert(session, KillTeam, counts, "kill_teams", {"faction_id": faction.id}, name=data["name"])
+    team = _upsert(
+        session,
+        KillTeam,
+        counts,
+        "kill_teams",
+        {"faction_id": faction.id, "composition_notes": data["composition_notes"]},
+        name=data["name"],
+    )
 
     for index, rule in enumerate(data.get("rules", [])):
         _upsert(

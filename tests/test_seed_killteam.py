@@ -121,6 +121,7 @@ SAMPLE = {
                 },
             ],
             "keyword_caps": [{"keyword": "EMBER", "max_operatives": 1}],
+            "composition_notes": ["Other than SENTINEL operatives, once each."],
         }
     ],
     "universal_ploys": [
@@ -251,6 +252,7 @@ def test_an_option_naming_an_unknown_operative_stops_the_seed(session):
             {
                 "name": "Broken",
                 "faction": "Sentinels",
+                "composition_notes": [],
                 "operatives": [],
                 "selection_lists": [
                     {
@@ -806,3 +808,24 @@ def test_a_rule_is_scoped_to_its_team_even_when_two_teams_print_the_same_name(se
     assert len(rules) == 2
     assert {r.kill_team.name for r in rules} == {"Hollow Vigil", "Ashen Choir"}
     assert all(r.kill_team_id is not None for r in rules)
+
+
+def test_composition_notes_are_stored_on_the_team(session):
+    # The page prints them under the whole composition, so that is where they live -- not
+    # pinned to whichever list preceded them (decision #30).
+    seed(session, SAMPLE)
+
+    team = session.exec(select(KillTeam)).one()
+    assert team.composition_notes == ["Other than SENTINEL operatives, once each."]
+
+
+def test_a_changed_note_is_rewritten(session):
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["composition_notes"] = ["A reworded note.", "And a second one."]
+
+    counts = seed(session, payload)
+
+    assert counts["updated"] == 1
+    team = session.exec(select(KillTeam)).one()
+    assert team.composition_notes == ["A reworded note.", "And a second one."]

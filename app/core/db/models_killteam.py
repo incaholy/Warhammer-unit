@@ -69,6 +69,13 @@ class KillTeam(TimestampMixin, table=True):
     name: str = Field(unique=True, index=True, max_length=128)
     faction_id: UUID = Field(foreign_key="kt_factions.id", index=True)
 
+    # The footnotes and callouts printed around the composition, in printed order
+    # (decision #30). Display only, like a list's `restriction_text`: the page prints them
+    # under the whole composition, and 13 teams used to have one pinned to whichever list
+    # happened to precede it -- 3 of them the wrong list, and 7 with no marker left to say
+    # which entries the note was about.
+    composition_notes: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+
     # No `operative_count`: a page states its composition as budgeted LISTS, and with
     # weighted costs a headcount stops being a fact -- Brood Brother spends 4
     # selections and can field more models than that. "Is this roster legal?" is

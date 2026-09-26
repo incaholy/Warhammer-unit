@@ -5,6 +5,7 @@ scraped content. The fetch layer is shared with the 40k scraper and is not teste
 here.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -1102,3 +1103,65 @@ def test_the_repeat_cap_rebuild_keeps_the_line_intact():
     assert listing.shape == "fixed"  # not clobbered by the rebuild
     assert listing.restriction_text is not None
     assert listing.options[0].max_selections == 1  # the rebuild still did its job
+
+
+def test_a_footnote_marker_does_not_land_in_a_lists_label():
+    # A marker is a REFERENCE to a note printed below, not part of the line. Death Korps
+    # print "4 TROOPER operatives *" and Brood Brother a `<sup>` before the colon, which
+    # rendered into the stored label as "… the following list 3 :" -- an API would serve it.
+    labels = [lst.label for lst in _lists()]
+
+    assert labels[3] == "3 HOLLOW operatives selected from the following list:"
+    assert not any("*" in label or re.search(r"\s\d+\s*:?$", label) for label in labels)
+
+
+def test_the_notes_printed_around_a_composition_are_their_own():
+    # One field used to hold four things at once: the repeat clause, a footnote body, a
+    # designer's note and (for Kasrkin) a glossary aside -- attached to whichever list
+    # happened to precede them. The page marks the boundaries itself, so the split is exact:
+    # a marker starts a note, and a callout box is a note of its own (decision #30).
+    composition = _composition()
+
+    assert composition.notes == [
+        "You cannot select more than two of these operatives combined.",
+        "Designer's Note: the page prints this in a box beside the composition.",
+    ]
+    # …and the restriction sentence keeps only its own half
+    restriction = composition.lists[-1].restriction_text
+    assert restriction is not None
+    assert restriction.endswith("up to one EMBER operative.")
+    assert "Designer's Note" not in restriction
+    assert "more than two of these" not in restriction
+
+
+def test_a_cap_stated_in_a_note_is_still_read():
+    # Brood Brother state their BROODCOVEN cap in a footnote rather than in the sentence, and
+    # a cap is team-wide wherever it is printed -- so caps are read from the sentence AND its
+    # notes. The fixture states its EMBER cap in the sentence; this pins the other half.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Ember Wisp</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">EMBER</span></td></tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
+      <ul class="redCircle2"><li>EMBER WISP</li></ul>
+    </li></ul>
+    Your kill team can only include each operative on this list once.
+    <sup>1</sup>
+    Your kill team can only include up to one EMBER operative.
+    """
+    composition = parse_composition(html)
+
+    assert composition.keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
+    assert len(composition.notes) == 1
+
+
+def test_a_space_left_before_punctuation_is_closed_up():
+    # The pages style part of a sentence, and joining inline elements leaves a space before
+    # whatever follows: "Other than GUNNER , SUBDUCTOR and …" where each keyword is a span.
+    # 550 stored strings carried one.
+    restriction = _composition().lists[-1].restriction_text
+
+    assert " ," not in restriction and " ." not in restriction
