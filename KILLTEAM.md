@@ -43,7 +43,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 22 | What a game snapshots | The **whole datacard**, not just the stat line: stats, weapon profiles, abilities and the text of the equipment taken, copied into the game as display-only JSON. Extends decision #6 | #6's reason applies to all of it, and the seed now REWRITES a catalog row when the source changes it (create-once would have been safe). Reading profiles live would let a balance update change a weapon mid-battle. It also makes a game self-contained: it keeps working if the catalog later drops that operative |
 | 23 | Actions | `KTGameOperative.actions_used`: a list of `{name, turning_point}` entries, appended as players mark them | Unique actions are abilities on the datacard, and their limits differ (once per battle, once per turning point). Recording *what was used and when* lets the screen show both without the tracker knowing any rule — decision #1 again, and the same shape as `tokens` |
 | 24 | Reference at the table | A game also snapshots its **team's** reference: the kill team's rules, its own ploys and the universal ones. With #22's datacards and equipment text, a battle needs **no catalog request** once it has started, and the game screen can show any datacard in full as a reference | A player reads the printed card mid-battle — every weapon profile, every ability, the ploys they might spend CP on. Leaving those in the catalog would mean a screen that mixes live and snapshotted data, and a re-scrape changing a ploy's wording mid-game. It is static for the game's whole life, so it is embedded in the game detail response and never invalidates |
-| 25 | Print order | **Every child of a kill team carries `position` and is ordered by it** — operatives, rules, ploys, equipment, weapons, abilities, selection lists and options. The one exception is `KTSelectionRestriction`, read out of a sentence rather than a printed list | Rows have no order of their own. The stored order matched the page by luck -- the seed inserts in page order -- and a `VACUUM FULL` reorders the heap, while a page that REORDERS its profiles changed no row's data, so the seed reported "nothing changed" and kept serving the old order for good. Sorting by name is not a datacard either: a card lists ranged profiles then melee, and one name can appear in both (Sanctifiers' brazier), so alphabetical splits one weapon across the list. Deliberately NOT unique per parent -- the seed rewrites positions in place, and a unique constraint would collide with whichever row has not moved yet. Sorting by name was tried for the four team-level collections and was wrong three ways: the page prints the LEADER first (not the alphabetically first operative, in 44 of 46 teams), Strategy Ploys before Firefight Ploys (which ordering by `kind` reverses, since "firefight" sorts first), and a rule beside the rule that refers to it (Raveners' Burrow and Tunnel). Once a team's chosen options became rules with a `group` (#27), alphabetical order also interleaved the three Aspects |
+| 25 | Print order | **Every child of a kill team carries `position` and is ordered by it** — operatives, rules, ploys, equipment, weapons, abilities, selection lists and options. The one exception is `KTSelectionRestriction`, read out of a sentence rather than a printed list | Rows have no order of their own. The stored order matched the page by luck -- the seed inserts in page order -- and a `VACUUM FULL` reorders the heap, while a page that REORDERS its profiles changed no row's data, so the seed reported "nothing changed" and kept serving the old order for good. Sorting by name is not a datacard either: a card lists ranged profiles then melee, and one name can appear in both (Sanctifiers' brazier), so alphabetical splits one weapon across the list. Not unique per parent for weapons, abilities and options, deliberately: the seed rewrites those positions IN PLACE, and a unique constraint would collide with whichever row has not moved yet. `KTSelectionList` is the exception and keeps `UNIQUE(kill_team_id, position)`, because a composition is replaced as a whole rather than rewritten, so no row ever moves while a sibling still holds its old position (the delete is flushed before the inserts). Sorting by name was tried for the four team-level collections and was wrong three ways: the page prints the LEADER first (not the alphabetically first operative, in 44 of 46 teams), Strategy Ploys before Firefight Ploys (which ordering by `kind` reverses, since "firefight" sorts first), and a rule beside the rule that refers to it (Raveners' Burrow and Tunnel). Once a team's chosen options became rules with a `group` (#27), alphabetical order also interleaved the three Aspects |
 | 26 | List columns | `keywords`, `weapon_rules` and `loadout_options` are `JSONB` on Postgres and plain `JSON` on SQLite, through one shared `STRING_LIST` type | Same shape, same reason, in one place. `json` cannot carry a GIN index, so a "which operatives have this keyword?" filter would have no way to be indexed — and a keyword is exactly what a catalog gets filtered by. Done while the migration was still an unmerged draft, so it cost nothing |
 | 27 | Chosen options | A team's **grouped selectable options** are `KillTeamRule` rows carrying the page section as a nullable `group` (NULL = an always-on faction rule) | Blades of Khaine print their whole mechanic as three "… Aspect Techniques" sections and Exodite Dragon Masters theirs as three "… Upgrade" sections: 30 named blocks the scraper read nothing of, because it read only "Faction Rules" and only a bare `h3`. They are not ploys -- not one of the 30 prints a CP cost -- and `KillTeamRule` is already name-and-text belonging to a team. The group is the missing fact: "THE SLICING HURRICANE" means nothing without "Dire Avenger", which is what says who may take it. Which option a player CHOSE is a per-game record, and belongs with K5 beside the Accursed Gift |
 | 28 | Composition is DESCRIPTION | The catalog states what a page prints and **never decides legality**. `validate` reports; a save is never blocked; where a printed rule cannot be structured, the report carries the sentence and says so | Decision #1 already leaves rules to the players, and roster legality is a rule. Trying to encode it produced a list no roster could satisfy (Battleclade), a cost the column cannot hold (Kommandos' half selection), and six shapes no column fits — caps over a subset of options, caps keyed on a loadout, mutual exclusion, per-item caps, per-battle limits, a selection spent on a ploy discount. Each new team brings another. We never had correct legality, only numbers that looked authoritative, which is worse than none. The membership half — WHICH operatives a list offers — is a page fact and stays |
@@ -122,34 +122,75 @@ Labels are normalised on the way through (curly quotes to straight, `&nbsp;`
 stripped) as a rule rather than a per-faction exception list: the nav writes
 "T’au Empire" where we store "T'au Empire", and two spellings would seed two rows.
 
-**Still needed from a browser:** the per-team pages carry the stats, and fetching
-them is what 403s intermittently, so save Raveners, one other kill team, and the
-universal equipment page into `tests/fixtures/` when it is time to write those
-parsers. `nav.html` needs no save — it fetches reliably.
+**Fetching, as it turned out:** the per-team pages 403 intermittently, so `fetch`
+caches every page to `scripts/data/cache/` and the parsers run against that. The cache
+has no expiry, which is why `make scrape-kt-fresh` exists. The committed fixtures are
+**synthetic** — real DOM structure, invented names — so no scraped content is in the
+repo, and all 48 pages have been parsed from the cache rather than from saved fixtures.
+
+### What the scraper decides
+
+Content decisions that live in code rather than in a numbered row, listed because a
+reader of the tables would not guess them:
+
+- **A page names each operative twice.** The composition says `FELLTALON`, the datacard
+  says "Ravener Felltalon", so `resolve_operative` matches them with an ordered ladder of
+  seven rules, each needing a unique winner. Its tie-break direction depends on which side
+  carries the extra words. An AMBIGUOUS entry always raises, even when the caller is only
+  asking "is this an operative?", because a lenient "no" once dropped a real entry as
+  though it were a weapon loadout.
+- **`composition_warnings` reports what cannot be checked.** A datacard no list offers, and
+  a list whose label names a datacard it does not offer. An operative named by a team rule
+  or an ability is excused (Chaos Cult gain theirs mid-battle); equipment text is
+  deliberately *not* searched, so Gellerpox's vermin stay visible.
+- **Universal rows come from two discovered pages**, not from a team: the ploys from the
+  core rules (Command Re-roll) and the equipment from the universal equipment page, both
+  found through the nav.
+- **Hidden duplicates are stripped**: `div.tooltip_templates` holds a second copy of every
+  ploy on some pages, which collided with `UNIQUE(kill_team_id, name)`.
+- **`p.ShowFluff` is dropped** from every rule, ploy and equipment entry — it is prose
+  about the faction, and the tracker shows rules.
+- **Text is normalised once, in `_clean`**: curly quotes, `&nbsp;`, the site's `<KY>`
+  keyword markers, and the space that joining inline elements leaves before punctuation.
+- **Equipment names keep their printed quantity prefix** (`1X AMMO CACHE`), because that is
+  the name the page gives; there is no quantity column.
+- **Keywords are upper-cased**, and a unique action keeps its AP cost at the front of its
+  own text rather than in a column.
+- **The seed refuses a payload that names the same thing twice**, section by section: every
+  natural key is a unique constraint, so a repeat would silently overwrite rather than add.
+- **An ABSENT `selection_lists` key leaves a composition alone; an empty list clears it.**
+  A partial payload is not a statement that a team has no composition.
+- **One transaction per run, rolled back on failure**, so a team that fails leaves nothing.
+- **Deleting a faction that still has kill teams is refused** — a faction is a grouping,
+  and losing one by accident must not take its teams.
+- **A run that parses nothing refuses to overwrite `killteam.json`**, which is gitignored
+  and therefore unrecoverable.
 
 ## Catalog
 
 Provisional tables — the migration is a **draft until `fire-team` merges**: a column
-the saved pages show is wrong is fixed and the migration regenerated. Checked so far
-against: Raveners.
+the pages show is wrong is fixed and the migration regenerated, which has happened five
+times. Checked against all 48 team pages: 46 parse and seed, and the two that do not are
+named under "Composition".
 
 | Table | Holds |
 |---|---|
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
 | `KillTeam` | name, `composition_notes` (decision #30); FK `KTFaction`. **No operative count** — see decision #16 |
-| `KillTeamRule` | name, text, nullable `group` (decision #27), `position`; FK kill team — **never NULL**, so a rule always names its team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts), and the grouped options two teams choose from |
-| `KTOperative` | name, APL, move, save, wounds, keywords (JSONB, decision #26); FK kill team. Whether a roster may take it, and how often, belongs to the list offering it — except for the datacards no list can offer, which get `availability` when K5 needs them (decision #20) |
+| `KillTeamRule` | name, `description`, nullable `group` (decision #27), `position`; FK kill team — **never NULL**, so a rule always names its team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts), and the grouped options two teams choose from |
+| `KTOperative` | name, APL, move, save, wounds, keywords (JSONB, decision #26), `position`; FK kill team. Whether a roster may take it, and how often, belongs to the list offering it — except for the datacards no list can offer, which get `availability` when K5 needs them (decision #20) |
 | `KTSelectionList` | label (as printed), `budget` (in selections, or models when `shape` is `fixed` — decision #29), `shape`, `position`, `restriction_text`; FK kill team |
 | `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**), `position` (print order, decision #25); `kill_team_id` + composite FKs to its list and operative |
 | `KTSelectionRestriction` | `keyword`, `max_operatives`; FK **kill team** — a team-wide cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSONB, decision #26), `position` (print order, decision #25); FK operative. A name is unique **per category** — one weapon can print both profiles |
-| `KTAbility` | name, text (includes unique actions), `position` (print order, decision #25); FK operative |
-| `KTPloy` | name, `kind` (`strategy`/`firefight`), CP cost (default 1 — the pages print none), text; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
-| `KTEquipment` | name, text; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |
+| `KTAbility` | name, `description` (includes unique actions), `position` (print order, decision #25); FK operative |
+| `KTPloy` | name, `kind` (`strategy`/`firefight`), `cp_cost` (default 1 — **most** pages print none; the core rules and Blades of Khaine print theirs), `description`, `position`; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
+| `KTEquipment` | name, `description`, `position`; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
-- Routes under `/api/v1/kill-team/...`; public read, admin write (same policy as the
-  40k catalog).
+- Routes under `/api/v1/kill-team/...`, **read-only**: public read and no writes at
+  all, unlike the 40k catalog's admin write. An admin edit would be silently undone by
+  the next `make seed-kt`, which rewrites a row whenever the payload differs.
 
 ### Ploys
 
@@ -213,10 +254,10 @@ Kill teams are grouped by a flat faction list of their own, one level deep:
 
 - Just the faction name: no Imperium / Chaos / Xenos grouping above it, and no link
   to the 40k `Faction` / `Subfaction` tables.
-- Faction names come from **one place in code**: the scraper's config maps each kill
-  team's page to its faction name, the way `FACTIONS` does in
-  `scripts/scrape_wahapedia.py`. The name is never read off the page, so a typo can
-  only happen once, in that map, where it's visible in review.
+- Faction names come from **one place**: the site's own nav, read by `parse_nav`
+  (see "Which teams: discovered, not configured"). Unlike the 40k scraper, which has a
+  hand-written `FACTIONS` map, there is no list here to drift from the site — and
+  normalising labels on the way through is what keeps one faction from seeding twice.
 - A table rather than a text column: the name is unique, so the seed finds the
   existing row instead of creating a duplicate, filters use an id like the rest of
   the API, and a rename is one row.
@@ -353,7 +394,8 @@ Infected** prints a second `ul.redTriangle` under "If you selected the MUTOID VE
 faction equipment:", offering a "specified number" of Cursemite, Eyestinger Swarm and
 Sludge-Grub. There is no budget on that line because the number lives in the equipment
 ("add four ... for the battle"), and those operatives never enter through a roster, so
-they are `availability = in_battle` (decision #20) and the parser reads only the first
+they **will be** `availability = in_battle` when decision #20's column lands with K5;
+today they are simply operatives no list offers, and the parser reads only the first
 block. Two consequences for K6: the conditional sentence is currently attached to the
 FIRST list's `restriction_text`, where it does not belong, and the second block's
 wording is worth keeping as display-only text so a human can see why those datacards

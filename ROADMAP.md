@@ -544,19 +544,21 @@ changeable until `fire-team` merges, since nothing is deployed against it.
 
 ## K1. Catalog models
 
-**Status: Next** — can start now; needs no scraped data.
+**Status: ✅ Done.**
 
-The `kt_*` catalog tables from KILLTEAM.md and their migration, with test factories
-and model tests (relationships, the roster-limit columns). Treated as a draft: a
-column the K2 fixtures show is wrong is fixed and the migration regenerated.
+The eleven `kt_*` catalog tables from KILLTEAM.md and their migration, with test
+factories and model tests. Still treated as a draft: the migration has been
+regenerated five times as the pages showed a column was wrong, and stays regenerable
+until `fire-team` merges.
 
 ## K2. Data pipeline
 
-**Status: Planned** — needs saved HTML for one or two kill teams and the universal
-equipment page, in `tests/fixtures/`.
+**Status: ✅ Done.**
 
-Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the
-K1 tables. Confirms the K1 columns against real pages.
+Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
+tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. 46 of the site's
+48 teams parse and seed; the two that do not are named in K6. Tested against
+**synthetic** fixtures, so no scraped content is committed.
 
 ## K3. Catalog routes
 
@@ -587,6 +589,8 @@ they gate the choice, so they are a game concern rather than a catalog one.
 
 ## K6. Widen to every kill team
 
-**Status: Planned.** Add the remaining kill teams to the scraper and fix the parser
-gaps they expose — today Hunter Clade and Inquisitorial Agent (both raise rather than
-guess) and Gellerpox Infected's equipment-conditional second composition block.
+**Status: Planned.** All 48 teams are already discovered from the nav and 46 parse, so
+what remains is the two pages that raise rather than guess — Hunter Clade's ambiguous
+`WARRIOR SICARIAN *` entry and Inquisitorial Agent's cross-referencing composition,
+which also carries a second, differently shaped selection tree — plus Gellerpox
+Infected's equipment-conditional block.
