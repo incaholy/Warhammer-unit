@@ -582,6 +582,8 @@ battle's equipment, the actions each operative has used, and the operatives that
 equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#24).
 The game screen doubles as the reference sheet: any operative opens to its full datacard,
 and the team's rules and ploys travel with the game, so a battle needs no catalog call.
+Tac Ops land here too, which is when the team's **archetypes** get scraped and stored —
+they gate the choice, so they are a game concern rather than a catalog one.
 
 ## K6. Widen to every kill team
 

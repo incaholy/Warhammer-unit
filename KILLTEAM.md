@@ -434,6 +434,13 @@ Validation stays bookkeeping, not rules: an added or transformed operative must 
 datacard of **this game's kill team**, and an `in_battle` datacard can only be added, not
 rostered (decision #20).
 
+**Archetypes, later.** Every page prints one ("Archetype: Seek & Destroy / Security", six
+pairs across the 48 teams, plus Blades of Khaine's `*` — theirs depends on the Aspect
+taken — and Inquisitorial Agent's "Any"). They gate which **Tac Ops** a team may choose,
+which is a game-time decision, so they belong here rather than in the catalog and are
+deliberately not stored yet. The catalog holds what a player reads about an OPERATIVE;
+the archetype is something a team picks a mission objective with.
+
 Endpoints under `/api/v1/me/kill-team/games/...`:
 
 - `POST` (from a roster), `GET` list / detail — detail carries the game's own reference
@@ -483,5 +490,8 @@ before opening its PR:
 
 - Rules engine (dice resolution, weapon-rule automation)
 - Two-player shared games and live sync
-- Killzone / terrain modelling
+- Killzone / terrain modelling — including **base sizes**. Every datacard prints one
+  (`⌀25mm` … `⌀75x42mm`, 454 of them) and the scraper strips it out of the keywords cell
+  where it trails the last keyword, deliberately: the tracker records an operative's
+  state, never its place on the table, so nothing would read it. Not a gap.
 - Editions other than 2024

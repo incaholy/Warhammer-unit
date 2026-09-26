@@ -273,7 +273,9 @@ def _keywords(frame: Tag) -> list[str]:
     for chunk in text.split(","):
         # The base size trails the LAST keyword in the same chunk ("PRIME ⌀40mm"), so
         # it is stripped rather than used to drop the chunk -- which silently lost
-        # each operative's most specific keyword.
+        # each operative's most specific keyword. Stripped and DISCARDED on purpose: the
+        # tracker records an operative's state, never its place on the table, so a base
+        # size has no reader (KILLTEAM.md, "Out of scope for v1").
         word = re.sub(r"\s+", " ", re.sub(r"⌀.*$", "", chunk)).strip()
         if word:
             keywords.append(word.upper())
