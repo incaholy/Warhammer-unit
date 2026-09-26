@@ -359,6 +359,17 @@ snapshotted into a game at K5. Which combinations are *legal* is a rule, and dec
 #1 leaves rules to the players — so the catalog says what an operative can use and
 stops there.
 
+A sentence may state SEVERAL caps, and the clauses after the first do not repeat
+"include" ("… up to two GUNNER operatives and up to four SUBDUCTOR operatives"), so every
+`up to N KEYWORD operative` clause is read — 15 caps across the 46 teams. A keyword capped
+twice at different numbers, which happens when the page distinguishes them by loadout
+(Battleclade: one COMBAT SERVITOR with a meltagun, three with another weapon), takes the
+**tighter** number: a loadout-keyed cap is a shape the model does not hold (decision #28),
+nothing is enforced, and the cost of the tighter number is a prompt to read the sentence
+rather than a refusal of a legal roster. The pages also vary the repeat clause itself —
+"each operative on this list once", "each operative **above** once", "each **option** on
+this list once" — and matching only the first left two teams' options uncapped entirely.
+
 `restriction_text` on a list keeps the sentence its caps were read from, for a human to
 check the parse against — only that sentence, since the footnotes and callouts printed
 around the composition are the team's `composition_notes` (decision #30).

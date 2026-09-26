@@ -15,6 +15,7 @@ from scripts.scrape_wahapedia_kt import (
     KeywordCap,
     NavEntry,
     OperativeNotResolved,
+    _carries,
     composition_warnings,
     core_rules_url,
     main,
@@ -1165,3 +1166,94 @@ def test_a_space_left_before_punctuation_is_closed_up():
     restriction = _composition().lists[-1].restriction_text
 
     assert " ," not in restriction and " ." not in restriction
+
+
+def _restricted(sentence: str, datacards: list[tuple[str, list[str]]], entries: list[str]):
+    """A one-list composition under `sentence`, for the restriction-clause rules."""
+    return _composition_with(datacards, entries, sentence)
+
+
+def test_every_cap_clause_in_a_sentence_is_read_not_just_the_first():
+    # A sentence states several caps, and the clauses after the first do not repeat
+    # "include": Exaction Squad print "… up to two GUNNER operatives (each must have a
+    # different option) and up to four SUBDUCTOR operatives", Wyrmblade three in a row.
+    # Requiring the word left three real caps unstored -- the permissive direction, which
+    # is why nothing noticed.
+    composition = _restricted(
+        "Your kill team can only include up to two GUNNER operatives (each must have a"
+        " different option) and up to four SUBDUCTOR operatives.",
+        [("Alpha Gunner", ["CLADE", "GUNNER"]), ("Alpha Subductor", ["CLADE", "SUBDUCTOR"])],
+        ["GUNNER", "SUBDUCTOR"],
+    )
+
+    assert composition.keyword_caps == [
+        KeywordCap(keyword="GUNNER", max_operatives=2),
+        KeywordCap(keyword="SUBDUCTOR", max_operatives=4),
+    ]
+
+
+def test_a_keyword_capped_twice_takes_the_tighter_number():
+    # Battleclade allow one COMBAT SERVITOR with a meltagun and three with another weapon.
+    # A loadout-keyed cap is a shape the model does not hold (decision #28), so one number
+    # stands for both: the tighter, because nothing is enforced and its cost is a prompt to
+    # read the sentence rather than a refusal of a legal roster.
+    composition = _restricted(
+        "Your kill team can only include up to one COMBAT SERVITOR operative with meltagun,"
+        " and up to three COMBAT SERVITOR operatives with heavy stubber.",
+        [("Alpha Combat Servitor", ["CLADE", "COMBAT", "SERVITOR"])],
+        ["COMBAT SERVITOR"],
+    )
+
+    assert composition.keyword_caps == [KeywordCap(keyword="COMBAT SERVITOR", max_operatives=1)]
+
+
+@pytest.mark.parametrize(
+    "wording",
+    [
+        "your kill team can only include each operative on this list once",
+        "your kill team can only include each operative above once",  # Goremonger
+        "your kill team can only include each option on this list once",  # Brood Brother
+    ],
+)
+def test_the_pages_wordings_of_once_each_all_cap_repeats(wording):
+    # Matching the one literal phrase left Goremonger's six options and Brood Brother's ten
+    # entirely uncapped, because each page words the middle of the sentence differently.
+    composition = _restricted(
+        f"Other than ASPIRANT operatives, {wording}.",
+        [("Alpha Aspirant", ["CULT", "ASPIRANT"]), ("Alpha Stalker", ["CULT", "STALKER"])],
+        ["ASPIRANT", "STALKER"],
+    )
+    options = {option.operative: option for option in composition.lists[0].options}
+
+    assert options["Alpha Aspirant"].max_selections is None  # exempt
+    assert options["Alpha Stalker"].max_selections == 1
+
+
+def test_a_sentence_that_caps_nothing_leaves_every_option_uncapped():
+    # The other direction: no repeat clause at all means the budget is the only limit.
+    composition = _restricted(
+        "Your kill team can only include up to two STALKER operatives.",
+        [("Alpha Stalker", ["CULT", "STALKER"]), ("Alpha Aspirant", ["CULT", "ASPIRANT"])],
+        ["STALKER", "ASPIRANT"],
+    )
+
+    assert [option.max_selections for option in composition.lists[0].options] == [None, None]
+
+
+def test_an_empty_keyword_phrase_matches_nothing():
+    # `_carries` answers "do these keywords carry this phrase?", and an empty phrase is
+    # vacuously a subset of anything. Without the guard it would return True and exempt
+    # every operative on the list from its repeat cap.
+    assert not _carries("", ["KOMMANDO", "BOY"])
+    assert not _carries("BOY", [])
+
+
+def test_a_card_that_begins_with_the_entry_beats_a_shorter_rearranged_one():
+    # The prefix rule: a composition entry often names the start of a card's name, dropping
+    # the trailing role ("SICARIAN RUSTSTALKER" for "Sicarian Ruststalker Warrior"). Without
+    # it, resolution falls through to card-contains-entry, whose fewest-extra-words
+    # tie-break would prefer a shorter card that merely shares the words in another order.
+    # Synthetic on purpose: no current page needs the rule, which is why it went unpinned.
+    cards = ["Ash Prophet Elite", "Prophet Ash"]
+
+    assert resolve_operative("ASH PROPHET", cards) == "Ash Prophet Elite"

@@ -501,10 +501,15 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
     so the two have to be matched -- and the scraper is the only place holding both.
 
     Rules run strongest first, and each needs a UNIQUE winner or falls through, so a
-    loose rule can never steal a match from a strict one. Counted over all 48 teams
-    (444 entries) the ordering resolves every one, with no ambiguity: exact, suffix,
-    suffix+shortest, prefix, same words, card-contains-entry, entry-contains-card, and
-    finally the last word.
+    loose rule can never steal a match from a strict one. Over all 48 teams (444 entries)
+    the ordering resolves every one with no ambiguity: exact, suffix, prefix,
+    card-contains-entry, entry-contains-card, and finally the last word.
+
+    There was a "same words" rule between prefix and card-contains-entry. It is gone: any
+    card whose word SET equals the entry's is also matched by card-contains-entry, whose
+    fewest-extra-words tie-break prefers that same card, so it could only ever differ if
+    two cards shared the entry's word set with different word counts (a repeated word).
+    Removing it changed none of the 420 stored options.
 
     The tie-break is "fewest extra words", and WHICH SIDE the extras are on decides the
     direction. Where the card is the longer side, the shortest card is meant: `GUNNER`
@@ -540,7 +545,6 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
         (lambda card: _words(card) == entry_words, min),
         (lambda card: " ".join(_words(card)).endswith(" " + joined), min),
         (lambda card: " ".join(_words(card)).startswith(joined + " "), min),
-        (lambda card: set(_words(card)) == as_set, min),
         (lambda card: set(_words(card)) >= as_set, min),
         # The other direction: the ENTRY carries a prefix the card does not.
         # "INQUISITORIAL AGENT INTERROGATOR" against the card "Interrogator Agent".
@@ -747,12 +751,19 @@ def parse_equipment(html: str) -> list[Equipment]:
 # ---------------------------------------------------------------------------
 
 _COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
-# "your kill team can only include each operative on this list once"
-_ONCE_EACH = re.compile(r"only include each operative on this list once", re.IGNORECASE)
+# "your kill team can only include each operative on this list once" -- and the pages vary
+# the middle of it: Goremonger print "each operative ABOVE once" and Brood Brother "each
+# OPTION on this list once". Matching the literal phrase left those two teams' options
+# uncapped entirely, which is the permissive direction, so nothing noticed.
+_ONCE_EACH = re.compile(r"only include each (?:operative|option)\b[^.]{0,24}\bonce", re.IGNORECASE)
 # "Other than CREMATOR and WARRIOR operatives, ..." -- the exceptions to that
 _OTHER_THAN = re.compile(r"other than (.+?) operatives,", re.IGNORECASE | re.DOTALL)
-# "Your kill team can only include up to two GUNNER operatives."
-_KEYWORD_CAP = re.compile(r"include up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
+# "Your kill team can only include up to two GUNNER operatives." A sentence may state
+# SEVERAL, and the ones after the first do not repeat "include": Exaction Squad print
+# "... up to two GUNNER operatives (each must have a different option) and up to four
+# SUBDUCTOR operatives", and Wyrmblade three clauses in a row. Requiring "include" read
+# only the first of each, so three real caps were never stored.
+_KEYWORD_CAP = re.compile(r"up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
 _COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
 _LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
 _IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
@@ -924,13 +935,13 @@ def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
     if operative is None:
         return None
 
-    # "MAGUS (counts as two selections)" -- what taking it spends from the budget.
+    # "MAGUS (counts as two selections)" -- what taking it spends from the budget. Cost and
+    # models are INDEPENDENT axes read from different parts of the line: the leading count
+    # is models ("2 PSYCHIC FAMILIAR operatives"), and a "counts as" note is the cost. When
+    # a line prints both -- "2 PSYCHIC FAMILIAR operatives (still counts as one selection)"
+    # -- that is models=2 with cost=1, which falls out of reading each where it is printed.
     spend = _COUNTS_AS.search(text)
     cost = _COUNT_WORDS.get(spend.group(1).lower(), 1) if spend else 1
-    # "2 PSYCHIC FAMILIAR operatives (still counts as one selection)": the leading
-    # count is models, and the sentence says it is still one selection.
-    if spend and models > 1:
-        cost = _COUNT_WORDS.get(spend.group(1).lower(), 1)
 
     # Printed variants: the child list items, or the "with ..." tail when the line
     # spells one loadout out inline ("3 VOIDSMAN with lasgun and gun butt").
@@ -966,13 +977,23 @@ def _keyword_caps(sentence: str) -> list[KeywordCap]:
     13 of the 48 teams state one, and several state more than one (Inquisitorial Agent
     caps GUN SERVITOR, SUBDUCTOR and GUNNER). A number word this parser does not know
     raises rather than defaulting: a silently wrong cap approves illegal rosters.
+
+    Read over the restriction sentence AND its notes, since Brood Brother state theirs in
+    a footnote: 15 caps across the 46 parsing teams.
     """
     caps: dict[str, int] = {}
     for word, keyword in _KEYWORD_CAP.findall(sentence):
         limit = _COUNT_WORDS.get(word.lower())
         if limit is None:
             raise CompositionNotParsed(f"unknown quantity {word!r} in a keyword cap: {sentence!r}")
-        caps[_clean(keyword).strip()] = limit
+        name = _clean(keyword).strip()
+        # A keyword can be capped TWICE at different numbers, when the page distinguishes
+        # them by loadout: Battleclade allow one COMBAT SERVITOR with a meltagun and three
+        # with another weapon. A loadout-keyed cap is a shape the model does not hold
+        # (decision #28), so one number stands for both, and it is the TIGHTER one: nothing
+        # is enforced, so its cost is a prompt to read the sentence -- which
+        # `restriction_text` carries -- rather than a refusal of a legal roster.
+        caps[name] = min(limit, caps.get(name, limit))
     return [KeywordCap(keyword=keyword, max_operatives=limit) for keyword, limit in caps.items()]
 
 

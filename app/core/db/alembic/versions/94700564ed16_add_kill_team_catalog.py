@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 004c5ea4bb1e
+Revision ID: 94700564ed16
 Revises: 44441c6a9671
-Create Date: 2026-09-25 17:23:09.831345
+Create Date: 2026-09-26 14:02:20.554683
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '004c5ea4bb1e'
+revision: str = '94700564ed16'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -87,6 +87,7 @@ def upgrade() -> None:
     sa.Column('position', sa.Integer(), nullable=False),
     sa.CheckConstraint('apl >= 1', name='ck_kt_operative_apl'),
     sa.CheckConstraint('move >= 0 AND save >= 0 AND wounds >= 0', name='ck_kt_operative_stats_non_negative'),
+    sa.CheckConstraint('position >= 0', name='ck_kt_operative_position'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('kill_team_id', 'id', name='uq_kt_operative_team_id'),

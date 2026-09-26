@@ -73,7 +73,12 @@ SAMPLE = {
                             "rules": ["Shock"],
                         },
                     ],
-                    "abilities": [{"name": "Warden's Vigil", "description": "Does something."}],
+                    # two, so the stored positions distinguish the payload's order from a
+                    # constant — with one ability, `index` and `0` are the same write
+                    "abilities": [
+                        {"name": "Warden's Vigil", "description": "Does something."},
+                        {"name": "EMBER STRIKE", "description": "1AP. Does something else."},
+                    ],
                 },
                 {
                     "name": "Hollow Sentinel",
@@ -125,9 +130,13 @@ SAMPLE = {
         }
     ],
     "universal_ploys": [
-        {"name": "COMMAND RE-ROLL", "kind": "firefight", "description": "Re-roll one die.", "cp_cost": 1}
+        {"name": "COMMAND RE-ROLL", "kind": "firefight", "description": "Re-roll one die.", "cp_cost": 1},
+        {"name": "GUARD", "kind": "strategy", "description": "A second universal ploy."},
     ],
-    "universal_equipment": [{"name": "1X AMMO CACHE", "description": "Set up one marker."}],
+    "universal_equipment": [
+        {"name": "1X AMMO CACHE", "description": "Set up one marker."},
+        {"name": "2X LADDERS", "description": "Set up two ladders."},
+    ],
 }
 
 
@@ -147,12 +156,12 @@ def test_every_part_of_a_kill_team_is_loaded(session):
         "equipment": 1,
         "operatives": 2,
         "weapons": 2,
-        "abilities": 1,
+        "abilities": 2,
         "selection_lists": 2,
         "selection_options": 2,
         "keyword_caps": 1,
-        "universal_ploys": 1,
-        "universal_equipment": 1,
+        "universal_ploys": 2,
+        "universal_equipment": 2,
         "updated": 0,
         "compositions_replaced": 0,
     }
@@ -171,7 +180,7 @@ def test_a_second_run_of_the_same_payload_changes_nothing(session):
     assert set(again.values()) == {0}
     assert len(session.exec(select(KTOperative)).all()) == 2
     assert len(session.exec(select(KTWeapon)).all()) == 2
-    assert len(session.exec(select(KTPloy)).all()) == 3  # two team ploys + the universal one
+    assert len(session.exec(select(KTPloy)).all()) == 4  # two team ploys + two universal
 
 
 def test_one_weapon_name_lands_in_both_categories(session):
@@ -279,7 +288,7 @@ def test_two_teams_can_share_a_faction(session):
     # each team gets its OWN copies of the operatives, rules and abilities
     assert len(session.exec(select(KTOperative)).all()) == 4
     assert len(session.exec(select(KillTeamRule)).all()) == 2
-    assert len(session.exec(select(KTAbility)).all()) == 2
+    assert len(session.exec(select(KTAbility)).all()) == 4  # two teams, two abilities each
 
 
 def test_a_changed_stat_is_rewritten_rather_than_left_stale(session):
@@ -292,11 +301,13 @@ def test_a_changed_stat_is_rewritten_rather_than_left_stale(session):
 
     counts = seed(session, payload)
 
-    assert counts["updated"] == 2
+    assert counts["updated"] == 2  # the operative and the universal ploy
     assert counts["operatives"] == 0  # updated, not duplicated
     warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
     assert warden.wounds == 21
-    reroll = session.exec(select(KTPloy).where(KTPloy.kill_team_id.is_(None))).one()
+    reroll = session.exec(
+        select(KTPloy).where(KTPloy.kill_team_id.is_(None), KTPloy.name == "COMMAND RE-ROLL")
+    ).one()
     assert reroll.description == "Re-roll one attack die."
 
 
@@ -375,7 +386,10 @@ def test_a_default_range_survives_a_re_seed_and_a_withdrawn_one_reverts(session)
         ),
         pytest.param(
             lambda team: team["operatives"][0]["abilities"][0].update(description="Does something else."),
-            lambda session: session.exec(select(KTAbility)).one().description == "Does something else.",
+            lambda session: session.exec(select(KTAbility).where(KTAbility.name == "Warden's Vigil"))
+            .one()
+            .description
+            == "Does something else.",
             id="ability description",
         ),
         pytest.param(
@@ -673,7 +687,7 @@ def test_the_payloads_order_becomes_the_stored_print_order(session):
 
     warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
     assert [(w.category, w.position) for w in warden.weapons] == [("range", 0), ("melee", 1)]
-    assert [a.position for a in warden.abilities] == [0]
+    assert [a.position for a in warden.abilities] == [0, 1]
     lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
     assert [o.position for o in lists[0].options] == [0]
 
@@ -777,7 +791,12 @@ def test_every_collection_keeps_the_payloads_order(session):
     ]
     # and the universal rows carry their own page order
     universal = session.exec(select(KTEquipment).where(KTEquipment.kill_team_id.is_(None))).all()
-    assert [q.position for q in universal] == [0]
+    assert [(q.position, q.name) for q in universal] == [(0, "1X AMMO CACHE"), (1, "2X LADDERS")]
+    universal_ploys = sorted(
+        session.exec(select(KTPloy).where(KTPloy.kill_team_id.is_(None))).all(),
+        key=lambda row: row.position,
+    )
+    assert [(p.position, p.name) for p in universal_ploys] == [(0, "COMMAND RE-ROLL"), (1, "GUARD")]
 
 
 def test_a_reordered_page_moves_every_position(session):

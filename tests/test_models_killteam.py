@@ -573,10 +573,14 @@ def test_a_keyword_cap_is_a_rule_about_a_SET_of_operatives(
 def test_a_team_may_carry_several_keyword_caps(session, make_kt_selection_restriction, make_kill_team):
     # Inquisitorial Agent states caps for GUN SERVITOR, SUBDUCTOR and GUNNER.
     team = make_kill_team()
-    make_kt_selection_restriction(kill_team=team, keyword="GUNNER", max_operatives=2)
+    # SUBDUCTOR first, so insertion order differs from the keyword order being asserted.
     make_kt_selection_restriction(kill_team=team, keyword="SUBDUCTOR", max_operatives=2)
+    make_kt_selection_restriction(kill_team=team, keyword="GUNNER", max_operatives=2)
 
-    assert {r.keyword for r in team.keyword_caps} == {"GUNNER", "SUBDUCTOR"}
+    # A LIST, not a set: the relationship orders caps by keyword (the one collection with no
+    # page order of its own, since caps are read out of a sentence), and a set assertion
+    # left that ordering unpinned.
+    assert [r.keyword for r in team.keyword_caps] == ["GUNNER", "SUBDUCTOR"]
 
 
 def test_one_keyword_is_capped_once_per_team(session, make_kill_team, make_kt_selection_restriction):
@@ -696,12 +700,14 @@ def test_a_teams_rules_keep_their_printed_order_and_their_groups_together(
     # Instincts, and alphabetical order separates Burrow from the Tunnel rule that refers
     # to it. And now that a team's chosen options are rules with a `group` (decision #27),
     # alphabetical order interleaves the three Aspects, so a reader cannot see one set.
+    # Written out of order, or insertion order alone would produce the expected list and
+    # the test could not fail -- which is exactly what it did before.
     team = make_kill_team(name="Hollow Vigil")
-    make_kill_team_rule(team, name="Burrow", position=0)
-    make_kill_team_rule(team, name="Tunnel", position=1)
-    make_kill_team_rule(team, name="Predatory Instincts", position=2)
-    make_kill_team_rule(team, name="ASH ON THE WIND", group="Ember Techniques", position=3)
     make_kill_team_rule(team, name="THE RISING EMBER", group="Ember Techniques", position=4)
+    make_kill_team_rule(team, name="Tunnel", position=1)
+    make_kill_team_rule(team, name="ASH ON THE WIND", group="Ember Techniques", position=3)
+    make_kill_team_rule(team, name="Burrow", position=0)
+    make_kill_team_rule(team, name="Predatory Instincts", position=2)
     session.expire_all()
 
     assert [r.name for r in team.rules] == [
@@ -736,24 +742,6 @@ def test_a_rule_always_belongs_to_a_kill_team(session, make_kill_team, make_kt_p
     assert universal.kill_team_id is None
 
 
-def test_a_negative_position_is_refused(session, make_kt_operative):
-    operative = make_kt_operative()
-    session.add(
-        KTWeapon(
-            operative_id=operative.id,
-            name="Backwards",
-            category="melee",
-            attacks=4,
-            hit=3,
-            normal_damage=4,
-            crit_damage=5,
-            position=-1,
-        )
-    )
-    with pytest.raises(IntegrityError):
-        session.commit()
-
-
 def test_two_profiles_may_share_a_position(session, make_kt_operative, make_kt_weapon):
     # Deliberately NOT unique per operative: the seed rewrites positions in place when a
     # page reorders its profiles, and a unique constraint would collide with whichever row
@@ -771,4 +759,78 @@ def test_a_selection_list_shape_outside_the_vocabulary_is_refused(session, make_
     team = make_kill_team()
     session.add(KTSelectionList(kill_team_id=team.id, label="1 X", budget=1, position=0, shape="whatever"))
     with pytest.raises(IntegrityError):
+        session.commit()
+
+
+@pytest.mark.parametrize(
+    ("build", "constraint"),
+    [
+        pytest.param(
+            lambda team, op: KTOperative(
+                kill_team_id=team.id, name="Backwards", apl=2, move=6, save=4, wounds=8, position=-1
+            ),
+            "ck_kt_operative_position",
+            id="operative",
+        ),
+        pytest.param(
+            lambda team, op: KillTeamRule(
+                kill_team_id=team.id, name="Backwards", description="x", position=-1
+            ),
+            "ck_kt_kill_team_rule_position",
+            id="rule",
+        ),
+        pytest.param(
+            lambda team, op: KTPloy(
+                kill_team_id=team.id, name="BACKWARDS", kind="strategy", description="x", position=-1
+            ),
+            "ck_kt_ploy_position",
+            id="ploy",
+        ),
+        pytest.param(
+            lambda team, op: KTEquipment(
+                kill_team_id=team.id, name="Backwards", description="x", position=-1
+            ),
+            "ck_kt_equipment_position",
+            id="equipment",
+        ),
+        pytest.param(
+            lambda team, op: KTAbility(operative_id=op.id, name="Backwards", description="x", position=-1),
+            "ck_kt_ability_position",
+            id="ability",
+        ),
+        pytest.param(
+            lambda team, op: KTWeapon(
+                operative_id=op.id,
+                name="Backwards",
+                category="melee",
+                attacks=4,
+                hit=3,
+                normal_damage=4,
+                crit_damage=5,
+                position=-1,
+            ),
+            "ck_kt_weapon_position",
+            id="weapon",
+        ),
+        pytest.param(
+            lambda team, op: KTSelectionList(
+                kill_team_id=team.id, label="1 X", budget=1, position=-1, shape="single"
+            ),
+            "ck_kt_selection_list_position",
+            id="selection list",
+        ),
+    ],
+)
+def test_a_negative_position_is_refused_on_every_table_that_carries_one(
+    session, make_kill_team, make_kt_operative, build, constraint
+):
+    # One test per table, because the convention is only as good as its weakest column:
+    # `kt_operatives` was the one carrying `position` with no CHECK at all, and the single
+    # test that existed built a KTWeapon, so the other six could all have been dropped with
+    # the suite green.
+    team = make_kill_team()
+    operative = make_kt_operative(kill_team=team)
+    session.add(build(team, operative))
+
+    with pytest.raises(IntegrityError, match=constraint):
         session.commit()

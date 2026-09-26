@@ -176,6 +176,7 @@ class KTOperative(TimestampMixin, table=True):
         UniqueConstraint("kill_team_id", "id", name="uq_kt_operative_team_id"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
+        CheckConstraint("position >= 0", name="ck_kt_operative_position"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
