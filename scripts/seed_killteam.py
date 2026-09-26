@@ -214,7 +214,11 @@ def _upsert(
     if row is None:
         row = model(**keys, **(values or {}))
         session.add(row)
-        session.flush()  # so the row has its id for the children that reference it
+        # Not for the id -- every id is a client-generated uuid4, so the row has one before
+        # it is added. The flush makes it VISIBLE to the queries that follow in this
+        # transaction, so a child's foreign key has something to point at and a second
+        # lookup of the same natural key finds this row rather than creating another.
+        session.flush()
         counts[count_key] += 1
         return row
 
@@ -591,6 +595,9 @@ def main() -> None:
     written = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
     # flushed so the note below, which goes to stderr, cannot overtake it in a terminal
     print("seeded:", written or "nothing new — the database already matches the payload", flush=True)
+
+    for entry in data.get("warnings") or []:
+        print(f"check by hand: {entry['team']}: {entry['warning']}", file=sys.stderr)
 
     skipped = data.get("skipped") or []
     if skipped:

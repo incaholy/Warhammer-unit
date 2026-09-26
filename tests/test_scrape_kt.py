@@ -877,19 +877,37 @@ def _scraped_team(**overrides) -> dict:
             {"name": "Hollow Sentinel", "abilities": []},
         ],
         "selection_lists": [
-            {
-                "label": "1 HOLLOW WARDEN operative",
-                "position": 0,
-                "options": [{"operative": "Hollow Warden"}],
-            },
-            {
-                "label": "4 HOLLOW operatives selected from the following list:",
-                "position": 1,
-                "options": [{"operative": "Hollow Sentinel"}],
-            },
+            _scraped_list("1 HOLLOW WARDEN operative", 0, 1, [("Hollow Warden", 1, None)]),
+            _scraped_list(
+                "4 HOLLOW operatives selected from the following list:",
+                1,
+                4,
+                [("Hollow Sentinel", 1, None)],
+            ),
         ],
     }
     return {**team, **overrides}
+
+
+def _scraped_list(label: str, position: int, budget: int, options: list[tuple]) -> dict:
+    """One selection list in the payload's shape, which the warnings read in full."""
+    return {
+        "label": label,
+        "position": position,
+        "budget": budget,
+        "shape": "budgeted",
+        "restriction_text": None,
+        "options": [
+            {
+                "operative": name,
+                "cost": cost,
+                "models": 1,
+                "max_selections": cap,
+                "loadout_options": [],
+            }
+            for name, cost, cap in options
+        ],
+    }
 
 
 def test_a_team_whose_composition_offers_every_datacard_is_quiet():
@@ -933,16 +951,18 @@ def test_a_list_offering_a_less_specific_card_than_its_label_names_is_flagged():
     team = _scraped_team(
         operatives=[{"name": "Lead Player", "abilities": []}, {"name": "Player", "abilities": []}],
         selection_lists=[
-            {
-                "label": "1 VOID-DANCER TROUPE LEAD PLAYER operative with one option",
-                "position": 0,
-                "options": [{"operative": "Player"}],
-            },
-            {
-                "label": "7 VOID-DANCER TROUPE operatives selected from the following list:",
-                "position": 1,
-                "options": [{"operative": "Player"}],
-            },
+            _scraped_list(
+                "1 VOID-DANCER TROUPE LEAD PLAYER operative with one option",
+                0,
+                1,
+                [("Player", 1, None)],
+            ),
+            _scraped_list(
+                "7 VOID-DANCER TROUPE operatives selected from the following list:",
+                1,
+                7,
+                [("Player", 1, None)],
+            ),
         ],
     )
 
@@ -1257,3 +1277,79 @@ def test_a_card_that_begins_with_the_entry_beats_a_shorter_rearranged_one():
     cards = ["Ash Prophet Elite", "Prophet Ash"]
 
     assert resolve_operative("ASH PROPHET", cards) == "Ash Prophet Elite"
+
+
+def test_a_list_no_roster_can_satisfy_is_flagged():
+    # Battleclade reached this state once: a budget of 8 over five options each capped at 1,
+    # because a two-word exemption matched nothing. It was found by hand months later, which
+    # is the reason this check exists rather than a verification note somewhere.
+    team = _scraped_team(
+        selection_lists=[
+            _scraped_list(
+                "8 HOLLOW operatives selected from the following list:",
+                0,
+                8,
+                [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, 1)],
+            )
+        ]
+    )
+
+    warnings = composition_warnings(team)
+
+    assert any("no legal roster exists" in w for w in warnings)
+    assert any("budget of 8 but at most 2" in w for w in warnings)
+
+
+def test_a_list_with_one_uncapped_option_is_not_flagged():
+    # The budget can always be spent when something may be taken repeatedly, which is the
+    # normal case: 107 of the 109 real lists have at least one uncapped option.
+    team = _scraped_team(
+        selection_lists=[
+            _scraped_list(
+                "8 HOLLOW operatives selected from the following list:",
+                0,
+                8,
+                [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, None)],
+            )
+        ]
+    )
+
+    assert composition_warnings(team) == []
+
+
+def test_a_fixed_roster_is_not_measured_in_selections():
+    # A `fixed` line's budget counts MODELS (decision #29), so comparing it against a sum of
+    # selections would flag both real fixed lists — Elucidian Starstrider and Gellerpox
+    # Infected, each budget 9 over 6–7 selections.
+    listing = _scraped_list(
+        "Every HOLLOW operative in the following list:",
+        0,
+        9,
+        [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, 1)],
+    )
+    listing["shape"] = "fixed"
+
+    assert composition_warnings(_scraped_team(selection_lists=[listing])) == []
+
+
+def test_a_page_with_no_restriction_sentence_has_notes_instead():
+    # Gellerpox print a conditional footnote and no restriction at all. Taking the first
+    # segment regardless put that footnote in the restriction slot, where a reader sees it as
+    # a constraint on the list and where the cap and repeat patterns then scan it.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <div class="BreakInsideAvoid">
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
+      <ul class="redCircle2"><li>SWARM</li></ul>
+    </li></ul>
+    If you selected the MUTOID VERMIN faction equipment:
+    </div>
+    """
+    composition = parse_composition(html)
+
+    assert composition.lists[0].restriction_text is None
+    assert composition.notes == ["If you selected the MUTOID VERMIN faction equipment:"]

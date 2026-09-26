@@ -764,6 +764,10 @@ _OTHER_THAN = re.compile(r"other than (.+?) operatives,", re.IGNORECASE | re.DOT
 # SUBDUCTOR operatives", and Wyrmblade three clauses in a row. Requiring "include" read
 # only the first of each, so three real caps were never stored.
 _KEYWORD_CAP = re.compile(r"up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
+# What makes a segment a restriction sentence rather than a footnote: every one of the 42
+# real ones says a kill team "can only include" something, or names an exception with
+# "other than".
+_IS_RESTRICTION = re.compile(r"can only include|other than", re.IGNORECASE)
 _COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
 _LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
 _IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
@@ -891,6 +895,13 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     cleaned = [re.sub(r"\s+", " ", _clean(" ".join(parts))).strip() for parts in segments if any(parts)]
     if not cleaned:
         return None, []
+    # The first segment is the restriction sentence only if it READS like one. Gellerpox
+    # print a conditional footnote and no restriction at all ("If you selected the MUTOID
+    # VERMIN faction equipment:"), which otherwise landed in the restriction slot -- where a
+    # reader sees a footnote presented as a constraint on that list, and where the cap and
+    # repeat patterns then scan it. 41 of the 42 real sentences carry one of these phrases.
+    if not _IS_RESTRICTION.search(cleaned[0]):
+        return None, cleaned
     return cleaned[0], cleaned[1:]
 
 
@@ -1222,6 +1233,19 @@ def composition_warnings(team: dict) -> list[str]:
         warnings.append(f"no selection list offers {card!r}, and no rule or ability names it")
 
     for listing in team["selection_lists"]:
+        # A list no legal roster can satisfy. Battleclade reached this state once -- a budget
+        # of 8 over five options each capped at 1 -- because a two-word exemption matched
+        # nothing, and it was found by hand rather than by the pipeline. Only `budgeted` and
+        # `single` lines count selections; a `fixed` line's budget counts models (#29).
+        caps = [option["max_selections"] for option in listing["options"]]
+        if listing["shape"] != "fixed" and caps and all(cap is not None for cap in caps):
+            ceiling = sum(cap * option["cost"] for cap, option in zip(caps, listing["options"], strict=True))
+            if ceiling < listing["budget"]:
+                warnings.append(
+                    f"list {listing['position']} has a budget of {listing['budget']} but at most "
+                    f"{ceiling} can be spent on it — no legal roster exists"
+                )
+
         label_words = set(_words(listing["label"].upper()))
         named = [card for card in cards if _words(card.upper()) and set(_words(card.upper())) <= label_words]
         listed = {option["operative"] for option in listing["options"]}
@@ -1281,13 +1305,21 @@ def scrape(*, refresh: bool = False) -> dict:
         "universal_ploys": [],
         "universal_equipment": [],
         "skipped": [],
+        "warnings": [],
     }
 
     for entry in parse_nav(nav_html):
         try:
-            payload["kill_teams"].append(scrape_team(entry, refresh=refresh))
+            team = scrape_team(entry, refresh=refresh)
         except (CompositionNotParsed, OperativeNotResolved) as exc:
             payload["skipped"].append({"team": entry.name, "reason": str(exc)})
+            continue
+        payload["kill_teams"].append(team)
+        # In the payload rather than only on the terminal, for the same reason as `skipped`:
+        # a seed printing only its own counts would look like a clean catalog.
+        payload["warnings"] += [
+            {"team": entry.name, "warning": warning} for warning in composition_warnings(team)
+        ]
 
     # Available to every kill team, so stored with no kill team: Command Re-roll from
     # the core rules, and the universal equipment list.
@@ -1353,11 +1385,10 @@ def main() -> None:
 
     # Not failures: the catalog is usable, but a silently mis-read composition seeds just
     # as cleanly as a correct one, so anything suspicious is said out loud.
-    flagged = [(team["name"], warning) for team in teams for warning in composition_warnings(team)]
-    if flagged:
-        print(f"\n{len(flagged)} composition(s) to check by hand:")
-        for name, warning in flagged:
-            print(f"  {name}: {warning}")
+    if payload["warnings"]:
+        print(f"\n{len(payload['warnings'])} composition(s) to check by hand:")
+        for entry in payload["warnings"]:
+            print(f"  {entry['team']}: {entry['warning']}")
     print("\nNow run: make seed-kt")
 
 

@@ -138,12 +138,12 @@ def test_a_printed_range_overrides_the_default(session, make_kt_weapon):
 def test_a_range_below_one_is_rejected_even_though_a_default_exists(session, make_kt_weapon):
     # A default only fires when the column is OMITTED, so the check is what holds an
     # explicit 0 from a future parser out.
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_weapon_range"):
         make_kt_weapon(range=0)
 
 
 def test_weapon_category_is_one_of_two_values(session, make_kt_weapon):
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_weapon_category"):
         make_kt_weapon(category="thrown")
 
 
@@ -261,7 +261,7 @@ def test_ploy_name_is_unique_per_kill_team_only(session, make_kill_team, make_kt
 def test_ploy_kind_is_strategy_or_firefight(session, make_kt_ploy):
     assert make_kt_ploy(kind="strategy").kind == "strategy"
     assert make_kt_ploy(kind="firefight").kind == "firefight"
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_ploy_kind"):
         make_kt_ploy(kind="tactical")
 
 
@@ -272,7 +272,7 @@ def test_cp_cost_defaults_to_one_and_cannot_be_negative(session, make_kill_team,
     session.refresh(default)
     assert default.cp_cost == 1
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_ploy_cp_cost"):
         make_kt_ploy(cp_cost=-1)
 
 
@@ -417,13 +417,15 @@ def test_a_cap_belongs_to_the_option_not_the_operative(
     [("cost", 0), ("models", 0), ("max_selections", 0)],
 )
 def test_an_option_cannot_be_taken_zero_ways(session, make_kt_selection_option, field, value):
-    with pytest.raises(IntegrityError):
+    # The constraint follows the field, so the assertion names it rather than accepting any
+    # IntegrityError -- which is how a whole missing CHECK stayed invisible elsewhere.
+    with pytest.raises(IntegrityError, match=f"ck_kt_selection_option_{field}"):
         make_kt_selection_option(**{field: value})
 
 
 def test_a_budget_of_zero_is_rejected(session, make_kt_selection_list):
     # A list nobody can spend on is not a list.
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_selection_list_budget"):
         make_kt_selection_list(budget=0)
 
 
@@ -593,7 +595,7 @@ def test_one_keyword_is_capped_once_per_team(session, make_kill_team, make_kt_se
 
 def test_a_cap_of_zero_is_rejected(session, make_kt_selection_restriction):
     # "None of these" is said by not offering them.
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_selection_restriction_max"):
         make_kt_selection_restriction(max_operatives=0)
 
 
@@ -758,7 +760,7 @@ def test_a_selection_list_shape_outside_the_vocabulary_is_refused(session, make_
     # a reader can rely on the vocabulary (decision #29).
     team = make_kill_team()
     session.add(KTSelectionList(kill_team_id=team.id, label="1 X", budget=1, position=0, shape="whatever"))
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_kt_selection_list_shape"):
         session.commit()
 
 

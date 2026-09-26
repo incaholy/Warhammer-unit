@@ -139,8 +139,11 @@ reader of the tables would not guess them:
   carries the extra words. An AMBIGUOUS entry always raises, even when the caller is only
   asking "is this an operative?", because a lenient "no" once dropped a real entry as
   though it were a weapon loadout.
-- **`composition_warnings` reports what cannot be checked.** A datacard no list offers, and
-  a list whose label names a datacard it does not offer. An operative named by a team rule
+- **`composition_warnings` reports what cannot be checked.** A list no legal roster can
+  satisfy (a budget larger than everything its capped options could spend — the state
+  Battleclade reached once), a datacard no list offers, and a list whose label names a
+  datacard it does not offer. They travel in the payload beside `skipped`, so the seed
+  reports them too. An operative named by a team rule
   or an ability is excused (Chaos Cult gain theirs mid-battle); equipment text is
   deliberately *not* searched, so Gellerpox's vermin stay visible.
 - **Universal rows come from two discovered pages**, not from a team: the ploys from the
