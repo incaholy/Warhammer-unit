@@ -38,7 +38,8 @@ killteam.json shape:
                                              "hit", "normal_damage", "crit_damage",
                                              "rules" }, ... ],
                             "abilities": [ { "name", "description" }, ... ] }, ... ],
-          "selection_lists": [ { "label", "budget", "position", "shape", "restriction_text",
+          "selection_lists": [ { "label", "budget", "position", "shape", "requisition_source",
+                                 "restriction_text",
                                  "options": [ { "operative", "cost", "models",
                                                 "max_selections",
                                                 "loadout_options" }, ... ] }, ... ],
@@ -324,9 +325,10 @@ def _comparable(lists) -> list:
                 label,
                 restriction,
                 shape,
+                source,
                 tuple(sorted(options, key=lambda option: option[0])),
             )
-            for position, budget, label, restriction, shape, options in lists
+            for position, budget, label, restriction, shape, source, options in lists
         ),
         key=lambda row: row[0],
     )
@@ -389,6 +391,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                 listing["label"],
                 listing.get("restriction_text"),
                 listing["shape"],
+                listing["requisition_source"],
                 options,
             )
         )
@@ -401,6 +404,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
             row.label,
             row.restriction_text,
             row.shape,
+            row.requisition_source,
             [
                 (
                     option.operative.name,
@@ -422,7 +426,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
         session.delete(row)
     session.flush()  # the DELETEs must land before an INSERT reuses (kill_team_id, position)
 
-    for position, budget, label, restriction, shape, options in wanted:
+    for position, budget, label, restriction, shape, source, options in wanted:
         row = KTSelectionList(
             kill_team_id=team.id,
             position=position,
@@ -430,6 +434,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
             label=label,
             restriction_text=restriction,
             shape=shape,
+            requisition_source=source,
         )
         session.add(row)
         session.flush()  # so the options have a list id
@@ -523,6 +528,31 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
         )
 
 
+def _link_requisitions(session: Session, counts: dict) -> None:
+    """Point each requisition list at the kill team it names, once every team exists.
+
+    A second pass on purpose: the payload's order is the site's, so Inquisitorial Agent can
+    be read before the Death Korps team it requisitions from. Resolving during that team's
+    own pass would depend on who came first.
+
+    A reference, never shared rows -- Death Korps' operatives stay Death Korps' (decision
+    #31). A group whose operatives are this team's own (Sister of Silence, Tempestus Scion,
+    neither of which is a kill team) keeps a NULL link and offers its options directly.
+    """
+    lists = session.exec(select(KTSelectionList).where(KTSelectionList.requisition_source.is_not(None))).all()
+    if not lists:
+        return
+    by_name = {team.name: team for team in session.exec(select(KillTeam)).all()}
+    for row in lists:
+        source = by_name.get(row.requisition_source)
+        # No team of that name means the ally has no page of its own, which is why this
+        # group's operatives are on the requisitioning team's page and already offered.
+        wanted = source.id if source is not None else None
+        if row.from_kill_team_id != wanted:
+            row.from_kill_team_id = wanted
+            counts["updated"] += 1
+
+
 def seed(session: Session, data: dict) -> dict[str, int]:
     """Load every row in `data`; returns how many were created, plus how many changed."""
     counts = dict.fromkeys(COUNT_KEYS, 0)
@@ -560,6 +590,7 @@ def seed(session: Session, data: dict) -> dict[str, int]:
                 name=item["name"],
             )
 
+        _link_requisitions(session, counts)
         session.commit()
     except Exception:
         # All or nothing. The rows written before the failure are only FLUSHED, so a

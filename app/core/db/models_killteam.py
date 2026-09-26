@@ -118,10 +118,16 @@ class KillTeam(TimestampMixin, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"order_by": "KTEquipment.position"},
     )
+    # `foreign_keys` because a selection list now has TWO foreign keys to a kill team: the
+    # team that OWNS it, and the team a requisition list REFERENCES (decision #34). Without
+    # naming the owning one, SQLAlchemy cannot tell which join this relationship means.
     selection_lists: list["KTSelectionList"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KTSelectionList.position"},
+        sa_relationship_kwargs={
+            "order_by": "KTSelectionList.position",
+            "foreign_keys": "[KTSelectionList.kill_team_id]",
+        },
     )
     # Team-wide, not per list: see KTSelectionRestriction.
     keyword_caps: list["KTSelectionRestriction"] = Relationship(
@@ -475,10 +481,27 @@ class KTSelectionList(TimestampMixin, table=True):
     # Which printed shape the line is. Stored rather than re-derived from the label,
     # because the label is prose and the parser already knows.
     shape: str = Field(max_length=16, index=True)
+    # The requisition group this line belongs to, as the page heads it, or NULL for an
+    # ordinary composition line (decision #33). Lists carrying one are ALTERNATIVES to each
+    # other and to the line that points at them -- "REQUISITIONED operatives from one group"
+    # -- not further lists to spend a budget on. Only Inquisitorial Agent has any.
+    requisition_source: str | None = Field(default=None, max_length=128, index=True)
+    # The kill team a requisition group's operatives belong to, when the ally HAS a team of
+    # its own (decision #34). A reference, never shared rows: Death Korps' operatives stay
+    # Death Korps' (decision #31), and this list says "you may field that team's operatives
+    # here" without copying them. NULL when the group's operatives are this team's own rows
+    # (Sister of Silence, Tempestus Scion) or when the line is not a requisition at all.
+    from_kill_team_id: UUID | None = Field(
+        default=None, foreign_key="kt_kill_teams.id", ondelete="SET NULL", index=True
+    )
     position: int  # print order
     restriction_text: str | None = Field(default=None)
 
-    kill_team: KillTeam = Relationship(back_populates="selection_lists")
+    # The team that owns this list, not the one a requisition list references.
+    kill_team: KillTeam = Relationship(
+        back_populates="selection_lists",
+        sa_relationship_kwargs={"foreign_keys": "[KTSelectionList.kill_team_id]"},
+    )
     # `overlaps` is the price of the composite foreign keys below: this relationship
     # and `KTOperative.offered_by` both write an option's `kill_team_id`, which is
     # deliberate -- it is one column reached through two parents -- and SQLAlchemy wants

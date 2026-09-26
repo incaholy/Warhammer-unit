@@ -593,6 +593,6 @@ they gate the choice, so they are a game concern rather than a catalog one.
 **Status: Planned.** All 48 teams now parse and seed (decision #32), so what remains is
 what a human has to decide rather than what the parser cannot read: Hunter Clade's
 `WARRIOR SICARIAN *` entry, which its footnote disambiguates; Inquisitorial Agent's
-cross-referencing line, whose requisition groups would need a reference to another kill
-TEAM rather than shared operative rows (decision #31); and Gellerpox Infected's
+cross-referencing line, which still names nine datacards ambiguously — its requisition
+groups themselves are read now (decisions #33, #34); and Gellerpox Infected's
 equipment-conditional block. Each is reported on every scrape and seed.

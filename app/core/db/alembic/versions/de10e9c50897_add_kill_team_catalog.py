@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 94700564ed16
+Revision ID: de10e9c50897
 Revises: 44441c6a9671
-Create Date: 2026-09-26 14:02:20.554683
+Create Date: 2026-09-26 15:50:13.941381
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '94700564ed16'
+revision: str = 'de10e9c50897'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -122,17 +122,22 @@ def upgrade() -> None:
     sa.Column('label', sqlmodel.sql.sqltypes.AutoString(length=256), nullable=False),
     sa.Column('budget', sa.Integer(), nullable=False),
     sa.Column('shape', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('requisition_source', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=True),
+    sa.Column('from_kill_team_id', sa.Uuid(), nullable=True),
     sa.Column('position', sa.Integer(), nullable=False),
     sa.Column('restriction_text', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.CheckConstraint("shape IN ('budgeted', 'fixed', 'single')", name='ck_kt_selection_list_shape'),
     sa.CheckConstraint('budget >= 1', name='ck_kt_selection_list_budget'),
     sa.CheckConstraint('position >= 0', name='ck_kt_selection_list_position'),
+    sa.ForeignKeyConstraint(['from_kill_team_id'], ['kt_kill_teams.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('kill_team_id', 'id', name='uq_kt_selection_list_team_id'),
     sa.UniqueConstraint('kill_team_id', 'position')
     )
+    op.create_index(op.f('ix_kt_selection_lists_from_kill_team_id'), 'kt_selection_lists', ['from_kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_selection_lists_kill_team_id'), 'kt_selection_lists', ['kill_team_id'], unique=False)
+    op.create_index(op.f('ix_kt_selection_lists_requisition_source'), 'kt_selection_lists', ['requisition_source'], unique=False)
     op.create_index(op.f('ix_kt_selection_lists_shape'), 'kt_selection_lists', ['shape'], unique=False)
     op.create_table('kt_selection_restrictions',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -227,7 +232,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_kt_selection_restrictions_keyword'), table_name='kt_selection_restrictions')
     op.drop_table('kt_selection_restrictions')
     op.drop_index(op.f('ix_kt_selection_lists_shape'), table_name='kt_selection_lists')
+    op.drop_index(op.f('ix_kt_selection_lists_requisition_source'), table_name='kt_selection_lists')
     op.drop_index(op.f('ix_kt_selection_lists_kill_team_id'), table_name='kt_selection_lists')
+    op.drop_index(op.f('ix_kt_selection_lists_from_kill_team_id'), table_name='kt_selection_lists')
     op.drop_table('kt_selection_lists')
     op.drop_index('uq_kt_ploy_universal_name', table_name='kt_ploys', sqlite_where=sa.text('kill_team_id IS NULL'), postgresql_where=sa.text('kill_team_id IS NULL'))
     op.drop_index(op.f('ix_kt_ploys_kill_team_id'), table_name='kt_ploys')

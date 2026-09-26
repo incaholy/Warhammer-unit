@@ -24,6 +24,7 @@ from scripts.scrape_wahapedia_kt import (
     parse_nav,
     parse_operatives,
     parse_ploys,
+    parse_requisition,
     parse_team_rules,
     resolve_operative,
     scrape,
@@ -1430,3 +1431,34 @@ def test_an_unresolved_entry_is_reported_as_a_warning():
     warnings = composition_warnings(team)
 
     assert any("needs a human" in w for w in warnings)
+
+
+def test_a_requisition_group_whose_ally_has_no_page_offers_this_teams_datacards():
+    # Inquisitorial Agent's main line points at requisition groups, so seven of its eighteen
+    # datacards were offered by nothing at all. Sister of Silence and Tempestus Scion are not
+    # kill teams — which is exactly why that page prints their datacards, as its own rows
+    # (decision #31) — so those groups resolve here and their operatives become usable.
+    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
+
+    wardens = groups["Ember Wardens"]
+    assert [option.operative for option in wardens.lists[0].options] == [
+        "Hollow Ash Prophet",
+        "Hollow Ember Wisp",
+    ]
+    assert wardens.lists[0].budget == 3
+    assert wardens.lists[0].requisition_source == "Ember Wardens"
+
+
+def test_a_requisition_group_whose_ally_is_a_kill_team_resolves_nothing_here():
+    # Not merely fruitless — WRONG. Resolving Death Korps' entries against Inquisitorial
+    # Agent's datacards matched its "TROOPER" to a Tempestus Scion Trooper, through the
+    # resolver's last-word rule. The printed line is still a page fact, so it is kept.
+    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
+
+    choir = groups["Ashen Choir"]
+    assert choir.lists[0].options == []
+    assert (choir.lists[0].budget, choir.lists[0].requisition_source) == (5, "Ashen Choir")
+
+
+def test_a_page_with_no_requisition_section_has_no_groups():
+    assert parse_requisition(TEAM, ["Ashen Choir"]) == []

@@ -96,6 +96,7 @@ SAMPLE = {
                     "label": "1 HOLLOW WARDEN operative",
                     "budget": 1,
                     "shape": "budgeted",
+                    "requisition_source": None,
                     "position": 0,
                     "restriction_text": None,
                     "options": [
@@ -112,6 +113,7 @@ SAMPLE = {
                     "label": "4 HOLLOW operatives selected from the following list:",
                     "budget": 4,
                     "shape": "budgeted",
+                    "requisition_source": None,
                     "position": 1,
                     "restriction_text": "Other than SENTINEL operatives, once each.",
                     "options": [
@@ -268,6 +270,7 @@ def test_an_option_naming_an_unknown_operative_stops_the_seed(session):
                         "label": "1 X",
                         "budget": 1,
                         "shape": "single",
+                        "requisition_source": None,
                         "position": 0,
                         "options": [{"operative": "Nobody", "cost": 1, "models": 1}],
                     }
@@ -489,6 +492,7 @@ def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session)
             "label": "1 HOLLOW HERALD operative",
             "budget": 1,
             "shape": "budgeted",
+            "requisition_source": None,
             "position": 0,
             "restriction_text": None,
             "options": [
@@ -861,6 +865,7 @@ def test_a_list_with_no_options_is_stored_as_the_page_printed_it(session):
             "budget": 5,
             "position": 2,
             "shape": "budgeted",
+            "requisition_source": None,
             "restriction_text": None,
             "options": [],
         }
@@ -895,3 +900,69 @@ def test_an_operative_is_never_shared_between_kill_teams(session):
     for option in session.exec(select(KTSelectionOption)).all():
         assert option.operative.kill_team_id == option.selection_list.kill_team_id
         assert option.kill_team_id == option.operative.kill_team_id
+
+
+def test_a_requisition_list_references_the_team_it_names(session):
+    # A reference, never shared rows: Death Korps' operatives stay Death Korps' (#31), and the
+    # list says "you may field that team's operatives here" (#34). Resolved in a second pass,
+    # because the payload's order is the site's — a team can be read before the one it names.
+    payload = copy.deepcopy(SAMPLE)
+    ally = copy.deepcopy(payload["kill_teams"][0])
+    ally["name"] = "Ashen Choir"
+    payload["kill_teams"][0]["selection_lists"].append(
+        {
+            "label": "5 ASHEN CHOIR operatives selected from the following list:",
+            "budget": 5,
+            "position": 2,
+            "shape": "budgeted",
+            "requisition_source": "Ashen Choir",
+            "restriction_text": None,
+            "options": [],
+        }
+    )
+    # the ally comes SECOND in the payload, so a single pass could not have linked it
+    payload["kill_teams"].append(ally)
+
+    seed(session, payload)
+
+    requisition = session.exec(
+        select(KTSelectionList).where(KTSelectionList.requisition_source.is_not(None))
+    ).one()
+    ally_row = session.exec(select(KillTeam).where(KillTeam.name == "Ashen Choir")).one()
+    assert requisition.from_kill_team_id == ally_row.id
+    assert requisition.kill_team.name == "Hollow Vigil"  # owned here, references there
+    assert requisition.options == []  # nothing is copied
+
+
+def test_a_requisition_group_with_no_team_of_its_own_keeps_a_null_reference(session):
+    # Sister of Silence and Tempestus Scion are not kill teams, which is why the page carries
+    # their datacards as its own rows — so the group offers them directly and references
+    # nothing.
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"].append(
+        {
+            "label": "5 EMBER WARDEN operatives selected from the following list:",
+            "budget": 5,
+            "position": 2,
+            "shape": "budgeted",
+            "requisition_source": "Ember Wardens",
+            "restriction_text": None,
+            "options": [
+                {
+                    "operative": "Hollow Sentinel",
+                    "cost": 1,
+                    "models": 1,
+                    "max_selections": None,
+                    "loadout_options": [],
+                }
+            ],
+        }
+    )
+
+    seed(session, payload)
+
+    requisition = session.exec(
+        select(KTSelectionList).where(KTSelectionList.requisition_source == "Ember Wardens")
+    ).one()
+    assert requisition.from_kill_team_id is None
+    assert [o.operative.name for o in requisition.options] == ["Hollow Sentinel"]

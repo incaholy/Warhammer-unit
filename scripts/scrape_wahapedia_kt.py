@@ -750,6 +750,8 @@ def parse_equipment(html: str) -> list[Equipment]:
 # Stealth Battlesuit" would otherwise be read as 26 operatives.
 # ---------------------------------------------------------------------------
 
+# The headings that end a team's own content: anything after them is the page's furniture.
+_AFTER_THE_TEAM = {"Datacards", "Books", "FAQ"}
 _COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
 # "your kill team can only include each operative on this list once" -- and the pages vary
 # the middle of it: Goremonger print "each operative ABOVE once" and Brood Brother "each
@@ -846,6 +848,11 @@ class SelectionList:
     # selections for `budgeted` and `single`, models for `fixed`. No default: an unstated
     # shape is a bug, and a default is what hid one here.
     shape: str
+    # The requisition group this line belongs to, as the page heads it ("Sister of Silence",
+    # "Death Korps"), or None for an ordinary composition line (decision #33). Lists that
+    # carry one are ALTERNATIVES to each other -- the page says "REQUISITIONED operatives
+    # from one group" -- not further lists to spend on.
+    requisition_source: str | None = None
     options: list[SelectionOption] = field(default_factory=list)
     restriction_text: str | None = None
 
@@ -1021,41 +1028,31 @@ def _repeat_exceptions(sentence: str) -> set[str]:
     return {_clean(word).strip().upper() for word in listed if _clean(word).strip()}
 
 
-def parse_composition(html: str) -> Composition:
-    """The kill team's selection lists, in printed order.
+def _budget_and_shape(label: str, models: int) -> tuple[int, str]:
+    """What a composition line's number is, and which of the three printed shapes it is.
 
-    Three shapes appear across the 48 teams:
-
-      A  "4 RAVENER operatives selected from the following list:"  -> budget 4
-      B  "Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y"
-                                                                   -> a fixed roster,
-                                                                      budget = the sum
-      C  "BOSS NOB operative with one of the following options:"    -> an implicit 1
-
-    Anything else raises rather than guessing a budget: a wrong number would seed a
-    roster rule that looks right.
-
-    Repeated operatives collapse. Wyrmblade prints three "GUNNER with ..." lines, and
-    that is one operative with a weapon choice (KILLTEAM.md: loadouts are display
-    only), so the variants merge into one option.
+    Shared by the main composition and the requisition groups, which print lines of exactly
+    the same three shapes (decision #29).
     """
-    soup = _soup(html)
-    head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
-    if head is None:
-        raise CompositionNotParsed("no 'Operatives' section on the page")
-    top = next(
-        (el for el in head.find_all_next() if el.name == "ul" and "redTriangle" in (el.get("class") or [])),
-        None,
-    )
-    if top is None:
-        raise CompositionNotParsed("the 'Operatives' section has no composition list")
+    count = _LEADING_COUNT.match(label)
+    if count:
+        return int(count.group(1)), "budgeted"  # shape A
+    if label.lower().startswith("every"):
+        # Shape B states a fixed roster, so the number counts MODELS, not selections -- the
+        # one place `budget` changes unit, which is why the shape is stored.
+        return models, "fixed"
+    return 1, "single"  # shape C: an unnumbered line naming one operative
 
-    # After the structural checks, so a page with no composition reports that rather
-    # than failing on its datacards.
-    operatives = parse_operatives(html)
-    datacards = [operative.name for operative in operatives]
-    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
 
+def _lists_from(
+    top: Tag, datacards: list[str], keywords_of: dict[str, set[str]]
+) -> tuple[list[SelectionList], list[str]]:
+    """Every selection list in one `ul.redTriangle` tree, and the entries nobody can resolve.
+
+    Separate from `parse_composition` because a page can print more than one such tree:
+    Inquisitorial Agent carries a whole `Inquisitorial Requisition` section, one group per
+    ally it may requisition from, each a tree of exactly this shape.
+    """
     # Which items are LISTS rather than entries, at any depth. Two teams print a second
     # list inside the first rather than beside it: Blades of Khaine nests "7 BLADES OF
     # KHAINE operatives ..." under its leader line, and Hunter Clade wraps "9 HUNTER
@@ -1146,16 +1143,7 @@ def parse_composition(html: str) -> Composition:
                     )
                 }
 
-        count = _LEADING_COUNT.match(label)
-        if count:
-            budget, shape = int(count.group(1)), "budgeted"  # shape A
-        elif label.lower().startswith("every"):
-            # Shape B states a fixed roster, so the number is a count of MODELS, not of
-            # selections -- the one place `budget` changes unit, which is why the shape
-            # is stored rather than inferred by a reader (decision #29).
-            budget, shape = sum(option.models for option in options.values()), "fixed"
-        else:
-            budget, shape = 1, "single"  # shape C: an unnumbered line naming one operative
+        budget, shape = _budget_and_shape(label, sum(o.models for o in options.values()))
 
         if not options and not unresolved:
             # No options AND nothing ambiguous means the parser did not recognise the line at
@@ -1176,8 +1164,144 @@ def parse_composition(html: str) -> Composition:
             )
         )
 
-    if not lists:
+    if not lists and not unresolved:
         raise CompositionNotParsed("the composition list is empty")
+
+    return lists, unresolved
+
+
+@dataclass(frozen=True)
+class RequisitionGroup:
+    """One ally a team may requisition operatives from, as its page prints it."""
+
+    source: str
+    lists: list[SelectionList] = field(default_factory=list)
+    unresolved: list[str] = field(default_factory=list)
+
+
+def parse_requisition(html: str, known_teams: Iterable[str] = ()) -> list[RequisitionGroup]:
+    """The groups under an "… Requisition" section, one per ally.
+
+    Only Inquisitorial Agent prints one, and it is why that team used to be unusable: its
+    main composition line points at these groups, so seven of its eighteen datacards were
+    offered by nothing. Each group is a `ul.redTriangle` tree of exactly the shape a
+    composition uses, under its own `h2`.
+
+    Two kinds come out, and the difference is whether the ally is a kill team of its own --
+    which is why `known_teams` is passed in rather than guessed at.
+
+    Sister of Silence and Tempestus Scion are NOT kill teams, which is precisely why this
+    page prints their datacards, as its own rows (decision #31). Their entries resolve here
+    and become ordinary lists, and that is what makes those seven operatives usable.
+
+    Death Korps, Exaction Squad, Imperial Navy Breacher and Kasrkin ARE kill teams, so their
+    operatives live on their own pages and must never be resolved against this one. Doing so
+    is not merely fruitless, it is WRONG: the resolver's last-word rule matched Death Korps'
+    "TROOPER" to this page's Tempestus Scion Trooper. Such a group keeps its printed line --
+    the label and the budget are page facts -- and offers nothing, and the reference to the
+    team it names is decision #34.
+    """
+    soup = _soup(html)
+    head = next((h for h in soup.find_all("h2") if h.get_text(strip=True).endswith("Requisition")), None)
+    if head is None:
+        return []
+
+    operatives = parse_operatives(html)
+    datacards = [operative.name for operative in operatives]
+    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
+
+    known = {name.casefold() for name in known_teams}
+    groups: list[RequisitionGroup] = []
+    for heading in head.find_all_next("h2"):
+        title = _clean(heading.get_text(strip=True))
+        if title in _AFTER_THE_TEAM:
+            break
+        top = next(
+            (
+                el
+                for el in heading.find_all_next()
+                if el.name == "ul" and "redTriangle" in (el.get("class") or [])
+            ),
+            None,
+        )
+        # `find_all_next` walks the whole document, so a group's tree must be one that comes
+        # before the NEXT heading -- otherwise the last group would borrow a later section's.
+        if top is None or (nxt := heading.find_next("h2")) is not None and nxt in top.parents:
+            continue
+        if top.find_previous("h2") is not heading:
+            continue
+
+        if title.casefold() in known:
+            # The ally has its own page, so nothing here is ours to resolve. Keep what the
+            # page states about the line and no options.
+            line = top.find("li")
+            if line is None:
+                continue
+            label = _own_text(line)
+            budget, shape = _budget_and_shape(label, 0)
+            groups.append(
+                RequisitionGroup(
+                    source=title,
+                    lists=[
+                        SelectionList(
+                            label=label,
+                            budget=budget,
+                            position=0,
+                            shape=shape,
+                            requisition_source=title,
+                        )
+                    ],
+                )
+            )
+            continue
+
+        lists, unresolved = _lists_from(top, datacards, keywords_of)
+        groups.append(
+            RequisitionGroup(
+                source=title,
+                lists=[replace(lst, requisition_source=title) for lst in lists],
+                unresolved=unresolved,
+            )
+        )
+    return groups
+
+
+def parse_composition(html: str) -> Composition:
+    """The kill team's selection lists, in printed order.
+
+    Three shapes appear across the 48 teams:
+
+      A  "4 RAVENER operatives selected from the following list:"  -> budget 4
+      B  "Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y"
+                                                                   -> a fixed roster,
+                                                                      budget = the sum
+      C  "BOSS NOB operative with one of the following options:"    -> an implicit 1
+
+    Anything else raises rather than guessing a budget: a wrong number would seed a
+    roster rule that looks right.
+
+    Repeated operatives collapse. Wyrmblade prints three "GUNNER with ..." lines, and
+    that is one operative with a weapon choice (KILLTEAM.md: loadouts are display
+    only), so the variants merge into one option.
+    """
+    soup = _soup(html)
+    head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
+    if head is None:
+        raise CompositionNotParsed("no 'Operatives' section on the page")
+    top = next(
+        (el for el in head.find_all_next() if el.name == "ul" and "redTriangle" in (el.get("class") or [])),
+        None,
+    )
+    if top is None:
+        raise CompositionNotParsed("the 'Operatives' section has no composition list")
+
+    # After the structural checks, so a page with no composition reports that rather
+    # than failing on its datacards.
+    operatives = parse_operatives(html)
+    datacards = [operative.name for operative in operatives]
+    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
+
+    lists, unresolved = _lists_from(top, datacards, keywords_of)
 
     sentence, notes = _composition_text(top)
     caps: list[KeywordCap] = []
@@ -1295,7 +1419,7 @@ def composition_warnings(team: dict) -> list[str]:
     return warnings
 
 
-def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
+def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bool = False) -> dict:
     """Everything one kill team's page holds, in the seed's shape.
 
     Operative names are the DATACARD's, here and in the selection options, so the seed
@@ -1304,6 +1428,15 @@ def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
     """
     html = fetch(entry.url, refresh=refresh)
     composition = parse_composition(html)
+    # A requisition group's lines are further composition lists for THIS team, continuing the
+    # print order -- and they are alternatives to one another, which `requisition_source`
+    # says (decision #33).
+    lists = list(composition.lists)
+    unresolved = list(composition.unresolved)
+    for group in parse_requisition(html, known_teams):
+        for listing in group.lists:
+            lists.append(replace(listing, position=len(lists)))
+        unresolved += group.unresolved
     return {
         "name": entry.name,
         "faction": entry.faction,
@@ -1311,10 +1444,10 @@ def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
         "ploys": [asdict(ploy) for ploy in parse_ploys(html)],
         "equipment": [asdict(item) for item in parse_equipment(html)],
         "operatives": [asdict(operative) for operative in parse_operatives(html)],
-        "selection_lists": [asdict(lst) for lst in composition.lists],
+        "selection_lists": [asdict(lst) for lst in lists],
         "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
         "composition_notes": composition.notes,
-        "unresolved_entries": composition.unresolved,
+        "unresolved_entries": unresolved,
     }
 
 
@@ -1343,9 +1476,11 @@ def scrape(*, refresh: bool = False) -> dict:
         "warnings": [],
     }
 
-    for entry in parse_nav(nav_html):
+    entries = parse_nav(nav_html)
+    known_teams = [entry.name for entry in entries]
+    for entry in entries:
         try:
-            team = scrape_team(entry, refresh=refresh)
+            team = scrape_team(entry, known_teams=known_teams, refresh=refresh)
         except (CompositionNotParsed, OperativeNotResolved) as exc:
             payload["skipped"].append({"team": entry.name, "reason": str(exc)})
             continue
