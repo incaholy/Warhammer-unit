@@ -587,11 +587,11 @@ def test_a_nested_lists_operatives_do_not_leak_into_the_line_above():
     assert len(_lists()[2].options) == 1  # the line that contains the nested list
 
 
-def test_an_ambiguous_entry_stops_the_team_instead_of_vanishing():
-    # Hunter Clade prints "WARRIOR SICARIAN *", which matches both the Infiltrator and
-    # the Ruststalker Warrior; the footnote tells a human which. The parser asks
-    # "is this an operative?" leniently, and a lenient None would have dropped the
-    # entry as though it were a weapon loadout -- so ambiguity raises even then.
+def test_a_lenient_resolution_still_raises_on_an_ambiguous_entry():
+    # `resolve_operative(strict=False)` answers "is this line an operative at all?", and a
+    # lenient None once dropped a real entry as though it were a weapon loadout. So
+    # ambiguity raises even then — the composition reader catches it per entry and reports
+    # it (see the two tests below), which is a different thing from never noticing.
     html = """
     <div class="dsOuterFrame"><table><tr class="pHeaderRow">
       <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warrior</div></h3></div></td>
@@ -606,8 +606,14 @@ def test_an_ambiguous_entry_stops_the_team_instead_of_vanishing():
       <ul class="redCircle2"><li><span class="kwb kwbo">WARRIOR</span> *</li></ul>
     </li></ul>
     """
+    # the entry, in isolation: the resolver itself refuses to guess
     with pytest.raises(OperativeNotResolved, match="several datacards"):
-        parse_composition(html)
+        resolve_operative("WARRIOR", ["Alpha Warrior", "Omega Warrior"], strict=False)
+
+    # and the composition keeps the rest of the team, recording what it could not read
+    composition = parse_composition(html)
+    assert composition.lists[0].options == []
+    assert len(composition.unresolved) == 1
 
 
 def test_the_restriction_sentence_caps_repeats_at_one():
@@ -1353,3 +1359,74 @@ def test_a_page_with_no_restriction_sentence_has_notes_instead():
 
     assert composition.lists[0].restriction_text is None
     assert composition.notes == ["If you selected the MUTOID VERMIN faction equipment:"]
+
+
+def test_an_ambiguous_entry_loses_itself_rather_than_its_team():
+    # Hunter Clade print "WARRIOR SICARIAN *", matching both Sicarian Warriors, and the
+    # footnote says which. Failing the whole team over it cost 14 datacards, 51 weapons, 8
+    # ploys, 4 equipment and a rule that all parse. The entry is dropped and REPORTED — not
+    # the old silence, which is what lost a real entry before.
+    composition = _composition_with(
+        [
+            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ranger", ["CLADE", "RANGER"]),
+        ],
+        ["WARRIOR", "RANGER"],
+        "",
+    )
+
+    assert [option.operative for option in composition.lists[0].options] == ["Alpha Ranger"]
+    assert len(composition.unresolved) == 1
+    assert "matches several datacards equally" in composition.unresolved[0]
+
+
+def test_a_line_whose_own_name_is_ambiguous_keeps_its_label_with_no_options():
+    # Inquisitorial Agent's only unreadable line reads "5 INQUISITORIAL AGENT operatives
+    # selected from the list above, or REQUISITIONED operatives from one group" — a name
+    # matching nine datacards, pointing at another list and at seven other teams' rosters.
+    # An option can only offer its OWN team's operative (decision #31), so there is nothing
+    # to store; the label and the report are the honest answer, and they are what let the
+    # team into the catalog at all.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Interrogator Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>5 ALPHA AGENT operatives selected from the list above</li></ul>
+    """
+    composition = parse_composition(html)
+
+    assert len(composition.lists) == 1
+    assert composition.lists[0].options == []
+    assert composition.lists[0].budget == 5  # the page's own number survives
+    assert "ALPHA AGENT" in composition.lists[0].label
+    assert len(composition.unresolved) == 1
+
+
+def test_a_line_the_parser_does_not_recognise_at_all_still_raises():
+    # The other half of the trade: no options AND nothing ambiguous means the parser did not
+    # read the line, which is a parser gap and has to be loud.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>4 SOMETHING UNREADABLE</li></ul>
+    """
+    with pytest.raises(CompositionNotParsed, match="no operatives found"):
+        parse_composition(html)
+
+
+def test_an_unresolved_entry_is_reported_as_a_warning():
+    team = _scraped_team(unresolved_entries=["WARRIOR SICARIAN — matches several datacards equally"])
+
+    warnings = composition_warnings(team)
+
+    assert any("needs a human" in w for w in warnings)

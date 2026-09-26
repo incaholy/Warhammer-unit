@@ -980,6 +980,9 @@ class Composition:
     # The footnotes and callouts printed around the composition, in printed order
     # (decision #30). Display only, like `restriction_text`.
     notes: list[str] = field(default_factory=list)
+    # Entries that name several datacards equally, so a human has to say which. Reported,
+    # never stored: an entry nobody can resolve is a gap in the read, not page content.
+    unresolved: list[str] = field(default_factory=list)
 
 
 def _keyword_caps(sentence: str) -> list[KeywordCap]:
@@ -1081,6 +1084,7 @@ def parse_composition(html: str) -> Composition:
         return None
 
     lists: list[SelectionList] = []
+    unresolved: list[str] = []
     for position, line in enumerate(line_nodes):
         label = _own_text(line)
         own_entries = [
@@ -1090,7 +1094,20 @@ def parse_composition(html: str) -> Composition:
         ]
         options: dict[str, SelectionOption] = {}
         for entry in own_entries:
-            option = _option_from(entry, datacards)
+            try:
+                option = _option_from(entry, datacards)
+            except OperativeNotResolved as exc:
+                # An entry naming several datacards equally needs a human (Hunter Clade's
+                # "WARRIOR SICARIAN *", whose footnote says which Warrior is meant). It used
+                # to fail the WHOLE team, which cost 14 datacards, 8 ploys, 4 equipment and a
+                # rule that all parse -- so the entry is dropped and REPORTED instead.
+                #
+                # Not a return to the old silence: dropping an entry quietly is what lost a
+                # real one before. `unresolved` travels in the payload and both tools print
+                # it, and the operative it would have offered then shows up in the "no list
+                # offers this datacard" warning as well.
+                unresolved.append(f"{_own_text(entry)[:60]} — {exc}")
+                continue
             if option is None:
                 continue
             existing = options.get(option.operative)
@@ -1110,7 +1127,15 @@ def parse_composition(html: str) -> Composition:
         # selections of one operative, where a nested "2 PSYCHIC FAMILIAR operatives"
         # is two models for one selection.
         if not options:
-            inline = _option_from(line, datacards)
+            try:
+                inline = _option_from(line, datacards)
+            except OperativeNotResolved as exc:
+                # The same tolerance for a LINE that names its own operative ambiguously.
+                # Inquisitorial Agent's only line reads "5 INQUISITORIAL AGENT operatives
+                # selected from the list above, or REQUISITIONED operatives from one group",
+                # and that name matches nine Agent datacards.
+                unresolved.append(f"{label[:60]} — {exc}")
+                inline = None
             if inline is not None:
                 options = {
                     inline.operative: SelectionOption(
@@ -1132,7 +1157,14 @@ def parse_composition(html: str) -> Composition:
         else:
             budget, shape = 1, "single"  # shape C: an unnumbered line naming one operative
 
-        if not options:
+        if not options and not unresolved:
+            # No options AND nothing ambiguous means the parser did not recognise the line at
+            # all, which is a parser gap and must be loud. A line whose entries were all
+            # ambiguous is different: it is stored with its label and NO options, which reads
+            # as "the page says this, and we could not structure it" -- honest under decision
+            # #28, and what lets Inquisitorial Agent into the catalog at all. Its line points
+            # at another list and at seven other teams' rosters, and an option can only ever
+            # offer its OWN team's operative (decision #31), so there is nothing to store.
             raise CompositionNotParsed(f"no operatives found for composition line {label!r}")
         lists.append(
             SelectionList(
@@ -1193,7 +1225,7 @@ def parse_composition(html: str) -> Composition:
         # moment it was added -- Gellerpox has one list, so its only list is the last one,
         # and it came back mislabelled as `budgeted` while its budget counted models.
         lists[-1] = replace(last, options=options, restriction_text=sentence)
-    return Composition(lists=lists, keyword_caps=caps, notes=notes)
+    return Composition(lists=lists, keyword_caps=caps, notes=notes, unresolved=unresolved)
 
 
 def composition_warnings(team: dict) -> list[str]:
@@ -1218,6 +1250,8 @@ def composition_warnings(team: dict) -> list[str]:
        elsewhere leaves no unused datacard behind, and nothing else would notice.
     """
     warnings: list[str] = []
+    for entry in team.get("unresolved_entries", []):
+        warnings.append(f"a composition entry needs a human: {entry}")
     cards = [operative["name"] for operative in team["operatives"]]
     offered = {option["operative"] for listing in team["selection_lists"] for option in listing["options"]}
 
@@ -1280,6 +1314,7 @@ def scrape_team(entry: NavEntry, *, refresh: bool = False) -> dict:
         "selection_lists": [asdict(lst) for lst in composition.lists],
         "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
         "composition_notes": composition.notes,
+        "unresolved_entries": composition.unresolved,
     }
 
 

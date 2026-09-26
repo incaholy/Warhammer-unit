@@ -848,3 +848,50 @@ def test_a_changed_note_is_rewritten(session):
     assert counts["updated"] == 1
     team = session.exec(select(KillTeam)).one()
     assert team.composition_notes == ["A reworded note.", "And a second one."]
+
+
+def test_a_list_with_no_options_is_stored_as_the_page_printed_it(session):
+    # Inquisitorial Agent's cross-referencing line: the page states a budget and a source we
+    # cannot structure, because an option can only offer its OWN team's operative
+    # (decision #31). The label and the budget are still page facts, so they are stored.
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"].append(
+        {
+            "label": "5 HOLLOW operatives selected from the list above",
+            "budget": 5,
+            "position": 2,
+            "shape": "budgeted",
+            "restriction_text": None,
+            "options": [],
+        }
+    )
+
+    counts = seed(session, payload)
+
+    assert counts["selection_lists"] == 3
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert lists[2].options == []
+    assert (lists[2].budget, lists[2].label) == (5, "5 HOLLOW operatives selected from the list above")
+
+    # and re-seeding it is still a no-op, so an empty list is not mistaken for a change
+    assert set(seed(session, copy.deepcopy(payload)).values()) == {0}
+
+
+def test_an_operative_is_never_shared_between_kill_teams(session):
+    # The separation that matters: two teams in one faction share nothing. The same operative
+    # NAME on two teams is two rows, and an option can only offer its own team's operative --
+    # which is enforced by the composite foreign key, not by the seed remembering to check.
+    payload = copy.deepcopy(SAMPLE)
+    second = copy.deepcopy(payload["kill_teams"][0])
+    second["name"] = "Ashen Choir"
+    payload["kill_teams"].append(second)
+
+    seed(session, payload)
+
+    wardens = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).all()
+    assert len(wardens) == 2
+    assert {w.kill_team.name for w in wardens} == {"Hollow Vigil", "Ashen Choir"}
+    # every option points at an operative of its OWN team
+    for option in session.exec(select(KTSelectionOption)).all():
+        assert option.operative.kill_team_id == option.selection_list.kill_team_id
+        assert option.kill_team_id == option.operative.kill_team_id

@@ -556,8 +556,9 @@ until `fire-team` merges.
 **Status: ✅ Done.**
 
 Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
-tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. 46 of the site's
-48 teams parse and seed; the two that do not are named in K6. Tested against
+tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. all 48 of the site's
+teams parse and seed; the three compositions a human still has to settle are named in K6
+and reported by both tools. Tested against
 **synthetic** fixtures, so no scraped content is committed.
 
 ## K3. Catalog routes
@@ -589,8 +590,9 @@ they gate the choice, so they are a game concern rather than a catalog one.
 
 ## K6. Widen to every kill team
 
-**Status: Planned.** All 48 teams are already discovered from the nav and 46 parse, so
-what remains is the two pages that raise rather than guess — Hunter Clade's ambiguous
-`WARRIOR SICARIAN *` entry and Inquisitorial Agent's cross-referencing composition,
-which also carries a second, differently shaped selection tree — plus Gellerpox
-Infected's equipment-conditional block.
+**Status: Planned.** All 48 teams now parse and seed (decision #32), so what remains is
+what a human has to decide rather than what the parser cannot read: Hunter Clade's
+`WARRIOR SICARIAN *` entry, which its footnote disambiguates; Inquisitorial Agent's
+cross-referencing line, whose requisition groups would need a reference to another kill
+TEAM rather than shared operative rows (decision #31); and Gellerpox Infected's
+equipment-conditional block. Each is reported on every scrape and seed.
