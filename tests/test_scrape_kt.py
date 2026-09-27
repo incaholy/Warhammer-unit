@@ -766,6 +766,20 @@ def _pages(**overrides: str) -> dict[str, str]:
     return {**pages, **overrides}
 
 
+def test_a_keyword_capped_in_two_places_keeps_the_tighter_number(monkeypatch):
+    # The composition caps EMBER at one and the Ember Wardens requisition group caps it at
+    # two. A cap read anywhere on the page is the TEAM's, and UNIQUE(kill_team_id, keyword)
+    # holds a single row, so the tighter number stands -- as `_keyword_caps` already does
+    # for a keyword capped twice within one sentence.
+    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(_pages()))
+
+    team = scrape()["kill_teams"][0]
+
+    assert [(cap["keyword"], cap["max_operatives"]) for cap in team["keyword_caps"]] == [("EMBER", 1)]
+    # and a group's footnote is the team's too, after the composition's own notes
+    assert team["composition_notes"][-1] == "These operatives count as half a selection each."
+
+
 def test_an_ambiguous_page_is_skipped_and_named_while_the_rest_are_kept(monkeypatch):
     # Hunter Clade and Inquisitorial Agent really do need a human decision (K6), and
     # holding the other 46 teams hostage to them would be the wrong trade -- so they are
@@ -1533,6 +1547,38 @@ def test_a_requisition_group_whose_ally_is_a_kill_team_resolves_nothing_here():
     choir = groups["Ashen Choir"]
     assert choir.lists[0].options == []
     assert (choir.lists[0].budget, choir.lists[0].requisition_source) == (5, "Ashen Choir")
+
+
+def test_a_requisition_groups_restriction_caps_the_operatives_it_offers():
+    # `parse_requisition` read the printed lines and nothing else, so five of Inquisitorial
+    # Agent's six groups lost their sentence and three lost their notes -- and its Tempestus
+    # Scion Gunner, Medic and Vox-Operator were stored with no repeat limit, where the page
+    # prints one. A group prints the sentence in the same place a composition does.
+    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
+
+    wardens = groups["Ember Wardens"]
+    options = {option.operative: option for option in wardens.lists[0].options}
+
+    assert wardens.lists[0].restriction_text is not None
+    assert options["Hollow Ember Wisp"].max_selections == 1
+    assert options["Hollow Ash Prophet"].max_selections is None  # the sentence exempts PROPHET
+    assert wardens.keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=2)]
+
+
+def test_a_known_teams_group_keeps_its_sentence_without_minting_a_cap():
+    # Such a group caps a keyword no datacard on THIS page carries, because the ally's
+    # operatives live on its own page: Exaction Squad cap SUBDUCTOR. Minting it would trip
+    # the "cap matches no operative" check and lose the whole team, and the row would be
+    # inert even if it did not -- so the sentence is stored and nothing is derived from it
+    # (decision #28). The footnote is still the team's, wherever on the page it is printed.
+    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
+
+    choir = groups["Ashen Choir"]
+
+    assert choir.lists[0].restriction_text is not None
+    assert "CHOIRMASTER" in choir.lists[0].restriction_text
+    assert choir.keyword_caps == []
+    assert choir.notes == ["These operatives count as half a selection each."]
 
 
 def test_a_page_with_no_requisition_section_has_no_groups():

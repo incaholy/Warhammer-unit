@@ -1316,7 +1316,81 @@ class RequisitionGroup:
 
     source: str
     lists: list[SelectionList] = field(default_factory=list)
+    # A group prints its own restriction sentence, and the caps and notes read out of it are
+    # the TEAM's, wherever on the page they appear -- so they travel back up with the lists.
+    keyword_caps: list[KeywordCap] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     unresolved: list[str] = field(default_factory=list)
+
+
+def _apply_restriction(
+    top: Tag,
+    lists: list[SelectionList],
+    keywords_of: dict[str, set[str]],
+    *,
+    mint_caps: bool = True,
+) -> tuple[list[SelectionList], list[KeywordCap], list[str]]:
+    """The loose text printed under a composition tree, read and applied to its lists.
+
+    Shared by the main composition and by every requisition group, because a group prints
+    the same three things in the same place. `parse_requisition` used to read none of it:
+    five of Inquisitorial Agent's six groups lost their sentence, three lost their notes,
+    and the four operatives its Tempestus Scion group offers were stored with no repeat
+    limit, where the page states one.
+
+    `mint_caps` is False for a group whose ally is a kill team of its own. Such a cap names
+    a keyword no datacard on THIS page can carry -- Exaction Squad cap SUBDUCTOR, and their
+    operatives live on their own page -- so minting it would trip the check below and lose
+    the whole team, and an unmatched cap would be inert even if it did not. The sentence is
+    still stored, which is all decision #28 asks: the catalog describes, it does not enforce.
+    """
+    sentence, notes = _composition_text(top)
+    caps: list[KeywordCap] = []
+    if sentence and lists:
+        # Printed after the whole composition and referring to "this list", so it
+        # belongs to the last one. Two clauses are read out of it: how often an
+        # operative may repeat, and caps on whole sets of operatives.
+        last = lists[-1]
+        exempt = _repeat_exceptions(sentence)
+        repeats_capped = bool(_ONCE_EACH.search(sentence))
+        options = [
+            SelectionOption(
+                operative=option.operative,
+                cost=option.cost,
+                models=option.models,
+                # "each operative on this list once" -- except the keywords the
+                # sentence exempts, which stay uncapped beyond the budget. The
+                # exemption is a KEYWORD, matched against what the datacard carries by
+                # WORDS (see `_carries`): Raveners exempt WARRIOR and "Ravener Warrior"
+                # holds it, while Battleclade exempts the two-word COMBAT SERVITOR.
+                max_selections=1
+                if repeats_capped
+                and not any(_carries(phrase, keywords_of.get(option.operative, set())) for phrase in exempt)
+                else option.max_selections,
+                loadout_options=option.loadout_options,
+            )
+            for option in last.options
+        ]
+        # Over the restriction sentence AND its notes: Brood Brother state their
+        # BROODCOVEN cap in a footnote, not in the sentence, and a cap is team-wide
+        # wherever it is printed (see `Composition`).
+        caps = _keyword_caps(" ".join([sentence, *notes])) if mint_caps else []
+        # A cap nobody can trigger means the phrase was misread, and a cap that
+        # silently never applies is worse than none: `validate` would approve rosters
+        # it should refuse. Checked against EVERY operative on the page, not just this
+        # list's -- the sentence says "your kill team" (Brood Brother caps BROODCOVEN,
+        # which its Magus and Patriarch carry from a different list).
+        for cap in caps:
+            if not any(cap.matches(carried) for carried in keywords_of.values()):
+                raise CompositionNotParsed(
+                    f"the cap on {cap.keyword!r} matches no operative's keywords on this page"
+                )
+        # `replace` rather than a fresh SelectionList: this rebuild exists only to apply
+        # the repeat caps, and listing the fields by hand silently dropped `shape` the
+        # moment it was added -- Gellerpox has one list, so its only list is the last one,
+        # and it came back mislabelled as `budgeted` while its budget counted models.
+        lists[-1] = replace(last, options=options, restriction_text=sentence)
+    return lists, caps, notes
 
 
 def parse_requisition(html: str, known_teams: Iterable[str] = ()) -> list[RequisitionGroup]:
@@ -1379,27 +1453,27 @@ def parse_requisition(html: str, known_teams: Iterable[str] = ()) -> list[Requis
                 continue
             label = _own_text(line)
             budget, shape = _budget_and_shape(label, 0)
-            groups.append(
-                RequisitionGroup(
-                    source=title,
-                    lists=[
-                        SelectionList(
-                            label=label,
-                            budget=budget,
-                            position=0,
-                            shape=shape,
-                            requisition_source=title,
-                        )
-                    ],
+            lists = [
+                SelectionList(
+                    label=label,
+                    budget=budget,
+                    position=0,
+                    shape=shape,
+                    requisition_source=title,
                 )
-            )
+            ]
+            lists, _, notes = _apply_restriction(top, lists, keywords_of, mint_caps=False)
+            groups.append(RequisitionGroup(source=title, lists=lists, notes=notes))
             continue
 
         lists, unresolved = _lists_from(top, datacards, keywords_of)
+        lists, caps, notes = _apply_restriction(top, lists, keywords_of)
         groups.append(
             RequisitionGroup(
                 source=title,
                 lists=[replace(lst, requisition_source=title) for lst in lists],
+                keyword_caps=caps,
+                notes=notes,
                 unresolved=unresolved,
             )
         )
@@ -1481,53 +1555,7 @@ def parse_composition(html: str) -> Composition:
     keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
 
     lists, unresolved = _lists_from(top, datacards, keywords_of)
-
-    sentence, notes = _composition_text(top)
-    caps: list[KeywordCap] = []
-    if sentence:
-        # Printed after the whole composition and referring to "this list", so it
-        # belongs to the last one. Two clauses are read out of it: how often an
-        # operative may repeat, and caps on whole sets of operatives.
-        last = lists[-1]
-        exempt = _repeat_exceptions(sentence)
-        repeats_capped = bool(_ONCE_EACH.search(sentence))
-        options = [
-            SelectionOption(
-                operative=option.operative,
-                cost=option.cost,
-                models=option.models,
-                # "each operative on this list once" -- except the keywords the
-                # sentence exempts, which stay uncapped beyond the budget. The
-                # exemption is a KEYWORD, matched against what the datacard carries by
-                # WORDS (see `_carries`): Raveners exempt WARRIOR and "Ravener Warrior"
-                # holds it, while Battleclade exempts the two-word COMBAT SERVITOR.
-                max_selections=1
-                if repeats_capped
-                and not any(_carries(phrase, keywords_of.get(option.operative, set())) for phrase in exempt)
-                else option.max_selections,
-                loadout_options=option.loadout_options,
-            )
-            for option in last.options
-        ]
-        # Over the restriction sentence AND its notes: Brood Brother state their
-        # BROODCOVEN cap in a footnote, not in the sentence, and a cap is team-wide
-        # wherever it is printed (see `Composition`).
-        caps = _keyword_caps(" ".join([sentence, *notes]))
-        # A cap nobody can trigger means the phrase was misread, and a cap that
-        # silently never applies is worse than none: `validate` would approve rosters
-        # it should refuse. Checked against EVERY operative on the page, not just this
-        # list's -- the sentence says "your kill team" (Brood Brother caps BROODCOVEN,
-        # which its Magus and Patriarch carry from a different list).
-        for cap in caps:
-            if not any(cap.matches(carried) for carried in keywords_of.values()):
-                raise CompositionNotParsed(
-                    f"the cap on {cap.keyword!r} matches no operative's keywords on this page"
-                )
-        # `replace` rather than a fresh SelectionList: this rebuild exists only to apply
-        # the repeat caps, and listing the fields by hand silently dropped `shape` the
-        # moment it was added -- Gellerpox has one list, so its only list is the last one,
-        # and it came back mislabelled as `budgeted` while its budget counted models.
-        lists[-1] = replace(last, options=options, restriction_text=sentence)
+    lists, caps, notes = _apply_restriction(top, lists, keywords_of)
     return Composition(lists=lists, keyword_caps=caps, notes=notes, unresolved=unresolved)
 
 
@@ -1618,10 +1646,18 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
     # says (decision #33).
     lists = list(composition.lists)
     unresolved = list(composition.unresolved)
+    notes = list(composition.notes)
+    caps = {cap.keyword: cap.max_operatives for cap in composition.keyword_caps}
     for group in parse_requisition(html, known_teams):
         for listing in group.lists:
             lists.append(replace(listing, position=len(lists)))
         unresolved += group.unresolved
+        notes += group.notes
+        for cap in group.keyword_caps:
+            # The same keyword capped in two places keeps the TIGHTER number, as
+            # `_keyword_caps` does within one sentence -- UNIQUE(kill_team_id, keyword)
+            # holds one row, and under decision #28 a cap is a prompt, not a refusal.
+            caps[cap.keyword] = min(cap.max_operatives, caps.get(cap.keyword, cap.max_operatives))
     return {
         "name": entry.name,
         "faction": entry.faction,
@@ -1633,8 +1669,10 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
             for operative in parse_operatives(html)
         ],
         "selection_lists": [asdict(lst) for lst in lists],
-        "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
-        "composition_notes": composition.notes,
+        "keyword_caps": [
+            asdict(KeywordCap(keyword=keyword, max_operatives=limit)) for keyword, limit in caps.items()
+        ],
+        "composition_notes": notes,
         "unresolved_entries": unresolved,
     }
 
