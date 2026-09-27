@@ -1519,3 +1519,44 @@ def test_an_entry_with_no_link_still_resolves_by_text():
     html = _anchored_html("<li>SENTINEL</li>", ["Alpha Sentinel", "Alpha Warden"])
 
     assert [o.operative for o in parse_composition(html).lists[0].options] == ["Alpha Sentinel"]
+
+
+def test_a_claimed_candidate_is_eliminated_leaving_one_answer():
+    # A list does not offer the same operative twice under two names (decision #37). Hunter
+    # Clade print "WARRIOR INFILTRATOR", which the page LINKS to the Infiltrator Warrior, and
+    # then "WARRIOR SICARIAN", which matches both Sicarian Warriors — a page inconsistency,
+    # it should read "WARRIOR RUSTSTALKER". With the Infiltrator claimed, only the Ruststalker
+    # is left, which is how a human reads it and what the entry's own loadouts confirm.
+    composition = _composition_with(
+        [
+            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ranger", ["CLADE", "RANGER"]),
+        ],
+        ["WARRIOR INFILTRATOR", "WARRIOR", "RANGER"],
+        "",
+    )
+
+    assert [option.operative for option in composition.lists[0].options] == [
+        "Alpha Infiltrator Warrior",
+        "Alpha Ruststalker Warrior",  # in its PRINTED position, not appended last
+        "Alpha Ranger",
+    ]
+    assert composition.unresolved == []
+
+
+def test_elimination_does_not_guess_when_more_than_one_candidate_is_left():
+    # Two ambiguous entries and two candidates: nothing is claimed, so nothing is decided.
+    # Guessing here is what the whole ladder exists to avoid.
+    composition = _composition_with(
+        [
+            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
+            ("Alpha Ranger", ["CLADE", "RANGER"]),
+        ],
+        ["WARRIOR", "WARRIOR", "RANGER"],
+        "",
+    )
+
+    assert [option.operative for option in composition.lists[0].options] == ["Alpha Ranger"]
+    assert len(composition.unresolved) == 2

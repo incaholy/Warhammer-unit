@@ -29,6 +29,7 @@ where 40k has Aeldari as a subfaction *under* Xenos.
 """
 
 import argparse
+import contextlib
 import json
 import re
 import sys
@@ -489,7 +490,15 @@ def _words(name: str) -> list[str]:
 
 
 class OperativeNotResolved(ValueError):
-    """A composition entry could not be tied to exactly one datacard."""
+    """A composition entry could not be tied to exactly one datacard.
+
+    `candidates` holds the datacards it matched equally, so a caller can narrow them with
+    what it knows -- see the elimination pass in `_lists_from` (decision #37).
+    """
+
+    def __init__(self, message: str, candidates: Iterable[str] = ()) -> None:
+        super().__init__(message)
+        self.candidates: list[str] = list(candidates)
 
 
 def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) -> str | None:
@@ -565,7 +574,8 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
             # Clade's "WARRIOR SICARIAN *" vanished that way, and its footnote is what
             # tells a human which Warrior is meant.
             raise OperativeNotResolved(
-                f"composition entry {entry!r} matches several datacards equally: {hits}"
+                f"composition entry {entry!r} matches several datacards equally: {hits}",
+                candidates=hits,
             )
     if strict:
         raise OperativeNotResolved(
@@ -1134,24 +1144,48 @@ def _lists_from(
             for entry in items
             if not any(entry is other for other in line_nodes) and owner_of(entry) is line
         ]
-        options: dict[str, SelectionOption] = {}
+        # Read every entry first, keeping the ambiguous ones aside with their candidates, so
+        # the elimination below can see what the rest of the LIST already claimed -- and so
+        # an eliminated entry keeps its printed position rather than being appended last.
+        read: list[tuple[Tag, SelectionOption | None, OperativeNotResolved | None]] = []
         for entry in own_entries:
             try:
-                option = _option_from(entry, datacards)
+                read.append((entry, _option_from(entry, datacards), None))
             except OperativeNotResolved as exc:
-                # An entry naming several datacards equally needs a human (Hunter Clade's
-                # "WARRIOR SICARIAN *", whose footnote says which Warrior is meant). It used
-                # to fail the WHOLE team, which cost 14 datacards, 8 ploys, 4 equipment and a
-                # rule that all parse -- so the entry is dropped and REPORTED instead.
-                #
-                # Not a return to the old silence: dropping an entry quietly is what lost a
-                # real one before. `unresolved` travels in the payload and both tools print
-                # it, and the operative it would have offered then shows up in the "no list
-                # offers this datacard" warning as well.
-                unresolved.append(f"{_own_text(entry)[:60]} — {exc}")
-                continue
+                read.append((entry, None, exc))
+
+        claimed = {option.operative for _, option, _ in read if option is not None}
+        settled: list[SelectionOption] = []
+        for entry, option, failure in read:
+            if failure is not None:
+                # A list does not offer the same operative twice under two names, so a
+                # candidate another entry already claimed is not this one (decision #37).
+                # Hunter Clade print "WARRIOR INFILTRATOR" -- which the page LINKS to the
+                # Infiltrator Warrior (#35) -- and then "WARRIOR SICARIAN", matching both
+                # Sicarian Warriors; with the Infiltrator claimed, only the Ruststalker is
+                # left, which is how a human reads it and what the entry's own Ruststalker
+                # loadouts confirm.
+                remaining = [card for card in failure.candidates if card not in claimed]
+                # `== 1` is not the only guard: handing several candidates back to the same
+                # reader makes it raise ambiguity again, so a guess is refused either way.
+                # Stated because a mutation that drops this check survives the suite.
+                if len(remaining) == 1:
+                    # The same reader, given the one candidate: no second code path, and if
+                    # even that does not resolve, the entry stays unresolved.
+                    with contextlib.suppress(OperativeNotResolved):
+                        option = _option_from(entry, remaining)
+                if option is None:
+                    # Dropped, and REPORTED -- not the old silence, which lost a real entry.
+                    # `unresolved` travels in the payload and both tools print it.
+                    unresolved.append(f"{_own_text(entry)[:60]} — {failure}")
+                    continue
+                claimed.add(option.operative)
             if option is None:
                 continue
+            settled.append(option)
+
+        options: dict[str, SelectionOption] = {}
+        for option in settled:
             existing = options.get(option.operative)
             if existing is None:
                 options[option.operative] = option
