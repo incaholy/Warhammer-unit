@@ -1191,6 +1191,76 @@ def test_a_cap_stated_in_a_note_is_still_read():
     assert len(composition.notes) == 1
 
 
+_TWO_CARDS = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Gunner</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">GUNNER</span></td></tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Diktat</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">DIKTAT</span></td></tr></table></div>
+"""
+
+
+def test_a_composition_wrapped_in_a_column_still_finds_its_restriction():
+    # Hunter Clade wrap the composition list in a `div.Columns2` of its own, so the list's
+    # parent holds no text and the sentence sits one level up. Reading only the parent made
+    # that team print "no restriction": it lost its repeat clause, three keyword caps and a
+    # footnote, and no warning could say so, because every check runs on this sentence.
+    html = f"""
+    {_TWO_CARDS}
+    <div class="BreakInsideAvoid">
+      <h2>Operatives</h2>
+      <div class="Columns2">
+        <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
+          <ul class="redCircle2"><li>GUNNER</li><li>DIKTAT</li></ul>
+        </li></ul>
+      </div>
+      Other than GUNNER operatives, your kill team can only include each operative on this
+      list once, and can only include up to one DIKTAT operative.
+    </div>
+    """
+    composition = parse_composition(html)
+    options = {option.operative: option for option in composition.lists[-1].options}
+
+    assert composition.lists[-1].restriction_text is not None
+    assert composition.keyword_caps == [KeywordCap(keyword="DIKTAT", max_operatives=1)]
+    assert options["Alpha Diktat"].max_selections == 1
+    assert options["Alpha Gunner"].max_selections is None  # the sentence exempts it
+
+
+def test_a_neighbouring_columns_prose_is_not_read_as_the_restriction():
+    # The climb above is allowed ONLY when the list is its wrapper's sole child. Walking up
+    # merely because the parent held no text of its own would read the column BESIDE the
+    # composition: Exodite Dragon Masters print 284 characters of another column's actions
+    # there, and Elucidian Starstrider the whole page body. Both print no restriction at all.
+    html = f"""
+    {_TWO_CARDS}
+    <div class="Columns2">
+      <div class="BreakInsideAvoid">
+        <h2>Operatives</h2>
+        <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
+          <ul class="redCircle2"><li>GUNNER</li><li>DIKTAT</li></ul>
+        </li></ul>
+        <h3>Remaining Actions</h3>
+        <ul class="redCircle2"><li>Not a composition line.</li></ul>
+      </div>
+      <div class="BreakInsideAvoid">
+        Other than GUNNER operatives, your kill team can only include each operative on
+        this list once, and can only include up to one DIKTAT operative.
+      </div>
+    </div>
+    """
+    composition = parse_composition(html)
+
+    assert composition.lists[-1].restriction_text is None
+    assert composition.keyword_caps == []
+    assert all(option.max_selections is None for option in composition.lists[-1].options)
+
+
 def test_a_space_left_before_punctuation_is_closed_up():
     # The pages style part of a sentence, and joining inline elements leaves a space before
     # whatever follows: "Other than GUNNER , SUBDUCTOR and …" where each keyword is a span.

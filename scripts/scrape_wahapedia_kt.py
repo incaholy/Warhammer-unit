@@ -875,6 +875,43 @@ class SelectionList:
     restriction_text: str | None = None
 
 
+def _without_structure(node: Tag) -> Tag:
+    """A copy of `node` holding only its loose text: the lists and headings removed."""
+    clone = copy(node)
+    for el in clone.find_all(["ul", "h1", "h2", "h3"]):
+        el.extract()
+    return clone
+
+
+def _text_wrapper(top: Tag) -> Tag | None:
+    """The element whose loose text belongs to the composition list `top`.
+
+    Normally `top.parent`: 47 of the 48 pages put the composition list inside the
+    `div.BreakInsideAvoid` that also prints the restriction sentence after it. Hunter
+    Clade wraps the list in a `div.Columns2` of its own first, so the parent holds no text
+    and the sentence sits one level up -- where nothing looked, and the team was read as
+    printing no restriction at all. It cost that team its repeat clause, three keyword
+    caps (DIKTAT, SURVEYOR, SICARIAN), four capped options and a footnote, and no warning
+    could report it because every check runs on the sentence this function returns.
+
+    The climb is allowed only when `top` is the wrapper's SOLE element child, which is
+    what distinguishes a container from a column of content. Climbing merely because the
+    parent held no text of its own would read a NEIGHBOUR's prose as this team's
+    restriction: Exodite Dragon Masters' grandparent prints 284 characters of another
+    column's actions, and Elucidian Starstrider's is the whole 36,000-character page body.
+    Identity, not equality -- two empty `div`s compare equal in BeautifulSoup.
+    """
+    wrapper = top.parent
+    if wrapper is None:
+        return None
+    if _without_structure(wrapper).get_text(" ", strip=True):
+        return wrapper
+    children = [child for child in wrapper.children if getattr(child, "name", None)]
+    if len(children) == 1 and children[0] is top and wrapper.parent is not None:
+        return wrapper.parent
+    return wrapper
+
+
 def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     """The loose text printed around the composition, as (restriction sentence, notes).
 
@@ -894,12 +931,10 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     Notes belong to the composition rather than to a list (decision #30): that is where
     the page prints them, and it is the only attachment that is never wrong.
     """
-    wrapper = top.parent
+    wrapper = _text_wrapper(top)
     if wrapper is None:
         return None, []
-    clone = copy(wrapper)
-    for el in clone.find_all(["ul", "h1", "h2", "h3"]):
-        el.extract()
+    clone = _without_structure(wrapper)
 
     segments: list[list[str]] = [[]]
     for child in clone.children:
