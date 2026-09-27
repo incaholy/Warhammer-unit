@@ -1462,3 +1462,60 @@ def test_a_requisition_group_whose_ally_is_a_kill_team_resolves_nothing_here():
 
 def test_a_page_with_no_requisition_section_has_no_groups():
     assert parse_requisition(TEAM, ["Ashen Choir"]) == []
+
+
+def _anchored_html(entry_html: str, cards: list[str]) -> str:
+    """A one-list composition whose datacards carry the anchors the site links to."""
+    frames = "".join(
+        f"""
+        <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+          <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3">
+            <div id="{card.replace(" ", "-")}">{card}</div></h3></div></td>
+          <td class="pCell">APL<div class="dsStat">2</div></td>
+        </tr></table></div>"""
+        for card in cards
+    )
+    return f"""
+    {frames}
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>2 ALPHA operatives selected from the following list:
+      <ul class="redCircle2">{entry_html}</ul>
+    </li></ul>
+    """
+
+
+def test_the_page_link_decides_which_datacard_an_entry_means():
+    # The site links each composition entry to the datacard it means. Measured over all 48
+    # pages: 444 anchors, 444 unique matches, no misses. That is better evidence than any
+    # text rule, and it is tried first (decision #35) -- here the text alone would resolve
+    # `PLAYER` to the shorter card, which is exactly the Void-dancer mis-resolution.
+    html = _anchored_html(
+        '<li><a class="kwbOne" href="/kill-team3/x#Lead-Player">PLAYER</a></li>',
+        ["Lead Player", "Player"],
+    )
+
+    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Lead Player"]
+
+
+def test_a_link_in_a_nested_loadout_list_is_not_the_entrys_own():
+    # Only the entry's OWN element is searched. A nested list is its loadouts, and a link
+    # there would name whatever that line mentions rather than the operative being offered.
+    html = _anchored_html(
+        """<li>SENTINEL
+             <ul class="redEmptyCircle2">
+               <li><a class="kwbOne" href="/kill-team3/x#Alpha-Warden">Warden's blade</a></li>
+             </ul>
+           </li>""",
+        ["Alpha Sentinel", "Alpha Warden"],
+    )
+
+    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Alpha Sentinel"]
+
+
+def test_an_entry_with_no_link_still_resolves_by_text():
+    # 296 of the 740 items carry no link, because the site links a keyword on its FIRST
+    # appearance only — Blooded's three repeated "GUNNER with …" variants are styled and
+    # unlinked. The text ladder is what reads those.
+    html = _anchored_html("<li>SENTINEL</li>", ["Alpha Sentinel", "Alpha Warden"])
+
+    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Alpha Sentinel"]

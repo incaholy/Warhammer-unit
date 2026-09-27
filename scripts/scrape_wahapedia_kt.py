@@ -925,6 +925,37 @@ def _loadouts(entry: Tag) -> list[str]:
     return [v for v in variants if v]
 
 
+def _anchored_operative(entry: Tag, datacards: list[str]) -> str | None:
+    """The datacard an entry LINKS to, if the page linked one.
+
+    A composition entry usually carries `<a class="kwbOne" href="…#Sicarian-Infiltrator-
+    Warrior">`, which is the site's own link to that datacard further down the page. The
+    fragment is the card's name with hyphens for spaces, so matching it by words identifies
+    exactly one card -- measured over all 48 pages: 444 anchors, 444 unique matches, no
+    misses and no ambiguity.
+
+    This is better evidence than any amount of text matching, and it is what would have
+    prevented Void-dancer Troupe's line offering a `Player` where the page requires the
+    `Lead Player`. Only the entry's OWN element is searched, so a nested loadout list cannot
+    contribute a link.
+
+    Absent for 296 of the 740 items, and not because the site hides anything: it links a
+    keyword on its FIRST appearance only, so Blooded's three repeated "GUNNER with …"
+    variants are styled and unlinked, and a phrase naming no single card -- Hunter Clade's
+    "WARRIOR SICARIAN", which should read "WARRIOR RUSTSTALKER" -- is left unlinked because
+    the site's own linker could not tell either.
+    """
+    link = _own_element(entry).select_one("a.kwbOne")
+    if link is None:
+        return None
+    fragment = (link.get("href") or "").split("#")[-1]
+    wanted = sorted(_words(fragment.replace("-", " ").upper()))
+    if not wanted:
+        return None
+    hits = [card for card in datacards if sorted(_words(card.upper())) == wanted]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
     """One option, or None when the line does not name an operative.
 
@@ -949,7 +980,12 @@ def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
     # read from the full text below.
     name = re.sub(r"\(.*?\)", " ", name).strip(" :,")
 
-    operative = resolve_operative(name, datacards, strict=False) if name else None
+    # The page states the answer in markup for most entries, and that beats every text rule
+    # below it (decision #35). Tried first, so the seven-rule ladder only runs where the
+    # page left nothing to read.
+    operative = _anchored_operative(entry, datacards)
+    if operative is None:
+        operative = resolve_operative(name, datacards, strict=False) if name else None
     if operative is None:
         return None
 
@@ -1059,7 +1095,16 @@ def _lists_from(
     # CLADE operatives ..." in a div inside the same `ul`, so it is neither a direct
     # child nor a descendant of the first line. Both were silently folded into the
     # budget-1 line above, offering a one-operative team.
-    items: list[Tag] = top.find_all("li")
+    # A `redEmptyCircle2` list is LOADOUTS, never operatives -- measured over all 48 pages:
+    # 149 items, not one of them an operative (decision #36). Skipping them costs nothing
+    # today and closes a hazard the anchor rule opens: a loadout line that happens to link a
+    # datacard ("Warden's blade" linking the Warden) would otherwise be read as an entry
+    # offering that operative. The page's own class says it is not one.
+    items: list[Tag] = [
+        item
+        for item in top.find_all("li")
+        if "redEmptyCircle2" not in (item.parent.get("class") or [] if item.parent else [])
+    ]
 
     def enclosing_items(node: Tag) -> list[Tag]:
         return [item for ancestor in node.parents for item in items if ancestor is item]
