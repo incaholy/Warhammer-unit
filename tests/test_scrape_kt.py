@@ -1708,6 +1708,47 @@ def test_a_line_pointing_at_another_list_is_a_reference_not_a_name():
     assert parse_composition(html).unresolved == []
 
 
+def test_a_restriction_applies_to_the_last_list_that_offers_something():
+    # The sentence is printed under the whole composition, so it belongs to the last list --
+    # but Inquisitorial Agent's composition ENDS on a cross-reference naming no options of
+    # its own (decision #38). The rule landed there, was applied to an empty set, and its
+    # nine Agents were stored with no repeat limit. It goes where its options are, which on
+    # 47 of the 48 teams is the same list. A tree with no options anywhere keeps it on the
+    # last line, which `test_a_known_teams_group_keeps_its_sentence_…` pins.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">MYSTIC</span></td></tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">WARDEN</span></td></tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle">
+      <li>5 ALPHA operatives selected from the following list:
+        <ul class="redCircle2">
+          <li><span class="kwb kwbo">MYSTIC</span></li>
+          <li><span class="kwb kwbo">WARDEN</span></li>
+        </ul>
+      </li>
+      <li>5 ALPHA operatives selected from the list above, or REQUISITIONED operatives</li>
+    </ul>
+    Other than WARDEN operatives, your kill team can only include each operative on this
+    list once.
+    """
+    lists = parse_composition(html).lists
+    options = {option.operative: option for option in lists[0].options}
+
+    # the cross-reference offers nothing, so it carries neither the rule nor its effect
+    assert (lists[1].options, lists[1].restriction_text) == ([], None)
+    assert lists[0].restriction_text is not None
+    assert options["Alpha Mystic Agent"].max_selections == 1
+    assert options["Alpha Warden Agent"].max_selections is None  # the sentence exempts it
+
+
 def test_operatives_a_condition_grants_are_marked_in_battle():
     # Gellerpox print a second block under "If you selected the MUTOID VERMIN faction
     # equipment:", whose line reads "Specified number of …" because the number is in the

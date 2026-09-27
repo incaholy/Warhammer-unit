@@ -1350,7 +1350,18 @@ def _apply_restriction(
         # Printed after the whole composition and referring to "this list", so it
         # belongs to the last one. Two clauses are read out of it: how often an
         # operative may repeat, and caps on whole sets of operatives.
-        last = lists[-1]
+        #
+        # The last list it OFFERS, though, not the last one printed: those differ for
+        # Inquisitorial Agent, whose composition ends on a cross-reference naming no
+        # options of its own (decision #38). The rule landed there and was applied to an
+        # empty set, so its nine Agents were stored with no repeat limit at all. The
+        # sentence goes where the options it governs are, so a reader finds the rule and
+        # the capped options on one row. With no options anywhere in the tree it stays on
+        # the last line -- a known team's requisition group, whose sentence is an ally's
+        # rule this page only describes (decision #34). The same on 47 of the 48 teams,
+        # where the last printed list is also the last that offers anything.
+        target = max((i for i, lst in enumerate(lists) if lst.options), default=len(lists) - 1)
+        last = lists[target]
         exempt = _repeat_exceptions(sentence)
         repeats_capped = bool(_ONCE_EACH.search(sentence))
         options = [
@@ -1389,7 +1400,7 @@ def _apply_restriction(
         # the repeat caps, and listing the fields by hand silently dropped `shape` the
         # moment it was added -- Gellerpox has one list, so its only list is the last one,
         # and it came back mislabelled as `budgeted` while its budget counted models.
-        lists[-1] = replace(last, options=options, restriction_text=sentence)
+        lists[target] = replace(last, options=options, restriction_text=sentence)
     return lists, caps, notes
 
 
