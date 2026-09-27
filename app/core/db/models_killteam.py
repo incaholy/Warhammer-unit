@@ -183,6 +183,8 @@ class KTOperative(TimestampMixin, table=True):
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
         CheckConstraint("position >= 0", name="ck_kt_operative_position"),
+        # Decision #20's vocabulary, same style as a weapon's category and a ploy's kind.
+        CheckConstraint("availability IN ('roster', 'in_battle')", name="ck_kt_operative_availability"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -201,6 +203,11 @@ class KTOperative(TimestampMixin, table=True):
     # different operative than the alphabetically first one, and which operative a team is
     # built around is information.
     position: int = Field(default=0)
+    # Whether a ROSTER may take this operative (decision #20). `in_battle` means it arrives
+    # during a game instead -- Gellerpox Infected's three Mutoid Vermin, which the MUTOID
+    # VERMIN equipment adds "for the battle", so no selection list offers them and none
+    # should. K5's "add an operative" screen is what needs this list.
+    availability: str = Field(default="roster", max_length=16, index=True)
 
     kill_team: KillTeam = Relationship(back_populates="operatives")
     # In the order the card prints them (decision #25), which is the whole point of the
@@ -493,6 +500,13 @@ class KTSelectionList(TimestampMixin, table=True):
     # (Sister of Silence, Tempestus Scion) or when the line is not a requisition at all.
     from_kill_team_id: UUID | None = Field(
         default=None, foreign_key="kt_kill_teams.id", ondelete="SET NULL", index=True
+    )
+    # The list whose options this one offers, when the page says so rather than printing them
+    # again (decision #38): "5 INQUISITORIAL AGENT operatives selected from the list above".
+    # A reference, so the options are stated once -- and the line still carries its own
+    # budget, because the page states one.
+    same_options_as_id: UUID | None = Field(
+        default=None, foreign_key="kt_selection_lists.id", ondelete="SET NULL", index=True
     )
     position: int  # print order
     restriction_text: str | None = Field(default=None)

@@ -33,12 +33,13 @@ killteam.json shape:
           "rules":      [ { "name", "description", "group" }, ... ],
           "ploys":      [ { "name", "kind", "description", "cp_cost"? }, ... ],
           "equipment":  [ { "name", "description" }, ... ],
-          "operatives": [ { "name", "apl", "move", "save", "wounds", "keywords",
+          "operatives": [ { "name", "apl", "move", "save", "wounds", "keywords", "availability",
                             "weapons":   [ { "name", "category", "range", "attacks",
                                              "hit", "normal_damage", "crit_damage",
                                              "rules" }, ... ],
                             "abilities": [ { "name", "description" }, ... ] }, ... ],
           "selection_lists": [ { "label", "budget", "position", "shape", "requisition_source",
+                                 "same_options_as",
                                  "restriction_text",
                                  "options": [ { "operative", "cost", "models",
                                                 "max_selections",
@@ -264,6 +265,7 @@ def _seed_operative(
             "wounds": data["wounds"],
             "keywords": data["keywords"],
             "position": position,
+            "availability": data["availability"],
         },
         kill_team_id=team.id,
         name=data["name"],
@@ -326,9 +328,10 @@ def _comparable(lists) -> list:
                 restriction,
                 shape,
                 source,
+                same_as,
                 tuple(sorted(options, key=lambda option: option[0])),
             )
-            for position, budget, label, restriction, shape, source, options in lists
+            for position, budget, label, restriction, shape, source, same_as, options in lists
         ),
         key=lambda row: row[0],
     )
@@ -392,11 +395,15 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                 listing.get("restriction_text"),
                 listing["shape"],
                 listing["requisition_source"],
+                listing["same_options_as"],
                 options,
             )
         )
 
     existing = session.exec(select(KTSelectionList).where(KTSelectionList.kill_team_id == team.id)).all()
+    # The payload names a referenced list by POSITION and the row holds its id, so the stored
+    # side is translated back before comparing -- otherwise every run would look changed.
+    position_of = {row.id: row.position for row in existing}
     stored = [
         (
             row.position,
@@ -405,6 +412,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
             row.restriction_text,
             row.shape,
             row.requisition_source,
+            position_of.get(row.same_options_as_id),
             [
                 (
                     option.operative.name,
@@ -426,7 +434,7 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
         session.delete(row)
     session.flush()  # the DELETEs must land before an INSERT reuses (kill_team_id, position)
 
-    for position, budget, label, restriction, shape, source, options in wanted:
+    for position, budget, label, restriction, shape, source, _same_as, options in wanted:
         row = KTSelectionList(
             kill_team_id=team.id,
             position=position,
@@ -453,6 +461,19 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
                     position=index,
                 )
             )
+
+    # Positions are unique within a team, so the reference resolves here -- no second pass
+    # needed, unlike a requisition pointing at another TEAM (decision #34).
+    rows = {
+        row.position: row
+        for row in session.exec(select(KTSelectionList).where(KTSelectionList.kill_team_id == team.id)).all()
+    }
+    for position, _budget, _label, _restriction, _shape, _source, same_as, _options in wanted:
+        if same_as is None:
+            continue
+        target = rows.get(same_as)
+        if target is not None and rows[position].same_options_as_id != target.id:
+            rows[position].same_options_as_id = target.id
 
     if existing:
         # Counted per team, not per row: "3 selection lists created" would be a lie about

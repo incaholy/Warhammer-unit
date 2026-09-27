@@ -780,6 +780,9 @@ _KEYWORD_CAP = re.compile(r"up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", r
 # real ones says a kill team "can only include" something, or names an exception with
 # "other than".
 _IS_RESTRICTION = re.compile(r"can only include|other than", re.IGNORECASE)
+# "selected from the list above" -- a line offering another list's options rather than its
+# own. One team prints one, and reading it as a name matched nine datacards.
+_CROSS_REFERENCE = re.compile(r"from the list above|as above", re.IGNORECASE)
 _COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
 _LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
 _IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
@@ -863,6 +866,11 @@ class SelectionList:
     # carry one are ALTERNATIVES to each other -- the page says "REQUISITIONED operatives
     # from one group" -- not further lists to spend on.
     requisition_source: str | None = None
+    # The list whose options this line offers, by POSITION, when the page says so instead of
+    # printing them again (decision #38). Only Inquisitorial Agent does: "5 INQUISITORIAL
+    # AGENT operatives selected from the list above, or REQUISITIONED operatives from one
+    # group".
+    same_options_as: int | None = None
     options: list[SelectionOption] = field(default_factory=list)
     restriction_text: str | None = None
 
@@ -1202,6 +1210,24 @@ def _lists_from(
         # leading number is the BUDGET, not models -- "2 BOMB SQUIG operatives" is two
         # selections of one operative, where a nested "2 PSYCHIC FAMILIAR operatives"
         # is two models for one selection.
+        # A line can point at another list instead of printing its options again. Checked
+        # BEFORE reading the label as an operative name, because it is not one: trying made
+        # "5 INQUISITORIAL AGENT operatives selected from the list above" match nine Agent
+        # datacards and report an ambiguity that was never a naming problem (decision #38).
+        if not options and _CROSS_REFERENCE.search(label):
+            same_options_as = position - 1 if position else None
+            if same_options_as is not None:
+                lists.append(
+                    SelectionList(
+                        label=label,
+                        budget=_budget_and_shape(label, 0)[0],
+                        position=position,
+                        shape=_budget_and_shape(label, 0)[1],
+                        same_options_as=same_options_as,
+                    )
+                )
+                continue
+
         if not options:
             try:
                 inline = _option_from(line, datacards)
@@ -1345,6 +1371,45 @@ def parse_requisition(html: str, known_teams: Iterable[str] = ()) -> list[Requis
     return groups
 
 
+def parse_in_battle_operatives(html: str) -> list[str]:
+    """Datacards a page offers through a CONDITION rather than through its composition.
+
+    Gellerpox Infected print a second `ul.redTriangle` block under "If you selected the
+    MUTOID VERMIN faction equipment:", listing Cursemite, Eyestinger Swarm and Sludge-Grub --
+    and its line reads "SPECIFIED NUMBER of … operatives", because the number is in the
+    equipment text ("add four … for the battle"), not on the line.
+
+    So those three are not rosterable at all: they arrive mid-battle when the equipment is
+    revealed, which is decision #18's `add` operation. Marking them `in_battle` (decision
+    #20) is what says so -- reading the block as a selection list would claim the opposite.
+    It is the only such block across the 48 pages.
+    """
+    soup = _soup(html)
+    head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
+    if head is None:
+        return []
+    blocks = []
+    for el in head.find_all_next():
+        if el.name == "h2" and el is not head:
+            break
+        if el.name == "ul" and "redTriangle" in (el.get("class") or []) and el.find_parent("ul") is None:
+            blocks.append(el)
+    if len(blocks) < 2:
+        return []
+
+    datacards = [operative.name for operative in parse_operatives(html)]
+    names: list[str] = []
+    for block in blocks[1:]:
+        for entry in block.find_all("li"):
+            with contextlib.suppress(OperativeNotResolved):
+                operative = _anchored_operative(entry, datacards) or resolve_operative(
+                    _own_text(entry), datacards, strict=False
+                )
+                if operative is not None and operative not in names:
+                    names.append(operative)
+    return names
+
+
 def parse_composition(html: str) -> Composition:
     """The kill team's selection lists, in printed order.
 
@@ -1463,9 +1528,14 @@ def composition_warnings(team: dict) -> list[str]:
         + [ability["description"] for operative in team["operatives"] for ability in operative["abilities"]]
     )
     prose_words = set(_words(prose.upper()))
+    in_battle = {
+        operative["name"] for operative in team["operatives"] if operative.get("availability") == "in_battle"
+    }
     for card in cards:
         card_words = set(_words(card.upper()))
-        if card in offered or not card_words or card_words <= prose_words:
+        # `in_battle` datacards are not rosterable BY DESIGN (decision #20), so a list not
+        # offering one is correct rather than a gap.
+        if card in offered or card in in_battle or not card_words or card_words <= prose_words:
             continue
         warnings.append(f"no selection list offers {card!r}, and no rule or ability names it")
 
@@ -1507,6 +1577,7 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
     """
     html = fetch(entry.url, refresh=refresh)
     composition = parse_composition(html)
+    in_battle = set(parse_in_battle_operatives(html))
     # A requisition group's lines are further composition lists for THIS team, continuing the
     # print order -- and they are alternatives to one another, which `requisition_source`
     # says (decision #33).
@@ -1522,7 +1593,10 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
         "rules": [asdict(rule) for rule in parse_team_rules(html)],
         "ploys": [asdict(ploy) for ploy in parse_ploys(html)],
         "equipment": [asdict(item) for item in parse_equipment(html)],
-        "operatives": [asdict(operative) for operative in parse_operatives(html)],
+        "operatives": [
+            asdict(operative) | {"availability": "in_battle" if operative.name in in_battle else "roster"}
+            for operative in parse_operatives(html)
+        ],
         "selection_lists": [asdict(lst) for lst in lists],
         "keyword_caps": [asdict(cap) for cap in composition.keyword_caps],
         "composition_notes": composition.notes,

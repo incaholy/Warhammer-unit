@@ -50,6 +50,7 @@ SAMPLE = {
                     "save": 5,
                     "wounds": 19,
                     "keywords": ["HOLLOW", "WARDEN"],
+                    "availability": "roster",
                     "weapons": [
                         {
                             "name": "Brazier",
@@ -87,6 +88,7 @@ SAMPLE = {
                     "save": 4,
                     "wounds": 12,
                     "keywords": ["HOLLOW", "SENTINEL", "EMBER"],
+                    "availability": "roster",
                     "weapons": [],
                     "abilities": [],
                 },
@@ -97,6 +99,7 @@ SAMPLE = {
                     "budget": 1,
                     "shape": "budgeted",
                     "requisition_source": None,
+                    "same_options_as": None,
                     "position": 0,
                     "restriction_text": None,
                     "options": [
@@ -114,6 +117,7 @@ SAMPLE = {
                     "budget": 4,
                     "shape": "budgeted",
                     "requisition_source": None,
+                    "same_options_as": None,
                     "position": 1,
                     "restriction_text": "Other than SENTINEL operatives, once each.",
                     "options": [
@@ -271,6 +275,7 @@ def test_an_option_naming_an_unknown_operative_stops_the_seed(session):
                         "budget": 1,
                         "shape": "single",
                         "requisition_source": None,
+                        "same_options_as": None,
                         "position": 0,
                         "options": [{"operative": "Nobody", "cost": 1, "models": 1}],
                     }
@@ -480,6 +485,7 @@ def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session)
             "save": 4,
             "wounds": 10,
             "keywords": ["HOLLOW", "HERALD"],
+            "availability": "roster",
             "weapons": [],
             "abilities": [],
         }
@@ -493,6 +499,7 @@ def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session)
             "budget": 1,
             "shape": "budgeted",
             "requisition_source": None,
+            "same_options_as": None,
             "position": 0,
             "restriction_text": None,
             "options": [
@@ -866,6 +873,7 @@ def test_a_list_with_no_options_is_stored_as_the_page_printed_it(session):
             "position": 2,
             "shape": "budgeted",
             "requisition_source": None,
+            "same_options_as": None,
             "restriction_text": None,
             "options": [],
         }
@@ -916,6 +924,7 @@ def test_a_requisition_list_references_the_team_it_names(session):
             "position": 2,
             "shape": "budgeted",
             "requisition_source": "Ashen Choir",
+            "same_options_as": None,
             "restriction_text": None,
             "options": [],
         }
@@ -946,6 +955,7 @@ def test_a_requisition_group_with_no_team_of_its_own_keeps_a_null_reference(sess
             "position": 2,
             "shape": "budgeted",
             "requisition_source": "Ember Wardens",
+            "same_options_as": None,
             "restriction_text": None,
             "options": [
                 {
@@ -966,3 +976,56 @@ def test_a_requisition_group_with_no_team_of_its_own_keeps_a_null_reference(sess
     ).one()
     assert requisition.from_kill_team_id is None
     assert [o.operative.name for o in requisition.options] == ["Hollow Sentinel"]
+
+
+def test_a_list_referencing_another_is_linked_within_the_team(session):
+    # Positions are unique within a team, so the reference resolves in the same pass — unlike
+    # a requisition pointing at another TEAM, which needs every team to exist first (#34).
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_lists"].append(
+        {
+            "label": "4 HOLLOW operatives selected from the list above",
+            "budget": 4,
+            "position": 2,
+            "shape": "budgeted",
+            "requisition_source": None,
+            "same_options_as": 1,
+            "restriction_text": None,
+            "options": [],
+        }
+    )
+
+    seed(session, payload)
+
+    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
+    assert lists[2].same_options_as_id == lists[1].id
+    assert lists[2].options == []  # stated once, on the list it points at
+    assert lists[2].budget == 4  # but the page states its own budget
+
+    # and re-seeding is still a no-op: the payload names a position, the row holds an id
+    assert set(seed(session, copy.deepcopy(payload)).values()) == {0}
+
+
+def test_an_in_battle_operative_is_stored_as_such(session):
+    # Gellerpox's three Mutoid Vermin: no list offers them because no roster may take them
+    # (decision #20). The flag is what says so, and what K5's add-an-operative screen needs.
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["operatives"].append(
+        {
+            "name": "Hollow Cursemite",
+            "apl": 1,
+            "move": 4,
+            "save": 6,
+            "wounds": 4,
+            "keywords": ["HOLLOW", "VERMIN"],
+            "availability": "in_battle",
+            "weapons": [],
+            "abilities": [],
+        }
+    )
+
+    seed(session, payload)
+
+    by_name = {o.name: o for o in session.exec(select(KTOperative)).all()}
+    assert by_name["Hollow Cursemite"].availability == "in_battle"
+    assert by_name["Hollow Warden"].availability == "roster"

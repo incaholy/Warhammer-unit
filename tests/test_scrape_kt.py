@@ -21,6 +21,7 @@ from scripts.scrape_wahapedia_kt import (
     main,
     parse_composition,
     parse_equipment,
+    parse_in_battle_operatives,
     parse_nav,
     parse_operatives,
     parse_ploys,
@@ -880,8 +881,12 @@ def _scraped_team(**overrides) -> dict:
         "name": "Hollow Vigil",
         "rules": [{"name": "Ember Tide", "description": "Place one Ember marker."}],
         "operatives": [
-            {"name": "Hollow Warden", "abilities": [{"name": "Vigil", "description": "Does a thing."}]},
-            {"name": "Hollow Sentinel", "abilities": []},
+            {
+                "name": "Hollow Warden",
+                "abilities": [{"name": "Vigil", "description": "Does a thing."}],
+                "availability": "roster",
+            },
+            {"name": "Hollow Sentinel", "abilities": [], "availability": "roster"},
         ],
         "selection_lists": [
             _scraped_list("1 HOLLOW WARDEN operative", 0, 1, [("Hollow Warden", 1, None)]),
@@ -1560,3 +1565,65 @@ def test_elimination_does_not_guess_when_more_than_one_candidate_is_left():
 
     assert [option.operative for option in composition.lists[0].options] == ["Alpha Ranger"]
     assert len(composition.unresolved) == 2
+
+
+def test_a_line_pointing_at_another_list_is_a_reference_not_a_name():
+    # "5 … operatives selected from the list above" names no operative, and reading it as one
+    # matched nine Agent datacards and reported an ambiguity that was never a naming problem.
+    # Checked before resolution, so the line carries a reference and its own budget (#38).
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle">
+      <li>5 ALPHA operatives selected from the following list:
+        <ul class="redCircle2"><li>MYSTIC</li></ul>
+      </li>
+      <li>5 ALPHA operatives selected from the list above, or REQUISITIONED operatives</li>
+    </ul>
+    """
+    lists = parse_composition(html).lists
+
+    assert [lst.same_options_as for lst in lists] == [None, 0]
+    assert lists[1].options == []
+    assert lists[1].budget == 5  # the page states one, so it is kept
+    assert parse_composition(html).unresolved == []
+
+
+def test_operatives_a_condition_grants_are_marked_in_battle():
+    # Gellerpox print a second block under "If you selected the MUTOID VERMIN faction
+    # equipment:", whose line reads "Specified number of …" because the number is in the
+    # equipment text. Those datacards are not rosterable at all — they arrive mid-battle
+    # (decisions #18, #20) — so they are marked rather than offered.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Cursemite</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">1</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
+      <ul class="redCircle2"><li>1 WARDEN</li></ul>
+    </li></ul>
+    If you selected the VERMIN faction equipment:
+    <ul class="redTriangle"><li>Specified number of ALPHA operatives selected from the following list:
+      <ul class="redCircle2"><li>CURSEMITE</li></ul>
+    </li></ul>
+    """
+    assert parse_in_battle_operatives(html) == ["Alpha Cursemite"]
+    # and the composition still reads only the first block
+    assert len(parse_composition(html).lists) == 1
+
+
+def test_an_in_battle_datacard_is_not_reported_as_unofferable():
+    # The warning exists to say "nobody can field this". An `in_battle` operative is not
+    # meant to be fieldable from a roster, so reporting it would be noise.
+    team = _scraped_team()
+    team["operatives"].append({"name": "Alpha Cursemite", "abilities": [], "availability": "in_battle"})
+
+    assert composition_warnings(team) == []

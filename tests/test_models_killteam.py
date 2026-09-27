@@ -836,3 +836,20 @@ def test_a_negative_position_is_refused_on_every_table_that_carries_one(
 
     with pytest.raises(IntegrityError, match=constraint):
         session.commit()
+
+
+def test_an_availability_outside_the_vocabulary_is_refused(session, make_kill_team):
+    team = make_kill_team()
+    session.add(
+        KTOperative(
+            kill_team_id=team.id,
+            name="Schrödinger",
+            apl=2,
+            move=6,
+            save=4,
+            wounds=8,
+            availability="maybe",
+        )
+    )
+    with pytest.raises(IntegrityError, match="ck_kt_operative_availability"):
+        session.commit()
