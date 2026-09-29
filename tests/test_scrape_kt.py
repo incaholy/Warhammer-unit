@@ -1514,6 +1514,53 @@ def test_a_line_the_parser_does_not_recognise_at_all_still_raises():
         parse_composition(html)
 
 
+_TWO_WARRIORS = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Infiltrator Warrior</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">CLADE</span>, <span class="tt kwbu">WARRIOR</span></td></tr></table></div>
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Ruststalker Warrior</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">CLADE</span>, <span class="tt kwbu">WARRIOR</span></td></tr></table></div>
+"""
+
+
+def test_an_unreadable_line_still_raises_after_an_earlier_line_was_ambiguous():
+    # The gate counted ambiguities over the WHOLE tree, so one ambiguous entry anywhere above
+    # silenced it for every line below: the same unreadable line raised or was stored with no
+    # options depending on an unrelated line. The elimination rule (#37) fills `unresolved` by
+    # design, so the check switched itself off exactly when the parser was already struggling.
+    html = f"""
+    {_TWO_WARRIORS}
+    <h2>Operatives</h2>
+    <ul class="redTriangle">
+      <li>2 CLADE operatives selected from the following list:
+        <ul class="redCircle2"><li>WARRIOR</li></ul></li>
+      <li>4 SOMETHING UNREADABLE</li>
+    </ul>
+    """
+    with pytest.raises(CompositionNotParsed, match="no operatives found"):
+        parse_composition(html)
+
+
+def test_a_line_whose_own_entries_were_all_ambiguous_is_still_stored():
+    # The other side of the same gate, and the reason it cannot simply always raise: this is
+    # the shape that lets Inquisitorial Agent into the catalog at all (#28, #37).
+    html = f"""
+    {_TWO_WARRIORS}
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>2 CLADE operatives selected from the following list:
+      <ul class="redCircle2"><li>WARRIOR</li></ul></li></ul>
+    """
+    composition = parse_composition(html)
+
+    assert composition.lists[0].options == []
+    assert len(composition.unresolved) == 1
+
+
 def test_an_unresolved_entry_is_reported_as_a_warning():
     team = _scraped_team(unresolved_entries=["WARRIOR SICARIAN — matches several datacards equally"])
 

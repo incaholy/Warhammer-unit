@@ -1182,6 +1182,9 @@ def _lists_from(
     unresolved: list[str] = []
     for position, line in enumerate(line_nodes):
         label = _own_text(line)
+        # Where this line's ambiguities start, so the gate below can tell "nothing ambiguous
+        # HERE" from "nothing ambiguous on the whole page".
+        unresolved_before = len(unresolved)
         own_entries = [
             entry
             for entry in items
@@ -1285,14 +1288,22 @@ def _lists_from(
 
         budget, shape = _budget_and_shape(label, sum(o.models for o in options.values()))
 
-        if not options and not unresolved:
-            # No options AND nothing ambiguous means the parser did not recognise the line at
-            # all, which is a parser gap and must be loud. A line whose entries were all
+        if not options and len(unresolved) == unresolved_before:
+            # No options AND nothing ambiguous ON THIS LINE means the parser did not recognise
+            # it at all, which is a parser gap and must be loud -- `scrape` turns the raise
+            # into a named skip rather than a failed run. A line whose entries were all
             # ambiguous is different: it is stored with its label and NO options, which reads
             # as "the page says this, and we could not structure it" -- honest under decision
             # #28, and what lets Inquisitorial Agent into the catalog at all. Its line points
             # at another list and at seven other teams' rosters, and an option can only ever
             # offer its OWN team's operative (decision #31), so there is nothing to store.
+            #
+            # Counted per line, because `unresolved` accumulates over the whole tree: testing
+            # it whole meant that after ANY earlier ambiguity an unreadable line was stored
+            # silently instead of raising, and the elimination rule (#37) fills `unresolved`
+            # by design -- so the loudest check the parser has switched itself off precisely
+            # when the parser was already struggling. The sibling gate below is different: it
+            # asks whether the WHOLE composition came out empty, so it reads the whole list.
             raise CompositionNotParsed(f"no operatives found for composition line {label!r}")
         lists.append(
             SelectionList(
