@@ -1212,9 +1212,14 @@ def _lists_from(
                 # left, which is how a human reads it and what the entry's own Ruststalker
                 # loadouts confirm.
                 remaining = [card for card in failure.candidates if card not in claimed]
-                # `== 1` is not the only guard: handing several candidates back to the same
-                # reader makes it raise ambiguity again, so a guess is refused either way.
-                # Stated because a mutation that drops this check survives the suite.
+                # `== 1` is load-bearing, not belt-and-braces -- an earlier comment here
+                # claimed the opposite and was wrong. `candidates` carries EVERY hit at the
+                # failing rule, not only the tied ones, so a narrowed-but-still-plural list
+                # can have a unique fewest-extra-words winner and resolve: with "Alpha
+                # Warrior" claimed, ["Alpha", "Omega", "Big Omega"] Warrior answers "Omega
+                # Warrior", which is a guess. The anchor is worse -- one that matched two
+                # cards against the full list returns None (#35) and exactly one against the
+                # narrowed list, so it would answer where it had just refused.
                 if len(remaining) == 1:
                     # The same reader, given the one candidate: no second code path, and if
                     # even that does not resolve, the entry stays unresolved.

@@ -1730,6 +1730,28 @@ def test_elimination_does_not_guess_when_more_than_one_candidate_is_left():
     assert len(composition.unresolved) == 2
 
 
+def test_elimination_refuses_a_winner_the_tie_break_would_pick():
+    # The sibling test above uses two candidates of equal length, which is the one shape
+    # where `len(remaining) == 1` is redundant -- the tie-break refuses either way. Three
+    # candidates of DIFFERING length is the shape that makes the guard load-bearing:
+    # `candidates` carries every hit at the failing rule, so with "Alpha Warrior" claimed the
+    # remaining two are not tied, and the fewest-extra-words rule would answer "Omega
+    # Warrior". A comment here used to claim a guess was refused either way; it is not.
+    composition = _composition_with(
+        [
+            ("Alpha Warrior", ["CLADE", "ALPHA", "WARRIOR"]),
+            ("Omega Warrior", ["CLADE", "OMEGA", "WARRIOR"]),
+            ("Big Omega Warrior", ["CLADE", "BIG", "OMEGA", "WARRIOR"]),
+        ],
+        ["ALPHA WARRIOR", "WARRIOR"],
+        "",
+    )
+
+    assert [option.operative for option in composition.lists[0].options] == ["Alpha Warrior"]
+    assert len(composition.unresolved) == 1
+    assert "Omega Warrior" not in str(composition.lists[0].options)
+
+
 def test_a_line_pointing_at_another_list_is_a_reference_not_a_name():
     # "5 … operatives selected from the list above" names no operative, and reading it as one
     # matched nine Agent datacards and reported an ambiguity that was never a naming problem.
