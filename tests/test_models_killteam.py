@@ -573,7 +573,9 @@ def test_a_keyword_cap_is_a_rule_about_a_SET_of_operatives(
 
 
 def test_a_team_may_carry_several_keyword_caps(session, make_kt_selection_restriction, make_kill_team):
-    # Inquisitorial Agent states caps for GUN SERVITOR, SUBDUCTOR and GUNNER.
+    # Hunter Clade states three: DIKTAT, SURVEYOR and SICARIAN. (Inquisitorial Agent's page
+    # states three too, but one of them belongs to a requisition group whose ally is a kill
+    # team, so it is deliberately never minted -- decision #40.)
     team = make_kill_team()
     # SUBDUCTOR first, so insertion order differs from the keyword order being asserted.
     make_kt_selection_restriction(kill_team=team, keyword="SUBDUCTOR", max_operatives=2)
@@ -666,7 +668,7 @@ def test_a_teams_selection_lists_come_back_in_print_order(session, make_kill_tea
 
 def test_a_teams_ploys_come_back_in_the_pages_order(session, make_kill_team, make_kt_ploy):
     # The pages print Strategy Ploys before Firefight Ploys, and ordering by `kind` reversed
-    # that for all 46 teams -- "firefight" sorts before "strategy". The page's order is the
+    # that for all 48 teams -- "firefight" sorts before "strategy". The page's order is the
     # only one that gets both the grouping and the order within a group right.
     team = make_kill_team(name="Hollow Vigil")
     make_kt_ploy(team, name="ZEAL", kind="firefight", position=3)
@@ -684,7 +686,7 @@ def test_a_teams_ploys_come_back_in_the_pages_order(session, make_kill_team, mak
 
 
 def test_a_teams_operatives_keep_the_leader_first(session, make_kill_team, make_kt_operative):
-    # A page prints the leader first, and in 44 of the 46 teams that is not the
+    # A page prints the leader first, and in 46 of the 48 teams that is not the
     # alphabetically first operative -- Raveners print Prime before Felltalon.
     team = make_kill_team(name="Hollow Vigil")
     make_kt_operative(kill_team=team, name="Warden", position=2)

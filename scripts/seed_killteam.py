@@ -45,15 +45,17 @@ killteam.json shape:
                                                 "max_selections",
                                                 "loadout_options" }, ... ] }, ... ],
           "keyword_caps":    [ { "keyword", "max_operatives" }, ... ],
-          "composition_notes": [ "…", ... ] }, ...
+          "composition_notes":  [ "…", ... ],
+          "unresolved_entries": [ "…", ... ] }, ...
       ],
       "universal_ploys":     [ { "name", "kind", "description", "cp_cost"? }, ... ],
       "universal_equipment": [ { "name", "description" }, ... ],
-      "skipped":             [ { "team", "reason" }, ... ]
+      "skipped":             [ { "team", "reason" }, ... ],
+      "warnings":            [ { "team", "warning" }, ... ]
     }
 
 Every key above is REQUIRED and read as such, so a scraper-side rename breaks the seed
-instead of loading 422 operatives with empty keywords. `range` and `max_selections` may
+instead of loading 454 operatives with empty keywords. `range` and `max_selections` may
 be null (no printed Range rule, no repeat cap); `cp_cost` is the one optional key, since
 a page that prints no cost means the default.
 
@@ -445,7 +447,9 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
             requisition_source=source,
         )
         session.add(row)
-        session.flush()  # so the options have a list id
+        # So the list row is in the database before its options reference it. NOT for the
+        # id: `KTSelectionList.id` is a client-side `uuid4` default and exists already.
+        session.flush()
         for name, cost, models, max_selections, loadouts, index in options:
             session.add(
                 KTSelectionOption(

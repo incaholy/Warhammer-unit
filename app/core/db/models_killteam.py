@@ -71,9 +71,9 @@ class KillTeam(TimestampMixin, table=True):
 
     # The footnotes and callouts printed around the composition, in printed order
     # (decision #30). Display only, like a list's `restriction_text`: the page prints them
-    # under the whole composition, and 13 teams used to have one pinned to whichever list
-    # happened to precede it -- 3 of them the wrong list, and 7 with no marker left to say
-    # which entries the note was about.
+    # under the whole composition, and they used to be pinned to whichever list happened to
+    # precede them -- some to the wrong list, and some with no marker left to say which
+    # entries the note was about. 29 notes over 20 teams today.
     composition_notes: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
 
     # No `operative_count`: a page states its composition as budgeted LISTS, and with
@@ -199,7 +199,7 @@ class KTOperative(TimestampMixin, table=True):
     wounds: int
 
     keywords: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
-    # Print order (decision #25). A page prints the LEADER first, in 44 of the 46 teams a
+    # Print order (decision #25). A page prints the LEADER first, in 46 of the 48 teams a
     # different operative than the alphabetically first one, and which operative a team is
     # built around is information.
     position: int = Field(default=0)
@@ -207,6 +207,14 @@ class KTOperative(TimestampMixin, table=True):
     # during a game instead -- Gellerpox Infected's three Mutoid Vermin, which the MUTOID
     # VERMIN equipment adds "for the battle", so no selection list offers them and none
     # should. K5's "add an operative" screen is what needs this list.
+    #
+    # It does NOT mean "every operative no list offers". It is set only from a CONDITIONAL
+    # composition block, and Gellerpox print the only one across the 48 pages. Chaos Cult's
+    # Chaos Mutant and Chaos Torment are offered by no list either -- they are gained
+    # mid-game through "Accursed Gifts" and "Mutation" -- and they stay `roster`, because
+    # nothing on the page marks them structurally. So `availability == "roster"` is not a
+    # test for rosterability: "is this operative offered by some selection list" is, and it
+    # is a join, not a column.
     availability: str = Field(default="roster", max_length=16, index=True)
 
     kill_team: KillTeam = Relationship(back_populates="operatives")
@@ -386,10 +394,10 @@ class KTPloy(TimestampMixin, table=True):
     name: str = Field(max_length=128)
     kind: str = Field(max_length=16)  # "strategy" | "firefight"
     # Most pages print no cost, so this is what a ploy costs unless the source says
-    # otherwise -- the core rules print Command Re-roll's, and Blades of Khaine prints
-    # its four firefight ploys' inline. As with `KTWeapon.range`, the seed writes this
-    # value explicitly rather than relying on the default, so a cost the source stops
-    # printing reverts instead of sticking.
+    # otherwise -- the core rules print Command Re-roll's, and Blades of Khaine and
+    # Inquisitorial Agent each print their four firefight ploys' inline (8 of 384).
+    # As with `KTWeapon.range`, the seed writes this value explicitly rather than relying
+    # on the default, so a cost the source stops printing reverts instead of sticking.
     cp_cost: int = Field(default=DEFAULT_PLOY_CP_COST)
     description: str
     # Print order (decision #25). The pages print Strategy Ploys before Firefight Ploys,
@@ -454,10 +462,13 @@ class KTSelectionList(TimestampMixin, table=True):
     "choose one of these"; and an option costing two selections (Brood Brother's Magus)
     spends the budget without another column anywhere else.
 
-    `restriction_text` keeps the sentence printed beside the list -- the one the caps
-    were read from ("Other than WARRIOR operatives, your kill team can only include
-    each operative on this list once"). The structured columns drive validation; the
-    sentence is what lets a human check the parse read it correctly.
+    `restriction_text` keeps the sentence printed beside the list -- usually the one the
+    caps were read from ("Other than WARRIOR operatives, your kill team can only include
+    each operative on this list once"). Usually, because a requisition group whose ally is
+    a kill team of its own has its sentence STORED and no cap minted from it: the keyword
+    names an ally's datacard, which this page does not carry (decision #40). The structured
+    columns drive validation; the sentence is what lets a human check the parse read it
+    correctly, and for those five it is the only record of the rule.
     """
 
     __tablename__ = "kt_selection_lists"
@@ -541,7 +552,8 @@ class KTSelectionOption(TimestampMixin, table=True):
     **display only -- nothing validates it**. Wyrmblade offers "GUNNER with flamer and
     gun butt", "GUNNER with grenade launcher and gun butt" and "GUNNER with webber and
     gun butt": one operative with a weapon choice, so it is ONE option (12 of the 48
-    teams repeat an operative like that) with its printed variants kept here. A list,
+    teams print one like that in a composition list, 25 lines collapsed) with its printed
+    variants kept here. A list,
     not a string, because there is usually more than one.
 
     Which weapons a roster actually took is recorded when the roster is built (K4) and
@@ -613,11 +625,11 @@ class KTSelectionRestriction(TimestampMixin, table=True):
     `max_selections` cannot express it -- GRAVIS is carried by several entries, so
     capping each at one still allows two GRAVIS operatives.
 
-    Not an exception: 13 of the 48 kill teams state a cap like this (Novitiates two
-    PURGATUS, Hunter Clade one DIKTAT, Farstalker Kinband two HOUND, ...), which is
-    what earns it a table rather than a sentence in `restriction_text`. Left
-    unstructured, `validate` would quietly approve illegal rosters for a quarter of
-    the teams.
+    Not an exception: 14 of the 48 kill teams state a cap like this (Novitiates two
+    PURGATUS, Hunter Clade one DIKTAT, Farstalker Kinband two HOUND, ...) -- 20 caps in
+    all, three each for Hunter Clade and Wyrmblade -- which is what earns it a table
+    rather than a sentence in `restriction_text`. Left unstructured, `validate` would
+    quietly approve illegal rosters for 14 of the 48 teams.
 
     Evaluated against `KTOperative.keywords`, which the catalog already stores, so the
     rule needs nothing beyond the keyword and its limit. A team may carry several.

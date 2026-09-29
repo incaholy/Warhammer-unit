@@ -862,9 +862,11 @@ def test_a_changed_note_is_rewritten(session):
 
 
 def test_a_list_with_no_options_is_stored_as_the_page_printed_it(session):
-    # Inquisitorial Agent's cross-referencing line: the page states a budget and a source we
-    # cannot structure, because an option can only offer its OWN team's operative
-    # (decision #31). The label and the budget are still page facts, so they are stored.
+    # A list can offer nothing and still be a page fact. At HEAD that happens two ways, both
+    # on Inquisitorial Agent: its cross-referencing line, whose options live on the list it
+    # points at (#38), and its four requisition groups whose allies are kill teams, whose
+    # operatives live on their own pages and which an option may never offer (#31, #34). The
+    # label and the budget are stored either way.
     payload = copy.deepcopy(SAMPLE)
     payload["kill_teams"][0]["selection_lists"].append(
         {

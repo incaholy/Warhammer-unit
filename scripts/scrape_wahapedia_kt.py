@@ -329,7 +329,7 @@ def _abilities(frame: Tag) -> list[Ability]:
             # on `actionEffect` left ten MARKERLIGHT rows reading just "1AP".
             body = _clean(block.get_text(" ", strip=True)).removeprefix(name).lstrip(" :.").strip()
         # Joined rather than stripped: `.strip(". ")` also took the body's final full stop,
-        # so 168 descriptions read as though they had been cut off.
+        # so 191 of the 193 action descriptions read as though they had been cut off.
         description = f"{cost_text}. {body}" if cost_text and body else (body or cost_text)
         abilities.append(Ability(name=name, description=re.sub(r"\s+", " ", description).strip()))
 
@@ -420,8 +420,8 @@ class Ploy:
 
     `cp_cost` is None unless the page states one, and the seed fills in the default of 1
     -- the same split as a weapon's `range`. Most pages print no cost at all; the core
-    rules print Command Re-roll's inside its name, and Blades of Khaine prints its four
-    firefight ploys' the same way.
+    rules print Command Re-roll's inside its name, and Blades of Khaine and Inquisitorial
+    Agent each print their four firefight ploys' the same way -- 8 of the 384 team ploys.
     """
 
     name: str
@@ -510,15 +510,20 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
     so the two have to be matched -- and the scraper is the only place holding both.
 
     Rules run strongest first, and each needs a UNIQUE winner or falls through, so a
-    loose rule can never steal a match from a strict one. Over all 48 teams (444 entries)
-    the ordering resolves every one with no ambiguity: exact, suffix, prefix,
-    card-contains-entry, entry-contains-card, and finally the last word.
+    loose rule can never steal a match from a strict one. Six rungs, strongest first:
+    exact, suffix, prefix, card-contains-entry, entry-contains-card, and finally the last
+    word. They are the fallback, not the main path -- the page's own link answers 444 of
+    the 470 composition entries that resolve (decision #35), so only 26 reach this ladder,
+    and just three rungs fire on today's pages: suffix 22, exact 3, card-contains-entry 1.
+    Two entries resolve on no rung at all and are handled above this function: Hunter
+    Clade's `WARRIOR SICARIAN` by elimination (#37) and Inquisitorial Agent's own line by
+    the cross-reference guard (#38).
 
     There was a "same words" rule between prefix and card-contains-entry. It is gone: any
     card whose word SET equals the entry's is also matched by card-contains-entry, whose
     fewest-extra-words tie-break prefers that same card, so it could only ever differ if
     two cards shared the entry's word set with different word counts (a repeated word).
-    Removing it changed none of the 420 stored options.
+    Removing it changed none of the 452 stored options.
 
     The tie-break is "fewest extra words", and WHICH SIDE the extras are on decides the
     direction. Where the card is the longer side, the shortest card is meant: `GUNNER`
@@ -776,7 +781,7 @@ _OTHER_THAN = re.compile(r"other than (.+?) operatives,", re.IGNORECASE | re.DOT
 # SUBDUCTOR operatives", and Wyrmblade three clauses in a row. Requiring "include" read
 # only the first of each, so three real caps were never stored.
 _KEYWORD_CAP = re.compile(r"up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
-# What makes a segment a restriction sentence rather than a footnote: every one of the 42
+# What makes a segment a restriction sentence rather than a footnote: every one of the 48
 # real ones says a kill team "can only include" something, or names an exception with
 # "other than".
 _IS_RESTRICTION = re.compile(r"can only include|other than", re.IGNORECASE)
@@ -886,10 +891,10 @@ def _without_structure(node: Tag) -> Tag:
 def _text_wrapper(top: Tag) -> Tag | None:
     """The element whose loose text belongs to the composition list `top`.
 
-    Normally `top.parent`: 47 of the 48 pages put the composition list inside the
-    `div.BreakInsideAvoid` that also prints the restriction sentence after it. Hunter
-    Clade wraps the list in a `div.Columns2` of its own first, so the parent holds no text
-    and the sentence sits one level up -- where nothing looked, and the team was read as
+    Normally `top.parent`: 47 of the 48 pages put the composition list inside a
+    `div.BreakInsideAvoid`, which on 43 of them also prints the restriction sentence after
+    it. Hunter Clade wraps the list in a `div.Columns2` of its own first, so the parent
+    holds no text and the sentence sits one level up -- where nothing looked, and the team was read as
     printing no restriction at all. It cost that team its repeat clause, three keyword
     caps (DIKTAT, SURVEYOR, SICARIAN), four capped options and a footnote, and no warning
     could report it because every check runs on the sentence this function returns.
@@ -898,8 +903,10 @@ def _text_wrapper(top: Tag) -> Tag | None:
     what distinguishes a container from a column of content. Climbing merely because the
     parent held no text of its own would read a NEIGHBOUR's prose as this team's
     restriction: Exodite Dragon Masters' grandparent prints 284 characters of another
-    column's actions, and Elucidian Starstrider's is the whole 36,000-character page body.
-    Identity, not equality -- two empty `div`s compare equal in BeautifulSoup.
+    column's actions, and Elucidian Starstrider's is the whole 21,000-character page body.
+    Blades of Khaine climbs too, harmlessly: its grandparent is empty as well, so it still
+    reads no sentence. Identity, not equality -- two empty `div`s compare equal in
+    BeautifulSoup.
     """
     wrapper = top.parent
     if wrapper is None:
@@ -959,7 +966,7 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     # print a conditional footnote and no restriction at all ("If you selected the MUTOID
     # VERMIN faction equipment:"), which otherwise landed in the restriction slot -- where a
     # reader sees a footnote presented as a constraint on that list, and where the cap and
-    # repeat patterns then scan it. 41 of the 42 real sentences carry one of these phrases.
+    # repeat patterns then scan it. 48 of the 49 leading segments carry one of these phrases.
     if not _IS_RESTRICTION.search(cleaned[0]):
         return None, cleaned
     return cleaned[0], cleaned[1:]
@@ -984,16 +991,19 @@ def _anchored_operative(entry: Tag, datacards: list[str]) -> str | None:
     A composition entry usually carries `<a class="kwbOne" href="…#Sicarian-Infiltrator-
     Warrior">`, which is the site's own link to that datacard further down the page. The
     fragment is the card's name with hyphens for spaces, so matching it by words identifies
-    exactly one card -- measured over all 48 pages: 444 anchors, 444 unique matches, no
-    misses and no ambiguity.
+    exactly one card -- measured over the 48 composition trees: 444 anchors, 444 unique
+    matches, no misses and no ambiguity. The requisition trees add 45 more, and 38 of those
+    match nothing here, because a known team's group links the ALLY's page (decision #34):
+    returning None is right, and the text ladder never resolves them either.
 
     This is better evidence than any amount of text matching, and it is what would have
     prevented Void-dancer Troupe's line offering a `Player` where the page requires the
     `Lead Player`. Only the entry's OWN element is searched, so a nested loadout list cannot
     contribute a link.
 
-    Absent for 296 of the 740 items, and not because the site hides anything: it links a
-    keyword on its FIRST appearance only, so Blooded's three repeated "GUNNER with …"
+    Absent for 147 of the 591 composition items this parser reads (296 of the 740 `li` if
+    the `redEmptyCircle2` loadouts it skips are counted), and not because the site hides
+    anything: it links a keyword on its FIRST appearance only, so Blooded's three repeated "GUNNER with …"
     variants are styled and unlinked, and a phrase naming no single card -- Hunter Clade's
     "WARRIOR SICARIAN", which should read "WARRIOR RUSTSTALKER" -- is left unlinked because
     the site's own linker could not tell either.
@@ -1084,12 +1094,14 @@ class Composition:
 def _keyword_caps(sentence: str) -> list[KeywordCap]:
     """Caps on a SET of operatives, from "can only include up to two GUNNER operatives".
 
-    13 of the 48 teams state one, and several state more than one (Inquisitorial Agent
-    caps GUN SERVITOR, SUBDUCTOR and GUNNER). A number word this parser does not know
-    raises rather than defaulting: a silently wrong cap approves illegal rosters.
+    14 of the 48 teams state one, and several state more than one (Hunter Clade and
+    Wyrmblade hold three each). A number word this parser does not know raises rather than
+    defaulting: a silently wrong cap approves illegal rosters.
 
     Read over the restriction sentence AND its notes, since Brood Brother state theirs in
-    a footnote: 15 caps across the 46 parsing teams.
+    a footnote: 20 caps across the 48 teams. A 21st clause is stated and deliberately not
+    minted -- the SUBDUCTOR cap Inquisitorial Agent's Exaction Squad group prints, whose
+    keyword no datacard on that page carries (see `_apply_restriction`'s `mint_caps`).
     """
     caps: dict[str, int] = {}
     for word, keyword in _KEYWORD_CAP.findall(sentence):
@@ -1109,7 +1121,7 @@ def _keyword_caps(sentence: str) -> list[KeywordCap]:
 
 def _repeat_exceptions(sentence: str) -> set[str]:
     """The keywords exempt from "each operative ... once", from "Other than CREMATOR and
-    WARRIOR operatives, ...". 38 of the 42 restriction sentences carry such a clause."""
+    WARRIOR operatives, ...". 44 of the 48 restriction sentences carry such a clause."""
     match = _OTHER_THAN.search(sentence)
     if match is None:
         return set()
@@ -1148,8 +1160,9 @@ def _lists_from(
     # CLADE operatives ..." in a div inside the same `ul`, so it is neither a direct
     # child nor a descendant of the first line. Both were silently folded into the
     # budget-1 line above, offering a one-operative team.
-    # A `redEmptyCircle2` list is LOADOUTS, never operatives -- measured over all 48 pages:
-    # 149 items, not one of them an operative (decision #36). Skipping them costs nothing
+    # A `redEmptyCircle2` list is LOADOUTS, never operatives -- measured over the 48
+    # composition trees: 149 items, not one of them an operative (157 including the
+    # requisition trees this also reads, decision #36). Skipping them costs nothing
     # today and closes a hazard the anchor rule opens: a loadout line that happens to link a
     # datacard ("Warden's blade" linking the Warden) would otherwise be read as an entry
     # offering that operative. The page's own class says it is not one.
@@ -1309,9 +1322,10 @@ def _lists_from(
             # into a named skip rather than a failed run. A line whose entries were all
             # ambiguous is different: it is stored with its label and NO options, which reads
             # as "the page says this, and we could not structure it" -- honest under decision
-            # #28, and what lets Inquisitorial Agent into the catalog at all. Its line points
-            # at another list and at seven other teams' rosters, and an option can only ever
-            # offer its OWN team's operative (decision #31), so there is nothing to store.
+            # #28. No page needs that tolerance today: Inquisitorial Agent's option-less line
+            # is stored as a cross-reference (#38) before reaching here, and its six
+            # requisition groups -- four of them other kill teams, whose operatives an option
+            # may never offer (#31, #34) -- are read by `parse_requisition`.
             #
             # Counted per line, because `unresolved` accumulates over the whole tree: testing
             # it whole meant that after ANY earlier ambiguity an unreadable line was stored
@@ -1599,11 +1613,14 @@ def parse_composition(html: str) -> Composition:
 def composition_warnings(team: dict) -> list[str]:
     """Things a human should look at in a scraped team. None of them is fatal.
 
-    Both checks exist because a mis-read composition is SILENT: it seeds cleanly, and
-    the result is a roster rule that looks right. They found three real problems in one
-    pass -- Gellerpox's three vermin (a second composition block the parser does not
-    read), Void-dancer's Lead Player (a tie-break that picked the wrong card), and Chaos
-    Cult's two rule-granted operatives, which turned out to be correct.
+    These checks exist because a mis-read composition is SILENT: it seeds cleanly, and the
+    result is a roster rule that looks right. They found three real problems in one pass --
+    Gellerpox's three vermin (then a second composition block nothing read; it is read now,
+    and they carry `availability = in_battle`, decision #20), Void-dancer's Lead Player (a
+    tie-break that picked the wrong card), and Chaos Cult's two rule-granted operatives,
+    which turned out to be correct. Four kinds of warning come out: an unresolved entry
+    passed through from the parser, the two numbered below, and a budget no legal roster
+    can satisfy.
 
     1. A datacard no list offers. That operative cannot be fielded, so either the page
        grants it some other way or the composition was read wrongly. Operatives named by
@@ -1717,14 +1734,15 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
 def scrape(*, refresh: bool = False) -> dict:
     """The whole catalog, with the teams that could not be read named in `skipped`.
 
-    A team whose page is AMBIGUOUS is skipped rather than failing the run: 46 of the 48
-    parse, and holding those 46 hostage to Hunter Clade's and Inquisitorial Agent's
-    ambiguous composition entries would be the wrong trade (both are K6 work).
+    A team whose page is AMBIGUOUS is skipped rather than failing the run, because holding
+    47 teams hostage to one unreadable page would be the wrong trade. All 48 parse today and
+    `skipped` is empty: the mechanism is a guard against a page CHANGING, not a standing
+    exclusion.
 
     Only the two ambiguity errors are caught, deliberately. They mean "this page needs a
     human decision"; anything else -- a missing section, an unreadable stat, an HTTP
     failure -- means the parsers or the site changed, and that must surface as a failed
-    run rather than as 46 quietly thinner teams.
+    run rather than as a catalog of quietly thinner teams.
 
     `skipped` goes INTO the payload so the seed can report it too. A caller that only
     printed it would leave `make seed-kt` announcing success over a catalog it knows is

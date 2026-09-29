@@ -3,15 +3,24 @@
   It carries its own minimal datacards, because a composition entry is resolved against
   them, plus the composition section itself.
 
-  Structure is real: one ul.redTriangle whose items are selection lists, each list's
-  operatives in a nested ul.redCircle2, and each operative's weapon variants in a
-  further nested ul. The restriction sentence is a loose text node after the list.
+  Structure is real: each ul.redTriangle holds selection lists, each list's operatives sit
+  in a nested ul.redCircle2, and each operative's weapon variants in a further nested ul.
+  A restriction sentence is a loose text node after its list. There are THREE such trees --
+  the composition, and one per requisition group -- and three restriction sentences.
 
-  Deliberately included: a line naming its own operative with no entries (shape C), a
-  numbered list (shape A), an operative repeated with two loadouts (must collapse into
-  ONE option), an entry whose leading count is models with "still counts as one
-  selection", an entry costing two selections, an "equipped with" phrasing, and a
-  loadout line that must not be read as an operative.
+  Deliberately included, in the composition: a line naming its own operative with no
+  entries (shape C), a numbered list (shape A), an operative repeated with two loadouts
+  (must collapse into ONE option), an entry whose leading count is models with "still
+  counts as one selection", an entry costing two selections, an "equipped with" phrasing,
+  a loadout line that must not be read as an operative, a `span.ast` marker inside a line
+  and a `<sup>` footnote reference inside a label (neither may reach the stored text), a
+  Corner25 callout that is a note of its own, and a nested list wrapped in a div so it is
+  neither a direct child of the ul nor a descendant of another line.
+
+  And in the "Hollow Requisition" section: one group whose ally is NOT a kill team, so its
+  entries resolve here and its sentence mints a cap; and one whose ally IS a kill team, so
+  nothing here may be resolved against it and its sentence caps a keyword no datacard on
+  this page carries -- which must be stored without minting a cap (decision #40).
 -->
 <html><body><div id="wahMainContent">
 

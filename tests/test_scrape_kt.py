@@ -400,7 +400,9 @@ def test_an_entry_naming_the_datacard_outright_resolves():
 
 
 def test_an_entry_that_drops_the_team_prefix_resolves():
-    # The commonest shape by far: 292 of the 444 real entries.
+    # Still the commonest shape on the text ladder, though the ladder is now the fallback:
+    # the page's own link resolves 444 of the 470 composition entries (#35), and of the 26
+    # that reach these rules, 22 land on this one.
     assert resolve_operative("FELLTALON", RAVENERS) == "Ravener Felltalon"
 
 
@@ -425,7 +427,9 @@ def test_an_entry_resolves_when_the_words_are_in_a_different_order():
 
 def test_an_entry_resolves_on_its_last_word_when_the_prefixes_differ():
     # The composition uses the kill team's name, the datacard the unit's: "EXACTION
-    # SQUAD PROCTOR-EXACTANT" against "Arbites Proctor-Exactant". Ten real entries.
+    # SQUAD PROCTOR-EXACTANT" against "Arbites Proctor-Exactant". No page needs this rung
+    # today -- the anchor answers those entries (#35) -- so it is kept as a net, like the
+    # prefix rule.
     assert (
         resolve_operative(
             "EXACTION SQUAD PROCTOR-EXACTANT", ["Arbites Proctor-Exactant", "Arbites Castigator"]
@@ -513,8 +517,8 @@ def test_digits_inside_a_name_are_not_read_as_a_budget():
 
 
 def test_one_operative_printed_twice_collapses_into_one_option():
-    # Wyrmblade prints three "GUNNER with ..." lines and 12 of the 48 teams repeat an
-    # operative that way. It is one operative with a weapon choice, and
+    # Wyrmblade prints three "GUNNER with ..." lines, and 12 of the 48 teams print one like
+    # that in a composition list (25 lines collapsed in all). It is one operative with a weapon choice, and
     # UNIQUE(selection_list_id, operative_id) would reject two rows for it.
     sentinel = _options(1)["Hollow Sentinel"]
 
@@ -560,8 +564,10 @@ def test_the_restriction_sentence_is_kept_verbatim():
     # read from it next. Kept whole so a human can check that reading.
     restriction = _lists()[-1].restriction_text
 
-    # Attached to the LAST list in print order, which is what "this list" refers to
-    # when the sentence is printed after the whole composition.
+    # Attached to the last list that OFFERS something, which is what "this list" refers to
+    # when the sentence is printed after the whole composition. Here they are the same list;
+    # `test_a_restriction_applies_to_the_last_list_that_offers_something` pins the case where
+    # they differ.
     assert _lists()[-1].position == 3
     assert restriction is not None
     assert "each operative on this list once" in restriction
@@ -619,8 +625,8 @@ def test_a_lenient_resolution_still_raises_on_an_ambiguous_entry():
 
 
 def test_the_restriction_sentence_caps_repeats_at_one():
-    # "your kill team can only include each operative on this list once" -- 39 of the 42
-    # restriction sentences say this, and it is what KTSelectionOption.max_selections
+    # "your kill team can only include each operative on this list once" -- 45 of the 48
+    # stored restriction sentences say this, and it is what KTSelectionOption.max_selections
     # holds.
     options = {option.operative: option for option in _lists()[-1].options}
 
@@ -631,7 +637,7 @@ def test_the_restriction_sentence_caps_repeats_at_one():
 def test_an_exempt_keyword_stays_uncapped():
     # "Other than SENTINEL operatives, ..." -- and the exemption is a KEYWORD matched
     # against what the datacard carries, not an operative name: Raveners exempt WARRIOR
-    # and "Ravener Warrior" holds that keyword. 38 sentences carry such a clause.
+    # and "Ravener Warrior" holds that keyword. 44 of the 48 sentences carry such a clause.
     options = {option.operative: option for option in _lists()[-1].options}
 
     assert options["Hollow Sentinel"].max_selections is None
@@ -689,8 +695,8 @@ def test_a_cap_matching_nobody_on_the_page_raises():
 
 
 def test_only_the_list_the_sentence_belongs_to_has_its_repeats_capped():
-    # The repeat clause says "each operative on this list", so it applies to the list the
-    # sentence follows -- unlike the keyword cap, which is team-wide.
+    # The repeat clause says "each operative on this list", so it applies to one list -- the
+    # last that offers options -- unlike the keyword cap, which is team-wide.
     assert all(option.max_selections is None for option in _lists()[0].options)
 
 
@@ -721,9 +727,10 @@ def test_a_page_with_no_composition_fails_loudly():
 
 
 def test_a_line_whose_operatives_cannot_be_found_fails_loudly():
-    # Inquisitorial Agent prints "5 ... operatives selected from the list above, or
-    # REQUISITIONED operatives from one group" -- a shape this parser does not know, and
-    # guessing its budget would seed a roster rule that looks right.
+    # A line pointing above with nothing above it, and a name matching no datacard: the
+    # parser read neither an operative nor a reference, and guessing its budget would seed a
+    # roster rule that looks right. (Inquisitorial Agent's real line, which DOES point at a
+    # list above, is stored as a reference now -- decision #38.)
     html = """
     <div class="dsOuterFrame"><table><tr class="pHeaderRow">
       <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
@@ -781,10 +788,11 @@ def test_a_keyword_capped_in_two_places_keeps_the_tighter_number(monkeypatch):
 
 
 def test_an_ambiguous_page_is_skipped_and_named_while_the_rest_are_kept(monkeypatch):
-    # Hunter Clade and Inquisitorial Agent really do need a human decision (K6), and
-    # holding the other 46 teams hostage to them would be the wrong trade -- so they are
-    # skipped. The skip goes into the payload, not just onto the terminal, so `make
-    # seed-kt` can say the catalog it is loading is knowingly incomplete.
+    # A page the parsers cannot read is skipped rather than failing the run, because holding
+    # 47 teams hostage to one page would be the wrong trade. No real page needs this today --
+    # all 48 parse and `skipped` is empty -- so this guards against a page CHANGING. The skip
+    # goes into the payload, not just onto the terminal, so `make seed-kt` can say the catalog
+    # it is loading is knowingly incomplete.
     pages = _pages()
     pages["kill-teams/rust-wardens"] = "<html><body>nothing recognisable</body></html>"
     monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(pages))
@@ -805,7 +813,7 @@ def test_an_ambiguous_page_is_skipped_and_named_while_the_rest_are_kept(monkeypa
 
 def test_a_failure_that_is_not_an_ambiguity_fails_the_whole_run(monkeypatch):
     # The other half of the trade. A missing section, an unreadable stat or an HTTP error
-    # means the site or the parsers changed; reporting that as "skipped 46 teams" would
+    # means the site or the parsers changed; reporting that as "skipped 47 teams" would
     # hand the seed a quietly thinner catalog.
     def exploding_fetch(url: str, *, refresh: bool = False, **_: object) -> str:
         if "rust-wardens" in url:
@@ -941,8 +949,10 @@ def test_a_team_whose_composition_offers_every_datacard_is_quiet():
 
 
 def test_a_datacard_no_list_offers_is_flagged():
-    # Gellerpox's three vermin: a second composition block the parser does not read, so
-    # those operatives cannot be fielded at all.
+    # A datacard no list offers cannot be fielded, so either the page grants it some other
+    # way or the composition was misread. Gellerpox's three vermin were the original finding;
+    # they are read now and carry `availability = in_battle` (#20), which the sibling test
+    # below pins as NOT a warning.
     team = _scraped_team()
     team["operatives"].append({"name": "Hollow Cinder Wisp", "abilities": []})
 
@@ -1011,8 +1021,8 @@ def test_a_unique_action_keeps_the_conditions_printed_beside_its_effect():
 
 def test_a_unique_action_keeps_its_final_full_stop():
     # The description was assembled with `f"{cost}. {body}".strip(". ")`, which strips
-    # from BOTH ends -- so 168 descriptions lost their closing full stop and read as
-    # though they had been cut off mid-sentence.
+    # from BOTH ends -- so 191 of the 193 action descriptions lost their closing full stop
+    # and read as though they had been cut off mid-sentence.
     strike = {a.name: a for a in _by_name()["Hollow Sentinel Warden"].abilities}["EMBER STRIKE"]
 
     assert strike.description.startswith("1AP.")
@@ -1278,7 +1288,7 @@ def test_a_neighbouring_columns_prose_is_not_read_as_the_restriction():
 def test_a_space_left_before_punctuation_is_closed_up():
     # The pages style part of a sentence, and joining inline elements leaves a space before
     # whatever follows: "Other than GUNNER , SUBDUCTOR and …" where each keyword is a span.
-    # 550 stored strings carried one.
+    # 941 of the 12,413 stored strings carried one, 1,740 occurrences in all.
     restriction = _composition().lists[-1].restriction_text
 
     assert " ," not in restriction and " ." not in restriction
@@ -1398,7 +1408,7 @@ def test_a_list_no_roster_can_satisfy_is_flagged():
 
 def test_a_list_with_one_uncapped_option_is_not_flagged():
     # The budget can always be spent when something may be taken repeatedly, which is the
-    # normal case: 107 of the 109 real lists have at least one uncapped option.
+    # normal case: 113 of the 116 lists that offer options have at least one uncapped option.
     team = _scraped_team(
         selection_lists=[
             _scraped_list(
@@ -1472,12 +1482,11 @@ def test_an_ambiguous_entry_loses_itself_rather_than_its_team():
 
 
 def test_a_line_whose_own_name_is_ambiguous_keeps_its_label_with_no_options():
-    # Inquisitorial Agent's only unreadable line reads "5 INQUISITORIAL AGENT operatives
-    # selected from the list above, or REQUISITIONED operatives from one group" — a name
-    # matching nine datacards, pointing at another list and at seven other teams' rosters.
-    # An option can only offer its OWN team's operative (decision #31), so there is nothing
-    # to store; the label and the report are the honest answer, and they are what let the
-    # team into the catalog at all.
+    # A line whose own label names several datacards equally. An option can only offer its
+    # OWN team's operative (decision #31), and the parser will not guess which card is meant,
+    # so the label and the report are the honest answer (#28, #32). Inquisitorial Agent's real
+    # line was the original case; it is stored as a cross-reference now (#38), so no page
+    # exercises this today — it is a guard against a page changing.
     html = """
     <div class="dsOuterFrame"><table><tr class="pHeaderRow">
       <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Interrogator Agent</div></h3></div></td>
@@ -1547,8 +1556,9 @@ def test_an_unreadable_line_still_raises_after_an_earlier_line_was_ambiguous():
 
 
 def test_a_line_whose_own_entries_were_all_ambiguous_is_still_stored():
-    # The other side of the same gate, and the reason it cannot simply always raise: this is
-    # the shape that lets Inquisitorial Agent into the catalog at all (#28, #37).
+    # The other side of the same gate, and the reason it cannot simply always raise: a line
+    # the parser DID read, whose entries it could not name, is stored as printed rather than
+    # losing the team (#28, #32, #37).
     html = f"""
     {_TWO_WARRIORS}
     <h2>Operatives</h2>
@@ -1653,8 +1663,9 @@ def _anchored_html(entry_html: str, cards: list[str]) -> str:
 
 
 def test_the_page_link_decides_which_datacard_an_entry_means():
-    # The site links each composition entry to the datacard it means. Measured over all 48
-    # pages: 444 anchors, 444 unique matches, no misses. That is better evidence than any
+    # The site links each composition entry to the datacard it means. Measured over the 48
+    # composition trees: 444 anchors, 444 unique matches, no misses — they resolve 444 of the
+    # 470 entries that produce an option, leaving 26 for the text ladder. That is better evidence than any
     # text rule, and it is tried first (decision #35) -- here the text alone would resolve
     # `PLAYER` to the shorter card, which is exactly the Void-dancer mis-resolution.
     html = _anchored_html(
@@ -1681,7 +1692,8 @@ def test_a_link_in_a_nested_loadout_list_is_not_the_entrys_own():
 
 
 def test_an_entry_with_no_link_still_resolves_by_text():
-    # 296 of the 740 items carry no link, because the site links a keyword on its FIRST
+    # 147 of the 591 composition items the parser reads carry no link (296 of the 740 `li` if
+    # the loadout items it skips are counted), because the site links a keyword on its FIRST
     # appearance only — Blooded's three repeated "GUNNER with …" variants are styled and
     # unlinked. The text ladder is what reads those.
     html = _anchored_html("<li>SENTINEL</li>", ["Alpha Sentinel", "Alpha Warden"])
