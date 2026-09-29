@@ -557,15 +557,16 @@ until `fire-team` merges.
 
 Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
 tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. all 48 of the site's
-teams parse and seed; the three compositions a human still has to settle are named in K6
-and reported by both tools. Tested against
-**synthetic** fixtures, so no scraped content is committed.
+teams parse and seed with **no warnings** — the three compositions that once needed a
+human are settled (decisions #35, #37, #38, and `availability` for Gellerpox). Tested
+against **synthetic** fixtures, so no scraped content is committed.
 
 ## K3. Catalog routes
 
 **Status: Planned.** Read-only routes under `/api/v1/kill-team` (factions, kill
-teams, operatives), public read and admin write like the 40k catalog — players never
-write to the scraped data (KILLTEAM.md decision #21).
+teams, operatives): public read and **no write route at all**, unlike the 40k catalog's
+admin write — an admin edit would be silently undone by the next `make seed-kt`
+(KILLTEAM.md decision #21).
 
 ## K4. Roster
 
@@ -590,9 +591,13 @@ they gate the choice, so they are a game concern rather than a catalog one.
 
 ## K6. Widen to every kill team
 
-**Status: Planned.** All 48 teams now parse and seed (decision #32), so what remains is
-what a human has to decide rather than what the parser cannot read: Hunter Clade's
-`WARRIOR SICARIAN *` entry, which its footnote disambiguates; Inquisitorial Agent's
-cross-referencing line, which still names nine datacards ambiguously — its requisition
-groups themselves are read now (decisions #33, #34); and Gellerpox Infected's
-equipment-conditional block. Each is reported on every scrape and seed.
+**Status: Planned — the three named compositions are now settled; what is left is the
+list below.** All 48 teams parse and seed with zero warnings and zero unresolved
+entries. Hunter Clade's `WARRIOR SICARIAN *` entry resolves by elimination within its
+list (decision #37); Inquisitorial Agent's cross-referencing line carries
+`same_options_as_id` and its requisition groups are read (decisions #33, #34, #38); and
+Gellerpox Infected's equipment-conditional datacards carry `availability = in_battle`
+(decision #20). What remains: Gellerpox's second block as display-only text, the
+`weapon_rules` asterisks and double spellings before the frontend renders them as chips,
+a CHECK forbidding both "options from elsewhere" columns on one list, and the conditional
+clauses `max_selections` and a keyword cap cannot express (decision #28).
