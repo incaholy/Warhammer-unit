@@ -1253,18 +1253,21 @@ def _lists_from(
         # "5 INQUISITORIAL AGENT operatives selected from the list above" match nine Agent
         # datacards and report an ambiguity that was never a naming problem (decision #38).
         if not options and _CROSS_REFERENCE.search(label):
-            same_options_as = position - 1 if position else None
-            if same_options_as is not None:
+            if position:
+                budget, shape = _budget_and_shape(label, 0)
                 lists.append(
                     SelectionList(
                         label=label,
-                        budget=_budget_and_shape(label, 0)[0],
+                        budget=budget,
                         position=position,
-                        shape=_budget_and_shape(label, 0)[1],
-                        same_options_as=same_options_as,
+                        shape=shape,
+                        same_options_as=position - 1,
                     )
                 )
                 continue
+            # At position 0 there is nothing above to point at, so the line cannot be stored
+            # as a reference and falls through -- where the guard below stops it being read
+            # as a name instead.
 
         if not options:
             try:
@@ -1276,7 +1279,14 @@ def _lists_from(
                 # and that name matches nine Agent datacards.
                 unresolved.append(f"{label[:60]} — {exc}")
                 inline = None
-            if inline is not None:
+            # A line that POINTS at another list names no operative, so a name read out of it
+            # is not one -- even when it resolves cleanly. Only position 0 reaches here (the
+            # branch above returns for every other position), and a cross-reference printed
+            # first references nothing, so leaving `options` empty makes the line raise below:
+            # a page shape the parser does not understand, reported as a skip. Reading it as a
+            # name instead invented an option the page never offered, with nothing in
+            # `unresolved` to say so -- the very thing decision #38 exists to prevent.
+            if inline is not None and not _CROSS_REFERENCE.search(label):
                 options = {
                     inline.operative: SelectionOption(
                         operative=inline.operative,

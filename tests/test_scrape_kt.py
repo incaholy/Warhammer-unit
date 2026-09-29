@@ -1796,6 +1796,26 @@ def test_a_restriction_applies_to_the_last_list_that_offers_something():
     assert options["Alpha Warden Agent"].max_selections is None  # the sentence exempts it
 
 
+def test_a_reference_printed_first_is_not_read_as_a_name():
+    # A cross-reference at position 0 points at nothing, so it cannot be stored as a
+    # reference -- and it used to fall through to the inline name resolution, where a label
+    # resolving to a single datacard made the parser invent an option the page never offered,
+    # with nothing in `unresolved` to say so. That is exactly what decision #38 forbids. A
+    # reference printed first is a page shape the parser does not understand, so it is loud:
+    # `scrape` turns the raise into a named skip.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table>
+    <table class="dsKeywords"><tr><td><span class="tt kwbu">ALPHA</span>, <span class="tt kwbu">MYSTIC</span></td></tr></table></div>
+    <h2>Operatives</h2>
+    <ul class="redTriangle"><li>5 ALPHA MYSTIC operatives selected from the list above</li></ul>
+    """
+    with pytest.raises(CompositionNotParsed, match="no operatives found"):
+        parse_composition(html)
+
+
 def test_operatives_a_condition_grants_are_marked_in_battle():
     # Gellerpox print a second block under "If you selected the MUTOID VERMIN faction
     # equipment:", whose line reads "Specified number of …" because the number is in the
