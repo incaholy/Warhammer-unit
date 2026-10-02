@@ -2227,6 +2227,203 @@
           }
         }
       }
+    },
+    "/api/v1/kill-team/factions": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "List Kt Factions",
+        "description": "The Kill Team faction list, alphabetically.\n\nA flat list of its own, one level deep (decision #12): no grand-alliance level\nabove it and no link to the 40k faction tables. A faction is how a team is FOUND.",
+        "operationId": "list_kt_factions_api_v1_kill_team_factions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTFaction_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/teams": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "List Kill Teams",
+        "description": "Kill teams, alphabetically, optionally narrowed to one faction.\n\nAlphabetical because that is the only order there is: decision #25 gives print\norder to every CHILD of a kill team, not to the teams themselves, so the site's\nnav order is not stored.\n\nA `faction_id` matching nothing is an empty page, not a 404 -- a filter naming\nnothing is a legitimate result, where a missing ROW asked for by id is not.",
+        "operationId": "list_kill_teams_api_v1_kill_team_teams_get",
+        "parameters": [
+          {
+            "name": "faction_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Faction Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KillTeam_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/teams/{kill_team_id}": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "Get Kill Team",
+        "description": "One kill team with its rules, ploys, equipment, datacards and composition.\n\n404 for an unknown id, through the service's `NotFoundError` -- `app/main.py`\nregisters one handler against `CodedError`, so nothing is mapped here.",
+        "operationId": "get_kill_team_api_v1_kill_team_teams__kill_team_id__get",
+        "parameters": [
+          {
+            "name": "kill_team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Kill Team Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillTeam_Detail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/universal": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "Read Universal",
+        "description": "Command Re-roll and the universal equipment list: the rows no team owns.\n\nUnpaginated, deliberately. This is one document rather than a collection -- one\nploy and eleven pieces of equipment, static until a re-scrape -- so a client\nfetches it once and keeps it.",
+        "operationId": "read_universal_api_v1_kill_team_universal_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Universal_Read"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2717,6 +2914,424 @@
         ],
         "title": "InventoryAdd"
       },
+      "KTAbility_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "position"
+        ],
+        "title": "KTAbility_Read"
+      },
+      "KTEquipment_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "position"
+        ],
+        "title": "KTEquipment_Read"
+      },
+      "KTFaction_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "KTFaction_Read"
+      },
+      "KTOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "apl": {
+            "type": "integer",
+            "title": "Apl"
+          },
+          "move": {
+            "type": "integer",
+            "title": "Move"
+          },
+          "save": {
+            "type": "integer",
+            "title": "Save"
+          },
+          "wounds": {
+            "type": "integer",
+            "title": "Wounds"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "weapons": {
+            "items": {
+              "$ref": "#/components/schemas/KTWeapon_Read"
+            },
+            "type": "array",
+            "title": "Weapons",
+            "default": []
+          },
+          "abilities": {
+            "items": {
+              "$ref": "#/components/schemas/KTAbility_Read"
+            },
+            "type": "array",
+            "title": "Abilities",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "apl",
+          "move",
+          "save",
+          "wounds",
+          "keywords",
+          "availability",
+          "position"
+        ],
+        "title": "KTOperative_Read"
+      },
+      "KTPloy_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cp_cost": {
+            "type": "integer",
+            "title": "Cp Cost"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "cp_cost",
+          "description",
+          "position"
+        ],
+        "title": "KTPloy_Read"
+      },
+      "KTSelectionRule_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "depth",
+          "kind",
+          "text"
+        ],
+        "title": "KTSelectionRule_Read",
+        "description": "One printed thing from the composition (decisions #44, #45).\n\nRead in `position` order, indenting by `depth`, and this is the page's\ncomposition section back. Nothing is derived from it: no budget, no cap, no\noperative resolved -- `text` is what the page said."
+      },
+      "KTWeapon_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "range": {
+            "type": "integer",
+            "title": "Range"
+          },
+          "attacks": {
+            "type": "integer",
+            "title": "Attacks"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "normal_damage": {
+            "type": "integer",
+            "title": "Normal Damage"
+          },
+          "crit_damage": {
+            "type": "integer",
+            "title": "Crit Damage"
+          },
+          "weapon_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Weapon Rules"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "range",
+          "attacks",
+          "hit",
+          "normal_damage",
+          "crit_damage",
+          "weapon_rules",
+          "position"
+        ],
+        "title": "KTWeapon_Read"
+      },
+      "KillTeamRule_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "group",
+          "position"
+        ],
+        "title": "KillTeamRule_Read"
+      },
+      "KillTeam_Detail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "faction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faction Id"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeamRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "selection_rules": {
+            "items": {
+              "$ref": "#/components/schemas/KTSelectionRule_Read"
+            },
+            "type": "array",
+            "title": "Selection Rules",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "faction_id"
+        ],
+        "title": "KillTeam_Detail",
+        "description": "A team whole: everything a reader of its page would see (decision #47).\n\nOne request rather than several, because operatives are reachable only nested and\na game snapshots the team's rules, its ploys and every datacard anyway (#24). Measured\nover the served responses: 17 KB to 47 KB, median 24 KB, each in nine queries flat."
+      },
+      "KillTeam_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "faction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faction Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "faction_id"
+        ],
+        "title": "KillTeam_Read"
+      },
       "Page_Ability_Read_": {
         "properties": {
           "items": {
@@ -2809,6 +3424,68 @@
           "offset"
         ],
         "title": "Page[Faction_Read]"
+      },
+      "Page_KTFaction_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTFaction_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTFaction_Read]"
+      },
+      "Page_KillTeam_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeam_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KillTeam_Read]"
       },
       "Page_Subfaction_ListRead_": {
         "properties": {
@@ -3435,6 +4112,29 @@
         },
         "type": "object",
         "title": "Unit_Update"
+      },
+      "Universal_Read": {
+        "properties": {
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Universal_Read",
+        "description": "The rows that belong to no kill team: `kill_team_id IS NULL` (decision #48).\n\nOne route for both, because they are one concept and one thing a client wants --\nfetched once, kept for the session, used with every team. Folding them into each\nteam detail instead would add 7.4 KB to every response and re-send it on every team\nview, to save a call that happens once per GAME."
       },
       "UserUnit_Read": {
         "properties": {

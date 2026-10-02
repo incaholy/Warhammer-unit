@@ -23,6 +23,7 @@ from app.api.auth import router as auth_router
 from app.api.errors import CODE_STATUS
 from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
+from app.api.killteam import router as killteam_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
 from app.core.errors import CodedError, ErrorCode
@@ -201,4 +202,6 @@ api_v1.include_router(unit_router)
 api_v1.include_router(faction_router)
 api_v1.include_router(inventory_router)
 api_v1.include_router(army_router)
+# Read-only, and the only router with no write path at all (KILLTEAM.md decision #21).
+api_v1.include_router(killteam_router)
 app.include_router(api_v1)

@@ -572,7 +572,15 @@ catalog's admin write — an admin edit would be silently undone by the next `ma
 Three routes: `/factions` and `/teams` paged (`?faction_id=`), `/teams/{id}` carrying the
 team whole — rules, ploys, equipment, operatives with their datacards, and the selection
 rules (#47). Operatives are reachable only nested, so there is no standalone operative
-resource and no keyword filter until something asks for one. A read names a parent by id
+resource and no keyword filter until something asks for one.
+
+**Deferred service work**, left out deliberately rather than forgotten: `KillTeamService`
+has no reader for a team's composition on its own, and none for a single selection rule,
+because #47 puts them in the team detail. If a roster view ever wants the composition
+without the datacards — 7–18% of a detail response — that is the reader to add, with a
+`/teams/{id}/composition` route over it. The same applies to a standalone operative
+reader and the keyword filter the JSONB column was chosen to allow (#26); neither has a
+caller, and no GIN index exists yet. A read names a parent by id
 and never copies its name (#46). `/universal` carries the two collections that belong to
 no team (#48). `openapi.json` is checked in and CI fails if it drifts, so a new route is
 not finished until `make openapi` has run.
