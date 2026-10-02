@@ -34,7 +34,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 13 | Team rules | Rules belong to the **kill team** (`KillTeamRule`), not the faction, and `kill_team_id` is NOT NULL — unlike a ploy or a piece of equipment, a rule is never universal | Two kill teams in the same faction can have different rules. And the same rule NAME is printed by several teams — "Astartes" by seven of them, "Rifles" by two — so each is that team's own row, never one shared rule. Anything that lists rules has to say whose they are, which is why the FK cannot be null and a rule read carries its kill team |
 | 14 | Weapons and abilities | Belong to **one operative** (a plain FK), not shared through link tables the way 40k's `unit_weapons` / `unit_abilities` do | A datacard lists its own profiles, and the same weapon name on two operatives can carry different numbers; sharing would mean deduplicating on name *and* every stat |
 | 15 | Weapon range | One non-null `range` column: the number from a printed `Range x` weapon rule when there is one, otherwise **1 for melee, 2 for range**, filled by a context-sensitive column default | A 2024 profile prints ATK/HIT/DMG/WR and no range — distance appears only as a weapon rule — so the column needs a defined meaning rather than a blank |
-| 16 | Composition | A kill team's composition is **budgeted selection lists** (`KTSelectionList` → `KTSelectionOption`), not a headcount with a leader. Descriptive, not enforced — see #28. An option carries its `cost` in selections, how many `models` it fields, and its own `max_selections` cap | The pages never say "leader": they say "1 X operative", then "4 X operatives selected from the following list". A budget of 1 over one option *is* required; over several it is "choose one". Weighted costs (Brood Brother's Magus counts as two selections) and pairs ("2 PSYCHIC FAMILIAR … still counts as one selection") cannot be expressed by a count and a flag |
+| 16 | Composition | **Retired by #44** — composition is text now, and a budget is one of the numbers that went with it. A kill team's composition is **budgeted selection lists** (`KTSelectionList` → `KTSelectionOption`), not a headcount with a leader. Descriptive, not enforced — see #28. An option carries its `cost` in selections, how many `models` it fields, and its own `max_selections` cap | The pages never say "leader": they say "1 X operative", then "4 X operatives selected from the following list". A budget of 1 over one option *is* required; over several it is "choose one". Weighted costs (Brood Brother's Magus counts as two selections) and pairs ("2 PSYCHIC FAMILIAR … still counts as one selection") cannot be expressed by a count and a flag |
 | 17 | Equipment | Equipment is picked **per game**, not per roster: `KTGameEquipment` with `UNIQUE(game_id, equipment_id)`, and the allowance (4 pieces, more for some teams) is checked there | The rules choose equipment for each battle and reveal it during play. On the roster it would make a roster mean "a roster for one battle", and re-playing the same team would mean a second roster |
 | 18 | A game's operatives | The set is **not fixed at creation**. Two operations change it during a battle: **add** (`source = equipment` or `rule`) and **transform** (one datacard becomes another) | Two teams need it already. MUTOID VERMIN equipment adds four Gellerpox vermin "for the battle", and Chaos Cult's Mutation turns a Devotee into a Mutant and then a Torment. Both are per-battle, so neither belongs on a roster |
 | 19 | Transform | **In place**: the row keeps its id, tokens, order and board status, its catalog pointer moves, and its datacard is re-snapshotted (stats, weapons and abilities — decision #22). The event log carries the history | It is the same miniature on the table, so the game screen needs nothing new. A second row plus `replaces_id` would give lineage and cheap undo, at the cost of a status the UI must filter everywhere |
@@ -43,26 +43,33 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 22 | What a game snapshots | The **whole datacard**, not just the stat line: stats, weapon profiles, abilities and the text of the equipment taken, copied into the game as display-only JSON. Extends decision #6 | #6's reason applies to all of it, and the seed now REWRITES a catalog row when the source changes it (create-once would have been safe). Reading profiles live would let a balance update change a weapon mid-battle. It also makes a game self-contained: it keeps working if the catalog later drops that operative |
 | 23 | Actions | `KTGameOperative.actions_used`: a list of `{name, turning_point}` entries, appended as players mark them | Unique actions are abilities on the datacard, and their limits differ (once per battle, once per turning point). Recording *what was used and when* lets the screen show both without the tracker knowing any rule — decision #1 again, and the same shape as `tokens` |
 | 24 | Reference at the table | A game also snapshots its **team's** reference: the kill team's rules, its own ploys and the universal ones. With #22's datacards and equipment text, a battle needs **no catalog request** once it has started, and the game screen can show any datacard in full as a reference | A player reads the printed card mid-battle — every weapon profile, every ability, the ploys they might spend CP on. Leaving those in the catalog would mean a screen that mixes live and snapshotted data, and a re-scrape changing a ploy's wording mid-game. It is static for the game's whole life, so it is embedded in the game detail response and never invalidates |
-| 25 | Print order | **Every child of a kill team carries `position` and is ordered by it** — operatives, rules, ploys, equipment, weapons, abilities, selection lists and options. The one exception is `KTSelectionRestriction`, read out of a sentence rather than a printed list | Rows have no order of their own. The stored order matched the page by luck -- the seed inserts in page order -- and a `VACUUM FULL` reorders the heap, while a page that REORDERS its profiles changed no row's data, so the seed reported "nothing changed" and kept serving the old order for good. Sorting by name is not a datacard either: a card lists ranged profiles then melee, and one name can appear in both (Sanctifiers' brazier), so alphabetical splits one weapon across the list. Not unique per parent for weapons, abilities and options, deliberately: the seed rewrites those positions IN PLACE, and a unique constraint would collide with whichever row has not moved yet. `KTSelectionList` is the exception and keeps `UNIQUE(kill_team_id, position)`, because a composition is replaced as a whole rather than rewritten, so no row ever moves while a sibling still holds its old position (the delete is flushed before the inserts). Sorting by name was tried for the four team-level collections and was wrong three ways: the page prints the LEADER first (not the alphabetically first operative, in 46 of 48 teams), Strategy Ploys before Firefight Ploys (which ordering by `kind` reverses, since "firefight" sorts first), and a rule beside the rule that refers to it (Raveners' Burrow and Tunnel). Once a team's chosen options became rules with a `group` (#27), alphabetical order also interleaved the three Aspects |
-| 26 | List columns | `keywords`, `weapon_rules` and `loadout_options` are `JSONB` on Postgres and plain `JSON` on SQLite, through one shared `STRING_LIST` type | Same shape, same reason, in one place. `json` cannot carry a GIN index, so a "which operatives have this keyword?" filter would have no way to be indexed — and a keyword is exactly what a catalog gets filtered by. Done while the migration was still an unmerged draft, so it cost nothing |
+| 25 | Print order | **Every child of a kill team carries `position` and is ordered by it** — operatives, rules, ploys, equipment, weapons, abilities and selection rules. Since #44 there is no exception: a restriction is a selection rule with a printed position like any other | Rows have no order of their own. The stored order matched the page by luck -- the seed inserts in page order -- and a `VACUUM FULL` reorders the heap, while a page that REORDERS its profiles changed no row's data, so the seed reported "nothing changed" and kept serving the old order for good. Sorting by name is not a datacard either: a card lists ranged profiles then melee, and one name can appear in both (Sanctifiers' brazier), so alphabetical splits one weapon across the list. Not unique per parent for weapons and abilities, deliberately: the seed rewrites those positions IN PLACE, and a unique constraint would collide with whichever row has not moved yet. `KTSelectionRule` is the exception and keeps `UNIQUE(kill_team_id, position)`, because a composition is replaced as a whole rather than rewritten, so no row ever moves while a sibling still holds its old position (the delete is flushed before the inserts). Sorting by name was tried for the four team-level collections and was wrong three ways: the page prints the LEADER first (not the alphabetically first operative, in 46 of 48 teams), Strategy Ploys before Firefight Ploys (which ordering by `kind` reverses, since "firefight" sorts first), and a rule beside the rule that refers to it (Raveners' Burrow and Tunnel). Once a team's chosen options became rules with a `group` (#27), alphabetical order also interleaved the three Aspects |
+| 26 | List columns | `keywords` and `weapon_rules` are `JSONB` on Postgres and plain `JSON` on SQLite, through one shared `STRING_LIST` type (`loadout_options` was a third until #44 removed the options table) | Same shape, same reason, in one place. `json` cannot carry a GIN index, so a "which operatives have this keyword?" filter would have no way to be indexed — and a keyword is exactly what a catalog gets filtered by. Done while the migration was still an unmerged draft, so it cost nothing |
 | 27 | Chosen options | A team's **grouped selectable options** are `KillTeamRule` rows carrying the page section as a nullable `group` (NULL = an always-on faction rule) | Blades of Khaine print their whole mechanic as three "… Aspect Techniques" sections and Exodite Dragon Masters theirs as three "… Upgrade" sections: 30 named blocks the scraper read nothing of, because it read only "Faction Rules" and only a bare `h3`. They are not ploys -- not one of the 30 prints a CP cost -- and `KillTeamRule` is already name-and-text belonging to a team. The group is the missing fact: "THE SLICING HURRICANE" means nothing without "Dire Avenger", which is what says who may take it. Which option a player CHOSE is a per-game record, and belongs with K5 beside the Accursed Gift |
-| 28 | Composition is DESCRIPTION | The catalog states what a page prints and **never decides legality**. `validate` reports; a save is never blocked; where a printed rule cannot be structured, the report carries the sentence and says so | Decision #1 already leaves rules to the players, and roster legality is a rule. Trying to encode it produced a list no roster could satisfy (Battleclade), a cost the column cannot hold (Kommandos' half selection), and six shapes no column fits — caps over a subset of options, caps keyed on a loadout, mutual exclusion, per-item caps, per-battle limits, a selection spent on a ploy discount. Each new team brings another. We never had correct legality, only numbers that looked authoritative, which is worse than none. The membership half — WHICH operatives a list offers — is a page fact and stays |
-| 29 | What a budget counts | `KTSelectionList.shape`: `budgeted` (the line prints its number), `single` (unnumbered, an implicit 1) or `fixed` ("Every X operative in the following list"). On a `fixed` line the number counts **models**, everywhere else **selections** | The parser already worked the shape out to compute the budget and then threw it away — so the one number whose unit changes was indistinguishable from the others. Two lists are `fixed` (Elucidian Starstrider and Gellerpox Infected, both budget 9 over 6–7 selections), and reading them as selections is how a counter reports "7 of 9" for a roster the page states as nine models. Stored rather than re-derived, because the label is prose |
-| 30 | Composition notes | The footnotes and callouts printed around a composition are `KillTeam.composition_notes`, a list of paragraphs in printed order. A list's `restriction_text` keeps only the sentence that follows it. Footnote MARKERS are dropped from labels and entries | One field used to hold four things: the repeat clause, a footnote body, a designer's-note box and (Kasrkin) a glossary aside — 342 characters and six sentences — attached to whichever list happened to precede them in the DOM. 13 teams stored a body on a list, 3 of them the wrong one, and 7 where no marker survived to say which entries it was about — figures from before this split, and not recomputable now. Today: 29 notes over 20 teams. The page marks the boundaries itself, which makes the split exact rather than a guess: a `sup` or `span.ast` marker STARTS a note, and a `Corner25` callout is a note of its own. Notes go on the team because that is where the page prints them — under the whole composition — and it is the only attachment that is never wrong. Caps are read from the sentence AND its notes, since Brood Brother state their BROODCOVEN cap in a footnote |
-| 31 | Separation by kill team | A kill team's operatives, rules, ploys and equipment are **its own rows**. Two teams in one faction share nothing, the same name on two teams is two rows, and an option can only offer an operative of its OWN team — enforced by `KTSelectionOption`'s composite foreign keys, not by a service remembering to check | The faction is only a way to FIND a team (#12); the kill team is the unit of play. It is also what the source does: Inquisitorial Agent's page carries its own copies of the Sister of Silence and Tempestus Scion datacards it can requisition, rather than pointing at those teams. So a cross-team composition is not expressible as options, and never should be — if requisition is ever modelled (K6) it has to be a reference to another kill TEAM, not a shared operative row |
-| 32 | An entry nobody can resolve | Ambiguity loses that ENTRY, not the team: the entry is dropped, recorded in the payload's `unresolved_entries`, and reported by both `make scrape-kt` and `make seed-kt`. A line whose own name is ambiguous keeps its label and budget with **no options**. A line the parser does not recognise at all still raises | Failing the whole team cost Hunter Clade's 14 datacards, 51 weapons, 8 ploys, 4 equipment and a rule, all of which parse, over one entry its own footnote disambiguates — and left the catalog at 46 of 48 teams with nothing saying so. This is not a return to the silence that once dropped a real entry: the payload carries the gap and both tools print it, and the operative involved also shows up in the "no list offers this datacard" warning. All 48 teams now seed |
-| 33 | Requisition groups | A team may print an "… Requisition" section, one `h2` per ally, each a composition tree of the ordinary shape. Its lines become selection lists on the requisitioning team, carrying `requisition_source` — the group's heading. Lists that carry one are **alternatives** to each other and to the line that points at them ("REQUISITIONED operatives from one group"), not further lists to spend on | Only Inquisitorial Agent prints one, and it is why that team was unusable: its main line points at the groups, so **seven of its eighteen datacards were offered by nothing**. The groups' operatives are the ones the page prints as its own rows — Sister of Silence and Tempestus Scion are not kill teams, which is exactly why their datacards are there (#31). Reading those two groups makes every one of its datacards fieldable |
-| 34 | Requisitioning another team | When the ally IS a kill team, its operatives live on its own page and are **never resolved against the requisitioning one**. The group keeps its printed label and budget, offers nothing, and points at that team through `KTSelectionList.from_kill_team_id` — resolved in a second seed pass, since the payload's order is the site's | Resolving them locally is not merely fruitless, it is wrong: the resolver's last-word rule matched Death Korps' "TROOPER" to Inquisitorial Agent's Tempestus Scion Trooper. A reference rather than copies, because Death Korps' operatives stay Death Korps' (#31) — copying ~50 rows would duplicate data that already exists and create a refresh question. Four groups reference a team (Death Korps, Exaction Squad, Imperial Navy Breacher, Kasrkin); the other two carry their own options |
-| 35 | Resolving an entry | The page's own **link** decides first: a composition entry usually carries `<a class="kwbOne" href="…#Sicarian-Infiltrator-Warrior">`, the site's link to that datacard. The six text rules run only where there is no link, which is 26 of the 470 entries that resolve | Measured over all 48 pages: **444 anchors, 444 unique matches, no misses and no ambiguity** — better evidence than any text heuristic, and it would have prevented Void-dancer Troupe's line offering a `Player` where the page requires the `Lead Player`. 296 items carry none, and not because the site hides anything: it links a keyword on its FIRST appearance only, so Blooded's three repeated "GUNNER with …" variants are styled and unlinked, and a phrase naming no single card — Hunter Clade's "WARRIOR SICARIAN", which should read "WARRIOR RUSTSTALKER" — is left unlinked because the site's own linker could not tell either |
-| 36 | Loadout lists | An item in a `ul.redEmptyCircle2` is a **loadout, never an operative**, and is not resolved at all | 149 such items across the 48 pages and not one is an operative, so the class is a structural answer where resolution was a guess. It also closes a hazard decision #35 opens: a loadout line that happens to link a datacard would otherwise be read as an entry offering it. `redCircle2` is deliberately NOT used this way — of its 455 items in the composition trees, 387 resolve to an operative and 68 do not, so it narrows the question without answering it |
-| 37 | Eliminating within a list | When an entry matches several datacards equally, candidates that **another entry of the same list already claimed** are removed. If exactly one is left, it is the answer; otherwise the entry stays unresolved and reported | A list does not offer the same operative twice under two names. Hunter Clade print "WARRIOR INFILTRATOR" — which the page LINKS to the Infiltrator Warrior (#35) — and then "WARRIOR SICARIAN", matching both Sicarian Warriors, because the page should read "WARRIOR RUSTSTALKER". With the Infiltrator claimed, only the Ruststalker remains, which is how a human reads it and what the entry's own Ruststalker loadouts confirm. The surviving candidate goes back through the SAME reader rather than a second code path, so an entry that still does not resolve stays unresolved. Every entry is read before any elimination, so an eliminated one keeps its printed position |
-| 38 | A line pointing at another list | When a line says "selected from the list above" it carries `same_options_as_id` — the list whose options it offers — and no options of its own. Checked BEFORE the label is read as an operative name, because it is not one | Inquisitorial Agent print one, and reading it as a name matched nine Agent datacards and reported an ambiguity that was never a naming problem. The options are stated once, on the list that prints them, and the line still carries its own budget because the page states one. Positions are unique within a team, so this resolves in the same seed pass — unlike a requisition pointing at another TEAM (#34) |
+| 28 | Composition is DESCRIPTION | The catalog states what a page prints and **never decides legality**. Completed by #44, which removed the structure this decision had already stopped trusting. `validate` reports; a save is never blocked; where a printed rule cannot be structured, the report carries the sentence and says so | Decision #1 already leaves rules to the players, and roster legality is a rule. Trying to encode it produced a list no roster could satisfy (Battleclade), a cost the column cannot hold (Kommandos' half selection), and six shapes no column fits — caps over a subset of options, caps keyed on a loadout, mutual exclusion, per-item caps, per-battle limits, a selection spent on a ploy discount. Each new team brings another. We never had correct legality, only numbers that looked authoritative, which is worse than none. The membership half — WHICH operatives a list offers — is a page fact and stays |
+| 29 | What a budget counts | **Retired by #44** — there is no budget to count. `KTSelectionList.shape`: `budgeted` (the line prints its number), `single` (unnumbered, an implicit 1) or `fixed` ("Every X operative in the following list"). On a `fixed` line the number counts **models**, everywhere else **selections** | The parser already worked the shape out to compute the budget and then threw it away — so the one number whose unit changes was indistinguishable from the others. Two lists are `fixed` (Elucidian Starstrider and Gellerpox Infected, both budget 9 over 6–7 selections), and reading them as selections is how a counter reports "7 of 9" for a roster the page states as nine models. Stored rather than re-derived, because the label is prose |
+| 30 | Composition notes | The footnotes and callouts printed around a composition are their own `KTSelectionRule` rows, `kind = 'note'`, in printed order — a `KillTeam.composition_notes` column until #44. A sentence is a `kind = 'restriction'` row. Footnote MARKERS are still dropped from the bullets they mark | One field used to hold four things: the repeat clause, a footnote body, a designer's-note box and (Kasrkin) a glossary aside — 342 characters and six sentences — attached to whichever list happened to precede them in the DOM. 13 teams stored a body on a list, 3 of them the wrong one, and 7 where no marker survived to say which entries it was about — figures from before this split, and not recomputable now. Today: 29 notes over 20 teams. The page marks the boundaries itself, which makes the split exact rather than a guess: a `sup` or `span.ast` marker STARTS a note, and a `Corner25` callout is a note of its own. Notes go on the team because that is where the page prints them — under the whole composition — and it is the only attachment that is never wrong. Caps are read from the sentence AND its notes, since Brood Brother state their BROODCOVEN cap in a footnote |
+| 31 | Separation by kill team | A kill team's operatives, rules, ploys and equipment are **its own rows**. Two teams in one faction share nothing, the same name on two teams is two rows, and nothing in the catalog can mix two teams' rows — a composition is text belonging to one team (#44), where it used to be options held to their team by composite foreign keys | The faction is only a way to FIND a team (#12); the kill team is the unit of play. It is also what the source does: Inquisitorial Agent's page carries its own copies of the Sister of Silence and Tempestus Scion datacards it can requisition, rather than pointing at those teams. So a cross-team composition is not expressible as options, and never should be — if requisition is ever modelled (K6) it has to be a reference to another kill TEAM, not a shared operative row |
+| 32 | An entry nobody can resolve | **Retired by #44** — nothing is resolved in a composition, so no entry can be unresolvable. Ambiguity loses that ENTRY, not the team: the entry is dropped, recorded in the payload's `unresolved_entries`, and reported by both `make scrape-kt` and `make seed-kt`. A line whose own name is ambiguous keeps its label and budget with **no options**. A line the parser does not recognise at all still raises | Failing the whole team cost Hunter Clade's 14 datacards, 51 weapons, 8 ploys, 4 equipment and a rule, all of which parse, over one entry its own footnote disambiguates — and left the catalog at 46 of 48 teams with nothing saying so. This is not a return to the silence that once dropped a real entry: the payload carries the gap and both tools print it, and the operative involved also shows up in the "no list offers this datacard" warning. All 48 teams now seed |
+| 33 | Requisition groups | **Retired by #44** — a group's heading and lines are text like any other (#44). A team may print an "… Requisition" section, one `h2` per ally, each a composition tree of the ordinary shape. Its lines become selection lists on the requisitioning team, carrying `requisition_source` — the group's heading. Lists that carry one are **alternatives** to each other and to the line that points at them ("REQUISITIONED operatives from one group"), not further lists to spend on | Only Inquisitorial Agent prints one, and it is why that team was unusable: its main line points at the groups, so **seven of its eighteen datacards were offered by nothing**. The groups' operatives are the ones the page prints as its own rows — Sister of Silence and Tempestus Scion are not kill teams, which is exactly why their datacards are there (#31). Reading those two groups makes every one of its datacards fieldable |
+| 34 | Requisitioning another team | **Retired by #44** — there is no reference to link, so whether an ally has a page stops mattering. When the ally IS a kill team, its operatives live on its own page and are **never resolved against the requisitioning one**. The group keeps its printed label and budget, offers nothing, and points at that team through `KTSelectionList.from_kill_team_id` — resolved in a second seed pass, since the payload's order is the site's | Resolving them locally is not merely fruitless, it is wrong: the resolver's last-word rule matched Death Korps' "TROOPER" to Inquisitorial Agent's Tempestus Scion Trooper. A reference rather than copies, because Death Korps' operatives stay Death Korps' (#31) — copying ~50 rows would duplicate data that already exists and create a refresh question. Four groups reference a team (Death Korps, Exaction Squad, Imperial Navy Breacher, Kasrkin); the other two carry their own options |
+| 35 | Resolving an entry | **Narrowed by #44** — a composition entry is no longer resolved at all; this is now only how `parse_in_battle_operatives` names the datacards a conditional block grants, for `availability` (#20). The page's own **link** decides first: a composition entry usually carries `<a class="kwbOne" href="…#Sicarian-Infiltrator-Warrior">`, the site's link to that datacard. The six text rules run only where there is no link, which is 26 of the 470 entries that resolve | Measured over all 48 pages: **444 anchors, 444 unique matches, no misses and no ambiguity** — better evidence than any text heuristic, and it would have prevented Void-dancer Troupe's line offering a `Player` where the page requires the `Lead Player`. 296 items carry none, and not because the site hides anything: it links a keyword on its FIRST appearance only, so Blooded's three repeated "GUNNER with …" variants are styled and unlinked, and a phrase naming no single card — Hunter Clade's "WARRIOR SICARIAN", which should read "WARRIOR RUSTSTALKER" — is left unlinked because the site's own linker could not tell either |
+| 36 | Loadout lists | **Retired by #44** — a loadout bullet is kept at its own depth rather than filtered out. An item in a `ul.redEmptyCircle2` is a **loadout, never an operative**, and is not resolved at all | 149 such items across the 48 pages and not one is an operative, so the class is a structural answer where resolution was a guess. It also closes a hazard decision #35 opens: a loadout line that happens to link a datacard would otherwise be read as an entry offering it. `redCircle2` is deliberately NOT used this way — of its 455 items in the composition trees, 387 resolve to an operative and 68 do not, so it narrows the question without answering it |
+| 37 | Eliminating within a list | **Retired by #44** — nothing resolves, so there is nothing to eliminate between. When an entry matches several datacards equally, candidates that **another entry of the same list already claimed** are removed. If exactly one is left, it is the answer; otherwise the entry stays unresolved and reported | A list does not offer the same operative twice under two names. Hunter Clade print "WARRIOR INFILTRATOR" — which the page LINKS to the Infiltrator Warrior (#35) — and then "WARRIOR SICARIAN", matching both Sicarian Warriors, because the page should read "WARRIOR RUSTSTALKER". With the Infiltrator claimed, only the Ruststalker remains, which is how a human reads it and what the entry's own Ruststalker loadouts confirm. The surviving candidate goes back through the SAME reader rather than a second code path, so an entry that still does not resolve stays unresolved. Every entry is read before any elimination, so an eliminated one keeps its printed position |
+| 38 | A line pointing at another list | **Retired by #44** — the line is stored as the text it is, with no reference column. When a line says "selected from the list above" it carries `same_options_as_id` — the list whose options it offers — and no options of its own. Checked BEFORE the label is read as an operative name, because it is not one | Inquisitorial Agent print one, and reading it as a name matched nine Agent datacards and reported an ambiguity that was never a naming problem. The options are stated once, on the list that prints them, and the line still carries its own budget because the page states one. Positions are unique within a team, so this resolves in the same seed pass — unlike a requisition pointing at another TEAM (#34) |
 
 | 39 | Where a composition's loose text lives | The element whose text belongs to a composition is the list's **parent** — or its grandparent when the list is that parent's sole element child. Never further, and never merely because the parent held no text of its own | 47 of the 48 pages put the composition `ul` inside a `div.BreakInsideAvoid`, and 43 pages print a sentence there. Hunter Clade wrap theirs in a `div.Columns2` first, so reading only the parent made that team print **no restriction at all**: it lost its repeat clause, three keyword caps (DIKTAT, SURVEYOR, SICARIAN), four capped options and a footnote, and no warning could report it, because every check runs on the sentence this step returns. The sole-child test is what keeps the climb from reading a NEIGHBOUR's prose as this team's rule — Exodite Dragon Masters' grandparent prints 284 characters of another column's actions and Elucidian Starstrider's is the whole page body, and both genuinely print no restriction. Blades of Khaine climbs too and finds nothing, which is harmless. Identity, not equality: two empty `div`s compare equal in BeautifulSoup |
-| 40 | A requisition group's own restriction | A group's sentence, caps and notes are read exactly as the main composition's are, and the caps and notes belong to the **team** wherever on the page they are printed. A keyword capped in two places keeps the **tighter** number. No cap is minted from a group whose ally is a kill team of its own | The group reader built its lines and read nothing else: five of Inquisitorial Agent's six groups lost their sentence, three lost their notes, a cap was lost, and its Tempestus Scion Gunner, Medic and Vox-Operator were stored with no repeat limit where the page prints one. A known team's cap names a keyword no datacard on THIS page can carry — Exaction Squad cap SUBDUCTOR and their operatives live on their own page (#34) — so minting it trips the "this cap matches no operative" check and loses the whole team, and the row would be inert even if it did not. The sentence is stored and only the derived cap withheld, which is all #28 asks. The tighter number because `UNIQUE(kill_team_id, keyword)` holds one row, the same trade as a loadout-keyed cap (#28) |
-| 41 | Which list a restriction caps | The last list that **offers something**, not the last one printed. When no list in the tree offers anything the sentence stays on the last line and caps nothing | Printed under the whole composition and saying "this list", so it belongs to the last one — right on 47 of the 48 teams; Inquisitorial Agent is the only one whose sentence would land on a list offering nothing. Inquisitorial Agent's composition ENDS on a cross-reference naming no options of its own (#38), so the rule was applied to an empty set and its nine Agents were stored with no repeat limit at all. Storing the sentence beside the options it governs puts the rule and its effect on one row, rather than making every consumer join them. The fallback is what a known team's group relies on (#40) |
-| 42 | Counting ambiguity | A line with no options raises only when **that line** produced no ambiguity — counted per line, never over the whole tree | `unresolved` accumulates across the composition, so one ambiguous entry anywhere above silenced the parser's loudest check for every line below it: the same unreadable line raised or was stored as a label with no options depending on an unrelated line printed earlier. The elimination rule (#37) fills `unresolved` by design, so the check switched itself off precisely when the parser was already struggling. The gate on the whole composition still reads the whole list, because there the question really is whether the composition came out empty |
-| 43 | A reference printed first | A cross-reference at position 0 points at nothing, so it is not stored as a reference — and an operative name is **never** read out of a line that points at another list, even when it resolves cleanly | Such a line fell through to the very inline name resolution #38 exists to prevent: a label resolving to exactly one datacard made the parser invent an option the page never offered, with `same_options_as` unset and nothing in `unresolved` to say so. It now raises, so `scrape` names the team in `skipped` — a reference printed first is a page shape the parser does not understand, and saying so is the honest answer. A label resolving AMBIGUOUSLY is still stored with its budget and reported (#32) |
+| 40 | A requisition group's own restriction | **Narrowed by #44** — a group's sentence and notes are still read, as rules of their own; there are no caps left to mint or withhold. A group's sentence, caps and notes are read exactly as the main composition's are, and the caps and notes belong to the **team** wherever on the page they are printed. A keyword capped in two places keeps the **tighter** number. No cap is minted from a group whose ally is a kill team of its own | The group reader built its lines and read nothing else: five of Inquisitorial Agent's six groups lost their sentence, three lost their notes, a cap was lost, and its Tempestus Scion Gunner, Medic and Vox-Operator were stored with no repeat limit where the page prints one. A known team's cap names a keyword no datacard on THIS page can carry — Exaction Squad cap SUBDUCTOR and their operatives live on their own page (#34) — so minting it trips the "this cap matches no operative" check and loses the whole team, and the row would be inert even if it did not. The sentence is stored and only the derived cap withheld, which is all #28 asks. The tighter number because `UNIQUE(kill_team_id, keyword)` holds one row, the same trade as a loadout-keyed cap (#28) |
+| 41 | Which list a restriction caps | **Retired by #44** — a restriction is its own row and caps nothing. The last list that **offers something**, not the last one printed. When no list in the tree offers anything the sentence stays on the last line and caps nothing | Printed under the whole composition and saying "this list", so it belongs to the last one — right on 47 of the 48 teams; Inquisitorial Agent is the only one whose sentence would land on a list offering nothing. Inquisitorial Agent's composition ENDS on a cross-reference naming no options of its own (#38), so the rule was applied to an empty set and its nine Agents were stored with no repeat limit at all. Storing the sentence beside the options it governs puts the rule and its effect on one row, rather than making every consumer join them. The fallback is what a known team's group relies on (#40) |
+| 42 | Counting ambiguity | **Retired by #44** — the gate it describes is gone with the structure it guarded. A line with no options raises only when **that line** produced no ambiguity — counted per line, never over the whole tree | `unresolved` accumulates across the composition, so one ambiguous entry anywhere above silenced the parser's loudest check for every line below it: the same unreadable line raised or was stored as a label with no options depending on an unrelated line printed earlier. The elimination rule (#37) fills `unresolved` by design, so the check switched itself off precisely when the parser was already struggling. The gate on the whole composition still reads the whole list, because there the question really is whether the composition came out empty |
+| 43 | A reference printed first | **Retired by #44** — no name is read out of any line. A cross-reference at position 0 points at nothing, so it is not stored as a reference — and an operative name is **never** read out of a line that points at another list, even when it resolves cleanly | Such a line fell through to the very inline name resolution #38 exists to prevent: a label resolving to exactly one datacard made the parser invent an option the page never offered, with `same_options_as` unset and nothing in `unresolved` to say so. It now raises, so `scrape` names the team in `skipped` — a reference printed first is a page shape the parser does not understand, and saying so is the honest answer. A label resolving AMBIGUOUSLY is still stored with its budget and reported (#32) |
+
+| 44 | Composition is TEXT | One table, `KTSelectionRule` = {`position`, `depth`, `kind`, `text`}, holding the page's own words in the page's own order. `kind` is `heading`, `line`, `restriction` or `note`; `depth` is the page's indent. Nothing is derived: no budget, no cost, no models, no repeat cap, no keyword cap, and no entry resolved against a datacard. Replaces `KTSelectionList`, `KTSelectionOption` and `KTSelectionRestriction`, and retires ten decisions with them | #28 already said the catalog DESCRIBES composition and never decides legality. Keeping the columns anyway was enforcement machinery with no enforcer, and every problem in this area came from that gap: a budget summing to 43 selections for a team that fields 7; a cap on COMBAT SERVITOR matching none of the seven operatives carrying it, because the datacard prints the phrase as two keywords; two conditional clauses stored at opposite strictnesses because a column had to pick one; four rows that looked identical while meaning four different things. Text is exact where a column had to approximate. A tracker meant to allow CUSTOM games should not imply a restriction it will not apply, and a roster offers every operative of its kill team (K4) with these rows read beside it. 593 structured rows became 893 text rows — more rows, every one of them something the page printed |
+| 45 | Why `depth` and not nested entries | Each printed bullet is its own row carrying how far it is indented, rather than a line owning a list of entry strings | Both flatter shapes lie about the page. An `entries` list per line made "Servo-claw; meltagun" a sibling of "AUTO-PROXY SERVITOR" instead of a choice FOR the COMBAT SERVITOR above it — wrong on 45 of the 85 lines that have entries. Keeping the old `redEmptyCircle2` filter instead dropped 157 printed lines and left two lines promising "one of the following options:" and listing none. Read in `position` order, indenting by `depth`, and the page's section is back: 740 bullets across the 48 composition trees, 114 / 490 / 136 by depth |
+| 46 | Naming a parent in a read | A read carries the parent's **id**, never a copy of its name: a kill team summary is {`id`, `name`, `faction_id`} | What `Unit_Read` already does, and the frontend already resolves it — `CatalogView.tsx` builds a `Map<UUID, string>` from the `/factions` listing, which it needs anyway for its filter rail. One way to name a parent across the whole API, and a rename cannot leave a stale copy in a cached response |
+| 47 | What a team detail carries | Everything nested: rules, ploys, equipment, operatives with their weapons and abilities, and the selection rules. 14–35 KB per team | Forced by there being no standalone operative route — nested is the only way to reach a datacard. It is also the 40k pattern (`Unit_Read` nests weapons and abilities even in its paged list), and #24 wants a game to snapshot the team's rules, ploys and every datacard anyway, so a game gets its snapshot in one call. Abilities and weapons are 42–53% of the bytes and the only cut that would change the size class — and they are what the page is for |
+| 48 | Reading the rows no team owns | One route, `/kill-team/universal`, carrying both the universal ploy and the universal equipment list | They are one concept — the rows with `kill_team_id` NULL — and one thing a client wants: fetch once, keep for the session, use with every team. Folding them into each team detail instead would add 7.4 KB to every response (+36% on a median team) and re-send it on every team view, to save a call that happens once per GAME |
+| 49 | Proving the catalog takes no writes | A test over `app.openapi()` asserting no `/kill-team` path declares any method but `get` | #21 says there is no write route at all, and until now nothing checked it. One assertion that cannot be outgrown by new routes, rather than a 405 test per path — the likely failure is a later slice mirroring the 40k routers, which are ~80% write code, and adding a `POST` nobody questions |
 
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
@@ -150,19 +157,16 @@ reader of the tables would not guess them:
 - **A page names each operative twice.** The composition says `FELLTALON`, the datacard
   says "Ravener Felltalon", so `resolve_operative` matches them with an ordered ladder of
   six rules, each needing a unique winner. They are the fallback for an entry the page
-  printed no link for (decision #35) — 26 of the 470 entries that resolve. The tie-break
-  direction depends on which side
-  carries the extra words. An AMBIGUOUS entry always raises, even when the caller is only
-  asking "is this an operative?", because a lenient "no" once dropped a real entry as
-  though it were a weapon loadout.
-- **`composition_warnings` reports what cannot be checked.** Four kinds: an entry the
-  parser could not name, passed through from the payload's `unresolved_entries`; a list no
-  legal roster can satisfy (a budget larger than everything its capped options could spend
-  — the state Battleclade reached once); a datacard no list offers; and a list whose label
-  names a datacard it does not offer. They travel in the payload beside `skipped`, so the seed
-  reports them too. An operative named by a team rule
-  or an ability is excused (Chaos Cult gain theirs mid-battle); equipment text is
-  deliberately *not* searched, so Gellerpox's vermin stay visible.
+  printed no link for (decision #35). Since #44 a composition entry is not resolved at
+  all, so this runs for one caller only: naming the datacards a CONDITIONAL block grants,
+  which is what `availability` is set from (#20). The tie-break direction depends on which
+  side carries the extra words, and an AMBIGUOUS entry raises rather than guessing.
+- **There is nothing left for `composition_warnings` to check.** It reported four kinds
+  of problem — an unresolvable entry, a budget no roster could satisfy, a datacard no list
+  offered, a label naming a card its list did not offer — and every one of them read a
+  structure #44 removed. A mis-read composition used to be silent and plausible; a
+  mis-read line is now just the line, printed wrong. The function is gone with the
+  checks.
 - **Universal rows come from two discovered pages**, not from a team: the ploys from the
   core rules (Command Re-roll) and the equipment from the universal equipment page, both
   found through the nav.
@@ -178,7 +182,7 @@ reader of the tables would not guess them:
   own text rather than in a column.
 - **The seed refuses a payload that names the same thing twice**, section by section: every
   natural key is a unique constraint, so a repeat would silently overwrite rather than add.
-- **An ABSENT `selection_lists` key leaves a composition alone; an empty list clears it.**
+- **An ABSENT `selection_rules` key leaves a composition alone; an empty list clears it.**
   A partial payload is not a statement that a team has no composition.
 - **One transaction per run, rolled back on failure**, so a team that fails leaves nothing.
 - **Deleting a faction that still has kill teams is refused** — a faction is a grouping,
@@ -195,18 +199,16 @@ times. Checked against all 48 team pages: all 48 parse and seed, with no warning
 | Table | Holds |
 |---|---|
 | `KTFaction` | name (unique) — the Kill Team faction list (see "Factions") |
-| `KillTeam` | name, `composition_notes` (decision #30); FK `KTFaction`. **No operative count** — see decision #16 |
+| `KillTeam` | name; FK `KTFaction`. **No operative count** and no composition columns — the composition is `KTSelectionRule` rows (decision #44) |
 | `KillTeamRule` | name, `description`, nullable `group` (decision #27), `position`; FK kill team — **never NULL**, so a rule always names its team — team-wide rules (e.g. Raveners' Burrow, Tunnel, Predatory Instincts), and the grouped options two teams choose from |
 | `KTOperative` | name, APL, move, save, wounds, keywords (JSONB, decision #26), `position`, `availability` (decision #20); FK kill team. Whether a roster may take it, and how often, belongs to the list offering it. `availability = in_battle` marks the three Gellerpox datacards a CONDITIONAL block grants; it is **not** a test for "no list offers this" — Chaos Cult's Chaos Mutant and Chaos Torment are offered by no list either and stay `roster` |
-| `KTSelectionList` | label (as printed), `budget` (in selections, or models when `shape` is `fixed` — decision #29), `shape`, `position`, `restriction_text`, `requisition_source` + `from_kill_team_id` (decisions #33, #34), `same_options_as_id` (decision #38); FK kill team. The three "options from elsewhere" columns are **mutually exclusive** — see "A list that offers nothing" |
-| `KTSelectionOption` | `cost` (default 1), `models` (default 1), `max_selections` (null = no limit), `loadout_options` (**display only**), `position` (print order, decision #25); `kill_team_id` + composite FKs to its list and operative |
-| `KTSelectionRestriction` | `keyword`, `max_operatives`; FK **kill team** — a team-wide cap on a SET of operatives (Deathwatch: up to one GRAVIS) |
+| `KTSelectionRule` | `position` (across the whole composition), `depth` (the page's indent), `kind` (`heading`/`line`/`restriction`/`note`), `text`; FK kill team. The composition as printed — nothing derived (decisions #44, #45) |
 | `KTWeapon` | name, `category` (`range`/`melee`, the same two values as the 40k column), `range` (decision #15), attacks, hit, normal damage, crit damage, weapon rules (JSONB, decision #26), `position` (print order, decision #25); FK operative. A name is unique **per category** — one weapon can print both profiles |
 | `KTAbility` | name, `description` (includes unique actions), `position` (print order, decision #25); FK operative |
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), `cp_cost` (default 1 — **most** pages print none; the core rules and Blades of Khaine print theirs), `description`, `position`; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
 | `KTEquipment` | name, `description`, `position`; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |
 
-Planned for K3 — none of this exists under `app/` yet.
+Planned for K3. `app/core/services/service_killteam.py` exists; the router does not.
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
 - Routes under `/api/v1/kill-team/...`, **read-only**: public read and no writes at
@@ -301,174 +303,50 @@ Mirrors `Army`.
 - `GET .../validate` **reports** composition problems rather than blocking saves;
   harden later, team by team.
 
-### Composition: budgeted selection lists
+### Composition: the page's own words
 
-A page states what a roster may contain as **lists**, each with a budget:
+A page states what a roster may contain as an indented list, and the catalog stores it as
+exactly that — one `KTSelectionRule` row per printed thing, in printed order, with the
+indent kept (decisions #44, #45). Battleclade's section, as stored:
 
-    Raveners   list 1  budget 1   [Ravener Prime]
-               list 2  budget 4   [Felltalon, Tremorscythe, Venomspitter, Warrior, Wrecker]
-                                  each max 1, except Warrior (no limit)
+    pos depth kind         text
+      0     0 line         1 BATTLECLADE TECHNOARCHEOLOGIST operative
+      1     0 line         1 BATTLECLADE SERVITOR UNDERSEER operative
+      2     0 line         8 BATTLECLADE operatives selected from the following list:
+      3     1 line         AUTO-PROXY SERVITOR
+      4     1 line         SERVITOR BREACHER
+      5     1 line         COMBAT SERVITOR with one of the following options:
+      6     2 line           Servo-claw; incendine igniter
+      7     2 line           Servo-claw; meltagun
+      8     2 line           Servo-claw; phosphor blaster
+      9     1 line         GUN SERVITOR with heavy arc rifle and augmetic claw
+     10     1 line         GUN SERVITOR with heavy bolter and augmetic claw
+     11     1 line         TECHNOMEDIC SERVITOR
+     12     0 restriction  Other than COMBAT SERVITOR operatives, your kill team can …
 
-Team size is per team — across the 48 teams the totals run from 5 to 14, with 10 the
-most common — so nothing about size is hardcoded.
+Read in `position` order, indenting by `depth`, and the page's section is back. Across the
+48 teams: **893 rules** — 810 bullets, 48 restriction sentences, 29 notes and 6 requisition
+headings, at depths 203 / 546 / 144.
 
-| Rule | Where it lives | Example |
-|---|---|---|
-| Selections a list may spend | `KTSelectionList.budget` | Raveners' second list: 4 |
-| Which operatives it offers | `KTSelectionOption` rows | the five specialists |
-| An operative that must be taken | a budget-1 list with one option | the Ravener Prime |
-| Choose one of several | a budget-1 list with several options | Angel of Death's sergeants |
-| An option costing two selections | `KTSelectionOption.cost` | Brood Brother's Magus |
-| Two models for one selection | `KTSelectionOption.models` | "2 PSYCHIC FAMILIAR … still counts as one selection" |
-| A cap on repeats | `KTSelectionOption.max_selections` | 1 per specialist, NULL for Warriors |
-| A team-wide cap on a **set** of operatives | `KTSelectionRestriction` (keyword + limit), on the kill team | Deathwatch: "up to one GRAVIS operative" |
+**Nothing is derived, and that is the point.** There is no budget, no cost, no models
+count, no repeat cap, no keyword cap, and no bullet resolved against a datacard. The
+catalog describes composition and never decides legality (decision #28), and until #44 it
+carried the apparatus anyway — which is where every problem in this area came from:
 
-The cap sits on the **option**, not the operative: it is stated by the list, and two
-lists can offer the same operative on different terms.
+| What was stored | What went wrong |
+|---|---|
+| a `budget` per list | summed to 43 selections for a team that fields 7, because some lists are alternatives |
+| a cap per keyword | `COMBAT SERVITOR` matched none of the seven operatives carrying it — the datacard prints the phrase as two keywords |
+| `max_selections` per option | two conditional clauses had to be stored at opposite strictnesses, because a column cannot hold "unless you took none of these" |
+| three reference columns | four rows read identically (`budget 5, 0 options`) while meaning four different things |
 
-**An option cannot offer another kill team's operative.** Two plain foreign keys only
-promise "some list" and "some operative", so the option carries `kill_team_id` and
-reaches both parents through composite foreign keys — a mismatch is refused by the
-database rather than by a service remembering to check (verified against Postgres with
-raw SQL). The cost is one denormalised column, a redundant unique key on each parent
-for the composite keys to target, and an `overlaps=` annotation on the relationships,
-since two of them write that column by design.
+Text is exact where a column had to approximate. And a tracker meant to allow **custom
+games** should not imply a restriction it will not apply: a roster offers every operative
+of its kill team (K4), with these rows read beside it.
 
-Three of the 48 teams use weighted costs (Blooded, Brood Brother, Pathfinders); `cost`
-and `models` are what make them expressible rather than exceptional.
-
-**Keyword caps are the other set-scoped rule, and they are common: 14 of the 48 teams
-state one.** Deathwatch prints "can only include each operative on this list once, and
-can only include up to one GRAVIS operative" — two rules in one sentence, and only the
-first is per-option. Several entries carry GRAVIS, so capping each at one still allows
-two, which is why `KTSelectionRestriction` exists rather than a note in
-`restriction_text`: unstructured, `validate` would approve illegal rosters for a
-quarter of the teams. It is evaluated against `KTOperative.keywords`, which the catalog
-already holds, and a **team** may carry several caps (Hunter Clade and Wyrmblade hold three each).
-
-**The restriction sentence is read, not just stored.** It carries two clauses, and both
-become data:
-
-- *"Other than CREMATOR and WARRIOR operatives, your kill team can only include each
-  operative on this list once"* → `max_selections = 1` on every option except those
-  whose datacard carries an exempted **keyword**. 47 of the 48 stored sentences cap repeats
-  and 44 carry an exemption clause; across the teams that is 279 options capped and 173 left
-  free.
-- *"Your kill team can only include up to two GUNNER operatives"* →
-  `KTSelectionRestriction`, scoped to the **kill team**. The two clauses have different
-  scopes and the sentence says so: the repeat clause reads "each operative on *this
-  list*", the cap reads "your *kill team*". Brood Brother proves it — its BROODCOVEN cap
-  matches the Magus, Patriarch and Primus, which a *different* list offers than the one
-  the sentence follows, so a list-scoped cap could never have applied. 14 of the 48 teams
-  state one, 20 caps in all, and a team may carry several.
-  **Matched by words, not strings**: the pages disagree about what counts as
-  one keyword — Battleclade's datacards print "COMBAT, SERVITOR" (two, comma-separated)
-  while Pathfinders prints "WEAPONS EXPERT" (one), and both are capped by a sentence
-  naming the phrase. An operative counts towards a cap when every word of the phrase
-  appears among the words of its keywords. A cap matching no operative on the page
-  raises: the phrase was misread, and a cap that never applies would leave `validate`
-  approving rosters it should refuse.
-
-A number word the parser does not know raises rather than defaulting, since a silently
-wrong cap approves illegal rosters.
-
-**Loadouts are display only.** `loadout_options` keeps the printed variants for an
-entry ("with flamer and gun butt", "with webber and gun butt") and **nothing validates
-them**. Wyrmblade prints three `GUNNER with …` lines, and 12 of the 48 teams repeat an
-operative that way: one operative with a weapon choice, so it is ONE option. Which
-weapons a roster took is recorded at K4 from the operative's own profiles and
-snapshotted into a game at K5. Which combinations are *legal* is a rule, and decision
-#1 leaves rules to the players — so the catalog says what an operative can use and
-stops there.
-
-A sentence may state SEVERAL caps, and the clauses after the first do not repeat
-"include" ("… up to two GUNNER operatives and up to four SUBDUCTOR operatives"), so every
-`up to N KEYWORD operative` clause is read — 20 caps across the 48 teams. A keyword capped
-twice at different numbers, which happens when the page distinguishes them by loadout
-(Battleclade: one COMBAT SERVITOR with a meltagun, three with another weapon), takes the
-**tighter** number: a loadout-keyed cap is a shape the model does not hold (decision #28),
-nothing is enforced, and the cost of the tighter number is a prompt to read the sentence
-rather than a refusal of a legal roster. The pages also vary the repeat clause itself —
-"each operative on this list once", "each operative **above** once", "each **option** on
-this list once" — and matching only the first left two teams' options uncapped entirely.
-
-`restriction_text` on a list keeps the sentence its caps were read from, for a human to
-check the parse against — only that sentence, since the footnotes and callouts printed
-around the composition are the team's `composition_notes` (decision #30).
-
-**Parsing it.** The section is one `ul.redTriangle`, three levels deep: a list, its
-operatives, and each operative's printed loadouts. Three shapes appear across the 48
-teams — a numbered line ("4 RAVENER operatives selected from the following list"), a
-fixed roster ("Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y",
-budget = the sum), and an unnumbered line naming one operative ("BOSS NOB operative
-with one of the following options", budget 1). A count on a LINE is a budget; a count on
-an ENTRY is models. Counts are read from the leading number only: "XV26 Stealth
-Battlesuit" would otherwise read as 26 operatives.
-
-A list line can be **nested**: Blades of Khaine prints its second list inside the
-leader line, and Hunter Clade wraps one in a `div` inside the same `ul`, so it is
-neither a direct child nor a descendant of another line. Both are read as their own
-lists, and an entry belongs to its *nearest* enclosing list.
-
-All 48 teams parse and seed, with **no unresolved entries**. Two pages used to carry an
-entry that named several datacards equally, and both are now read structurally rather than
-left to a human:
-
-- **Inquisitorial Agent** prints "5 INQUISITORIAL AGENT operatives selected from the
-  list above, or REQUISITIONED operatives from one group". Read as a reference: it carries
-  `same_options_as_id` and its own budget, no options of its own (decision #38), and its
-  six requisition groups are read separately (decisions #33, #34).
-- **Hunter Clade** prints "WARRIOR SICARIAN *", which matches both the Infiltrator and
-  the Ruststalker Warrior. A sibling entry claims the Infiltrator, so elimination leaves
-  one candidate (decision #37). An ambiguous entry still raises **even when the parser is
-  only asking "is this an operative?"** — a lenient "no" would drop it as though it were a
-  weapon loadout, which is how it silently vanished before.
-
-Decision #32's tolerance — an ambiguous entry loses itself, not its team — therefore has
-no live instance. It stays as the guard for a page that changes.
-
-A third page shape is read but deliberately **not** modelled as a list: **Gellerpox
-Infected** prints a second `ul.redTriangle` under "If you selected the MUTOID VERMIN
-faction equipment:", offering a "specified number" of Cursemite, Eyestinger Swarm and
-Sludge-Grub. There is no budget on that line because the number lives in the equipment
-("add four ... for the battle"), and those operatives never enter through a roster, so
-they are `availability = in_battle` (decision #20), read from that very block, and the
-parser still takes its composition from only the first
-block. The conditional sentence no longer lands in the first list's `restriction_text`:
-a first segment is only taken as a restriction when it READS like one, so Gellerpox's
-"If you selected …" is stored as a composition note instead (decision #30). What is
-still worth doing is keeping the second block's wording as display-only text, so a
-human can see why those three datacards are not offered.
-
-#### A list that offers nothing
-
-A `KTSelectionList` can have **no options of its own**, and this is normal rather than a
-failure. Four different things look identical at a glance, so a route must distinguish
-them by column, not by the empty list:
-
-| Why it is empty | How to tell | What it means |
-|---|---|---|
-| It points at another list of the same team | `same_options_as_id` set | The options are stated once, on the list that prints them (decision #38). Render that list's options; the budget here is the page's own |
-| It requisitions from an ally that is a kill team | `requisition_source` set **and** `from_kill_team_id` set | The ally's operatives live on its own page and were never resolved here (decision #34). Render a reference to that team |
-| It requisitions from an ally that is not a kill team | `requisition_source` set, `from_kill_team_id` **NULL** | Usually **not empty at all**, and never a failed lookup: that ally has no page of its own, which is exactly why the requisitioning page prints its datacards as its own rows (decision #31), so its entries resolved here and the list carries options — Sister of Silence (3) and Tempestus Scion (4). A list that IS empty in this state means the referenced team was deleted, since `from_kill_team_id` is `ondelete="SET NULL"`; the two are indistinguishable by column, and the next seed re-links it |
-| The page prints a line we could not structure | all three NULL | The label and `restriction_text` are the honest answer (decisions #28, #32), and `unresolved_entries` in the payload says why. Render the text, never an empty offer. **No list is in this state today** — it is the shape a changed page would produce, so handle it rather than test for it |
-
-The three "options from elsewhere" columns are **mutually exclusive**: a list with both
-`requisition_source` and `same_options_as_id` would claim an ally group offers the
-requisitioning team's own datacards, which is the mis-resolution decision #34 exists to
-prevent. Nothing in the schema forbids it yet.
-
-Two further rules for a consumer:
-
-- **Nothing is inherited.** A referring list does not carry the target's
-  `restriction_text`; the sentence lives on the list that offers the options (decision
-  #41), so following `same_options_as_id` is what finds it. Keyword caps need no
-  following at all — `KTSelectionRestriction` hangs off the **kill team**, so a cap
-  applies team-wide however the operative was reached.
-- **Do not sum every budget.** Lists carrying `requisition_source` or
-  `same_options_as_id` are alternatives, not further lists to spend on (decision #33).
-  Summing all ten of Inquisitorial Agent's gives 43; excluding those two flags gives 7,
-  in line with every other team. It is the only team where the two sums differ.
+What a reader still gets, because the page prints it: which operatives a line offers, how
+many, which loadouts each may take, what the repeat rule is and what the footnotes say —
+all of it as the page worded it, none of it as a number the catalog invented.
 
 Equipment rules are game-level rather than catalog or roster (decision #17): an option
 cannot be selected twice in one game, and the allowance is 4 pieces with some teams

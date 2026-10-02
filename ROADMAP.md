@@ -557,24 +557,36 @@ until `fire-team` merges.
 
 Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
 tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. all 48 of the site's
-teams parse and seed with **no warnings** — the three compositions that once needed a
-human are settled (decisions #35, #37, #38, and `availability` for Gellerpox). Tested
-against **synthetic** fixtures, so no scraped content is committed.
+teams parse and seed. Composition is stored as the page's own words — 893
+`KTSelectionRule` rows, nothing derived (KILLTEAM.md decision #44) — which is why there
+is no longer a warning channel for it: the checks all read a structure that is gone.
+Tested against **synthetic** fixtures, so no scraped content is committed.
 
 ## K3. Catalog routes
 
-**Status: Planned.** Read-only routes under `/api/v1/kill-team` (factions, kill
-teams, operatives): public read and **no write route at all**, unlike the 40k catalog's
-admin write — an admin edit would be silently undone by the next `make seed-kt`
-(KILLTEAM.md decision #21).
+**Status: In progress — `KillTeamService` is done, the router is not.** Read-only routes
+under `/api/v1/kill-team`: public read and **no write route at all**, unlike the 40k
+catalog's admin write — an admin edit would be silently undone by the next `make seed-kt`
+(decision #21), and one assertion over the published OpenAPI document proves it (#49).
+
+Three routes: `/factions` and `/teams` paged (`?faction_id=`), `/teams/{id}` carrying the
+team whole — rules, ploys, equipment, operatives with their datacards, and the selection
+rules (#47). Operatives are reachable only nested, so there is no standalone operative
+resource and no keyword filter until something asks for one. A read names a parent by id
+and never copies its name (#46). `/universal` carries the two collections that belong to
+no team (#48). `openapi.json` is checked in and CI fails if it drifts, so a new route is
+not finished until `make openapi` has run.
 
 ## K4. Roster
 
 **Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
 Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
-since the rules pick it per battle. Composition is checked, never enforced (decision
-#28): `validate` reports problems, including "this list carries a printed rule we do not
-model", and a save is never blocked.
+since the rules pick it per battle. A roster offers **every operative of its kill team**
+and nothing narrows that: composition is the page's words shown beside the roster, never
+a rule the catalog applies (decisions #28, #44), which is what lets a custom game be
+built. So there is no `validate` and nothing to report — if legality checking is ever
+wanted it is a feature of its own, decided then, not a column inherited from the
+catalog.
 
 ## K5. Game tracker
 
@@ -591,13 +603,14 @@ they gate the choice, so they are a game concern rather than a catalog one.
 
 ## K6. Widen to every kill team
 
-**Status: Planned — the three named compositions are now settled; what is left is the
-list below.** All 48 teams parse and seed with zero warnings and zero unresolved
-entries. Hunter Clade's `WARRIOR SICARIAN *` entry resolves by elimination within its
-list (decision #37); Inquisitorial Agent's cross-referencing line carries
-`same_options_as_id` and its requisition groups are read (decisions #33, #34, #38); and
-Gellerpox Infected's equipment-conditional datacards carry `availability = in_battle`
-(decision #20). What remains: Gellerpox's second block as display-only text, the
-`weapon_rules` asterisks and double spellings before the frontend renders them as chips,
-a CHECK forbidding both "options from elsewhere" columns on one list, and the conditional
-clauses `max_selections` and a keyword cap cannot express (decision #28).
+**Status: ✅ Done in substance.** All 48 teams parse and seed. The three pages that used
+to need a human decision needed it because the catalog was trying to structure their
+composition; storing the printed words instead (decision #44) removed the question rather
+than answering it — an entry the parser could not name is not a problem when no entry is
+named. Gellerpox Infected's equipment-conditional datacards still carry
+`availability = in_battle` (#20), which is the one thing in a composition that is still
+read structurally.
+
+What remains is small and unrelated to composition: Gellerpox's second block as
+display-only text, and the `weapon_rules` asterisks and double spellings, before the
+frontend renders them as chips.
