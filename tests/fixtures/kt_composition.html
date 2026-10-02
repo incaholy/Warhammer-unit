@@ -4,7 +4,8 @@
   them, plus the composition section itself.
 
   Structure is real: each ul.redTriangle holds selection lists, each list's operatives sit
-  in a nested ul.redCircle2, and each operative's weapon variants in a further nested ul.
+  in a nested ul.redCircle2, and each operative's weapon variants in a further nested
+  ul.redCircle2 or ul.redEmptyCircle2 -- both of which the real pages use.
   A restriction sentence is a loose text node after its list. There are THREE such trees --
   the composition, and one per requisition group -- and three restriction sentences.
 
@@ -80,9 +81,12 @@
       <li>2 <span class="kwb kwbo">EMBER WISP</span> operatives (still counts as one selection)</li>
       <li><span class="kwb kwbo">ASH PROPHET</span> (counts as two selections)</li>
       <li><span class="kwb kwbo">WARDEN</span> equipped with one of the following options:
-        <ul><li>Ash lash; rusted glaive</li><li>Cinder bolt; rusted glaive</li></ul>
+        <!-- The two classes the real pages use for a loadout list: Kommandos print
+             "one of the following options:" with a redCircle2, Angel of Death print
+             "one option from each of the following:" with a redEmptyCircle2. -->
+        <ul class="redCircle2"><li>Ash lash; rusted glaive</li><li>Cinder bolt; rusted glaive</li></ul>
         Or one option from each of the following:
-        <ul><li>Ember charm or ash token</li></ul>
+        <ul class="redEmptyCircle2"><li>Ember charm or ash token</li></ul>
       </li>
     </ul>
   </li>

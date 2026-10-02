@@ -28,9 +28,7 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
-    KTSelectionList,
-    KTSelectionOption,
-    KTSelectionRestriction,
+    KTSelectionRule,
     KTWeapon,
 )
 from app.core.security import create_access_token
@@ -440,58 +438,22 @@ def make_kt_equipment(session, make_kill_team):
 
 
 @pytest.fixture
-def make_kt_selection_list(session, make_kill_team):
+def make_kt_selection_rule(session, make_kill_team):
+    """One printed line, sentence or note of a team's composition (text, decision #28)."""
+
     def _make(kill_team=None, **overrides):
         kill_team = kill_team or make_kill_team()
         data = dict(
-            shape="budgeted",
-            label=f"{next(_counter)} operatives selected from the following list",
-            budget=4,
+            kind="line",
+            text=f"{next(_counter)} operatives selected from the following list:",
             position=0,
+            depth=0,
         )
         data.update(overrides)
-        selection_list = KTSelectionList(kill_team_id=kill_team.id, **data)
-        session.add(selection_list)
+        rule = KTSelectionRule(kill_team_id=kill_team.id, **data)
+        session.add(rule)
         session.commit()
-        session.refresh(selection_list)
-        return selection_list
-
-    return _make
-
-
-@pytest.fixture
-def make_kt_selection_option(session, make_kt_selection_list, make_kt_operative):
-    """An option on a list. Pass `operative=` to offer one that already exists."""
-
-    def _make(selection_list=None, operative=None, **overrides):
-        selection_list = selection_list or make_kt_selection_list()
-        operative = operative or make_kt_operative(
-            kill_team=selection_list.kill_team if selection_list.kill_team else None
-        )
-        option = KTSelectionOption(
-            kill_team_id=selection_list.kill_team_id,
-            selection_list_id=selection_list.id,
-            operative_id=operative.id,
-            **overrides,
-        )
-        session.add(option)
-        session.commit()
-        session.refresh(option)
-        return option
-
-    return _make
-
-
-@pytest.fixture
-def make_kt_selection_restriction(session, make_kill_team):
-    def _make(kill_team=None, **overrides):
-        kill_team = kill_team or make_kill_team()
-        data = dict(keyword="GRAVIS", max_operatives=1)
-        data.update(overrides)
-        restriction = KTSelectionRestriction(kill_team_id=kill_team.id, **data)
-        session.add(restriction)
-        session.commit()
-        session.refresh(restriction)
-        return restriction
+        session.refresh(rule)
+        return rule
 
     return _make

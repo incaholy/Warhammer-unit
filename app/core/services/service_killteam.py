@@ -23,7 +23,6 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
-    KTSelectionList,
 )
 from app.core.services.errors import NotFoundError
 
@@ -81,11 +80,10 @@ class KillTeamService:
     def get_kill_team(self, kill_team_id: UUID) -> KillTeam:
         """One kill team with everything a reader of its page would see.
 
-        Eager-loaded in a FLAT number of queries -- eleven, whatever the team's size:
-        the team and its faction, then one query per collection, and one each for the
-        two nested levels (an operative's weapons and abilities, a selection list's
-        options). The largest team, Inquisitorial Agent, is 138 rows over 10 lists,
-        and lazy loading it would be a query per operative per collection.
+        Eager-loaded in a FLAT number of queries -- nine, whatever the team's size: the
+        team and its faction, one query per collection, and one each for the two nested
+        levels (an operative's weapons and abilities). Lazy loading would be a query per
+        operative per collection.
 
         `selectinload` rather than `joinedload` throughout, including the
         many-to-one faction: a join would multiply the team row by every collection
@@ -96,11 +94,9 @@ class KillTeamService:
         orders by keyword, since a cap is read out of a sentence and has no printed
         position of its own.
 
-        What this does NOT do is resolve a list that offers nothing. A list can point
-        at another list of this team (`same_options_as_id`), at another kill TEAM
-        (`requisition_source` + `from_kill_team_id`), or at neither, and those mean
-        different things to a reader -- see KILLTEAM.md, "A list that offers nothing".
-        The rows say which; the caller decides how to render it.
+        `selection_rules` is the composition as the page prints it -- text with an indent
+        depth, nothing derived (decision #28). Read in `position` order, indenting by
+        `depth`, and it is the page's composition section back.
         """
         statement = (
             select(KillTeam)
@@ -110,10 +106,9 @@ class KillTeamService:
                 selectinload(KillTeam.rules),  # type: ignore[arg-type]
                 selectinload(KillTeam.ploys),  # type: ignore[arg-type]
                 selectinload(KillTeam.equipment),  # type: ignore[arg-type]
-                selectinload(KillTeam.keyword_caps),  # type: ignore[arg-type]
+                selectinload(KillTeam.selection_rules),  # type: ignore[arg-type]
                 selectinload(KillTeam.operatives).selectinload(KTOperative.weapons),  # type: ignore[arg-type]
                 selectinload(KillTeam.operatives).selectinload(KTOperative.abilities),  # type: ignore[arg-type]
-                selectinload(KillTeam.selection_lists).selectinload(KTSelectionList.options),  # type: ignore[arg-type]
             )
         )
         team = self.session.exec(statement).first()

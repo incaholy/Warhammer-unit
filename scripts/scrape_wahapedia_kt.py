@@ -35,7 +35,7 @@ import re
 import sys
 from collections.abc import Iterable
 from copy import copy
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from bs4 import BeautifulSoup, Tag
@@ -767,117 +767,14 @@ def parse_equipment(html: str) -> list[Equipment]:
 
 # The headings that end a team's own content: anything after them is the page's furniture.
 _AFTER_THE_TEAM = {"Datacards", "Books", "FAQ"}
-_COUNT_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
-# "your kill team can only include each operative on this list once" -- and the pages vary
-# the middle of it: Goremonger print "each operative ABOVE once" and Brood Brother "each
-# OPTION on this list once". Matching the literal phrase left those two teams' options
-# uncapped entirely, which is the permissive direction, so nothing noticed.
-_ONCE_EACH = re.compile(r"only include each (?:operative|option)\b[^.]{0,24}\bonce", re.IGNORECASE)
-# "Other than CREMATOR and WARRIOR operatives, ..." -- the exceptions to that
-_OTHER_THAN = re.compile(r"other than (.+?) operatives,", re.IGNORECASE | re.DOTALL)
-# "Your kill team can only include up to two GUNNER operatives." A sentence may state
-# SEVERAL, and the ones after the first do not repeat "include": Exaction Squad print
-# "... up to two GUNNER operatives (each must have a different option) and up to four
-# SUBDUCTOR operatives", and Wyrmblade three clauses in a row. Requiring "include" read
-# only the first of each, so three real caps were never stored.
-_KEYWORD_CAP = re.compile(r"up to (\w+) ([A-Z][A-Z0-9’'\- ]*?) operatives?", re.DOTALL)
 # What makes a segment a restriction sentence rather than a footnote: every one of the 48
 # real ones says a kill team "can only include" something, or names an exception with
 # "other than".
 _IS_RESTRICTION = re.compile(r"can only include|other than", re.IGNORECASE)
-# "selected from the list above" -- a line offering another list's options rather than its
-# own. One team prints one, and reading it as a name matched nine datacards.
-_CROSS_REFERENCE = re.compile(r"from the list above|as above", re.IGNORECASE)
-_COUNTS_AS = re.compile(r"counts as (\w+) selections?", re.IGNORECASE)
-_LEADING_COUNT = re.compile(r"^\s*(\d+)\s")
-_IS_NESTED_LIST = re.compile(r"selected from the following list", re.IGNORECASE)
 
 
 class CompositionNotParsed(ValueError):
     """A composition line does not match a shape this parser knows."""
-
-
-def _carries(phrase: str, keywords: Iterable[str]) -> bool:
-    """Whether an operative's `keywords` carry the keyword phrase `phrase`.
-
-    A restriction sentence names keywords as prose, and two page habits have to be
-    satisfied at once -- either rule alone gets real teams wrong.
-
-    A phrase may be SPLIT ACROSS KEYWORDS. Battleclade's datacards print "COMBAT,
-    SERVITOR" as two keywords while the sentence names "COMBAT SERVITOR", so comparing
-    whole strings matches nothing -- which left Battleclade with a budget of 8 over five
-    options capped at one each, a list no legal roster can satisfy.
-
-    But a phrase must not match PART of a keyword. Kommandos print "BREACHA BOY" as one
-    keyword and exempt "BOY" operatives: only the plain Boy may be taken repeatedly, and
-    a Breacha Boy is still once-only. Plain word-subset matching exempted all seven
-    specialists, and Kasrkin's DEMO-TROOPER and Hearthkyn's JUMP PACK WARRIOR the same
-    way.
-
-    So: the phrase must be covered by keywords that each fit INSIDE it. "COMBAT
-    SERVITOR" is covered by the keywords COMBAT and SERVITOR; "BOY" is not covered by
-    "BREACHA BOY", which carries a word the phrase does not.
-    """
-    wanted = set(_words(phrase))
-    covered = {word for keyword in keywords for word in _words(keyword) if set(_words(keyword)) <= wanted}
-    return bool(wanted) and wanted <= covered
-
-
-@dataclass(frozen=True)
-class KeywordCap:
-    """A cap on operatives carrying a keyword, as `KTSelectionRestriction` stores it.
-
-    `keyword` is the phrase as printed, and matching it is by WORDS rather than by
-    string, because the pages are not consistent about which is which: Battleclade's
-    datacards print "COMBAT, SERVITOR" -- two keywords, comma-separated -- while
-    Pathfinders prints "WEAPONS EXPERT" as one. Both are capped by a sentence naming the
-    phrase, so an operative satisfies a cap when every word of the phrase appears among
-    the words of its keywords.
-    """
-
-    keyword: str
-    max_operatives: int
-
-    def matches(self, keywords: Iterable[str]) -> bool:
-        """Whether an operative carrying `keywords` counts towards this cap."""
-        return _carries(self.keyword, keywords)
-
-
-@dataclass(frozen=True)
-class SelectionOption:
-    """One operative a list offers, as `KTSelectionOption` stores it."""
-
-    operative: str  # the canonical datacard name, via resolve_operative
-    cost: int = 1
-    models: int = 1
-    max_selections: int | None = None
-    loadout_options: list[str] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class SelectionList:
-    """One budgeted list, as `KTSelectionList` stores it."""
-
-    label: str
-    budget: int
-    position: int
-    # Which of the three printed shapes this line is (decision #29). It was computed to
-    # work out the budget and then thrown away -- but it is also what the budget MEANS:
-    # selections for `budgeted` and `single`, models for `fixed`. No default: an unstated
-    # shape is a bug, and a default is what hid one here.
-    shape: str
-    # The requisition group this line belongs to, as the page heads it ("Sister of Silence",
-    # "Death Korps"), or None for an ordinary composition line (decision #33). Lists that
-    # carry one are ALTERNATIVES to each other -- the page says "REQUISITIONED operatives
-    # from one group" -- not further lists to spend on.
-    requisition_source: str | None = None
-    # The list whose options this line offers, by POSITION, when the page says so instead of
-    # printing them again (decision #38). Only Inquisitorial Agent does: "5 INQUISITORIAL
-    # AGENT operatives selected from the list above, or REQUISITIONED operatives from one
-    # group".
-    same_options_as: int | None = None
-    options: list[SelectionOption] = field(default_factory=list)
-    restriction_text: str | None = None
 
 
 def _without_structure(node: Tag) -> Tag:
@@ -972,19 +869,6 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     return cleaned[0], cleaned[1:]
 
 
-def _loadouts(entry: Tag) -> list[str]:
-    """An entry's printed weapon variants: the items of its child lists. Display only.
-
-    Every nested list, not just the first: a line reading "with one of the following
-    options: ... Or one option from each of the following:" prints two groups, and for
-    display purposes they are all variants of the same entry.
-    """
-    variants = []
-    for nested in entry.find_all("ul"):
-        variants.extend(_own_text(li) for li in nested.find_all("li", recursive=False))
-    return [v for v in variants if v]
-
-
 def _anchored_operative(entry: Tag, datacards: list[str]) -> str | None:
     """The datacard an entry LINKS to, if the page linked one.
 
@@ -1017,518 +901,6 @@ def _anchored_operative(entry: Tag, datacards: list[str]) -> str | None:
         return None
     hits = [card for card in datacards if sorted(_words(card.upper())) == wanted]
     return hits[0] if len(hits) == 1 else None
-
-
-def _option_from(entry: Tag, datacards: list[str]) -> SelectionOption | None:
-    """One option, or None when the line does not name an operative.
-
-    The line's own text is "<count?> <NAME> <with loadout?>", and the name is what
-    resolves against the datacards -- which is also how a loadout line is recognised,
-    since no datacard is called "Autogun".
-    """
-    text = _own_text(entry)
-    if not text or _IS_NESTED_LIST.search(text):
-        return None
-
-    count = _LEADING_COUNT.match(text)
-    models = int(count.group(1)) if count else 1
-    name = _LEADING_COUNT.sub("", text, count=1)
-    # "equipped with" as well as "with": Nemesis Claw prints "VISIONARY equipped with
-    # one of the following options", and splitting on "with" alone left "VISIONARY
-    # equipped", which resolves to nothing.
-    name = re.split(r"\bequipped\b|\bwith\b|\bOr the following\b", name)[0]
-    name = re.sub(r"\boperatives?\b.*$", "", name, flags=re.IGNORECASE)
-    # A parenthetical is a note about the entry, not part of its name: "ASH PROPHET
-    # (counts as two selections)" resolves only once it is removed. The note itself is
-    # read from the full text below.
-    name = re.sub(r"\(.*?\)", " ", name).strip(" :,")
-
-    # The page states the answer in markup for most entries, and that beats every text rule
-    # below it (decision #35). Tried first, so the seven-rule ladder only runs where the
-    # page left nothing to read.
-    operative = _anchored_operative(entry, datacards)
-    if operative is None:
-        operative = resolve_operative(name, datacards, strict=False) if name else None
-    if operative is None:
-        return None
-
-    # "MAGUS (counts as two selections)" -- what taking it spends from the budget. Cost and
-    # models are INDEPENDENT axes read from different parts of the line: the leading count
-    # is models ("2 PSYCHIC FAMILIAR operatives"), and a "counts as" note is the cost. When
-    # a line prints both -- "2 PSYCHIC FAMILIAR operatives (still counts as one selection)"
-    # -- that is models=2 with cost=1, which falls out of reading each where it is printed.
-    spend = _COUNTS_AS.search(text)
-    cost = _COUNT_WORDS.get(spend.group(1).lower(), 1) if spend else 1
-
-    # Printed variants: the child list items, or the "with ..." tail when the line
-    # spells one loadout out inline ("3 VOIDSMAN with lasgun and gun butt").
-    variants = _loadouts(entry)
-    if not variants:
-        tail = re.search(r"\bwith\b(?! one of the following| one option)(.+)$", text, re.IGNORECASE)
-        if tail:
-            variants = [f"with {tail.group(1).strip(' :,')}"]
-
-    return SelectionOption(operative=operative, cost=cost, models=models, loadout_options=variants)
-
-
-@dataclass(frozen=True)
-class Composition:
-    """What a roster may contain: the budgeted lists, plus the team's keyword caps.
-
-    The caps sit here rather than on a list because the sentence scopes them that way --
-    "your kill team can only include up to one GRAVIS operative", beside a repeat clause
-    that says "each operative on this list once". Brood Brother caps BROODCOVEN, whose
-    operatives are offered by a different list than the one the sentence follows.
-    """
-
-    lists: list[SelectionList]
-    keyword_caps: list[KeywordCap] = field(default_factory=list)
-    # The footnotes and callouts printed around the composition, in printed order
-    # (decision #30). Display only, like `restriction_text`.
-    notes: list[str] = field(default_factory=list)
-    # Entries that name several datacards equally, so a human has to say which. Reported,
-    # never stored: an entry nobody can resolve is a gap in the read, not page content.
-    unresolved: list[str] = field(default_factory=list)
-
-
-def _keyword_caps(sentence: str) -> list[KeywordCap]:
-    """Caps on a SET of operatives, from "can only include up to two GUNNER operatives".
-
-    14 of the 48 teams state one, and several state more than one (Hunter Clade and
-    Wyrmblade hold three each). A number word this parser does not know raises rather than
-    defaulting: a silently wrong cap approves illegal rosters.
-
-    Read over the restriction sentence AND its notes, since Brood Brother state theirs in
-    a footnote: 20 caps across the 48 teams. A 21st clause is stated and deliberately not
-    minted -- the SUBDUCTOR cap Inquisitorial Agent's Exaction Squad group prints, whose
-    keyword no datacard on that page carries (see `_apply_restriction`'s `mint_caps`).
-    """
-    caps: dict[str, int] = {}
-    for word, keyword in _KEYWORD_CAP.findall(sentence):
-        limit = _COUNT_WORDS.get(word.lower())
-        if limit is None:
-            raise CompositionNotParsed(f"unknown quantity {word!r} in a keyword cap: {sentence!r}")
-        name = _clean(keyword).strip()
-        # A keyword can be capped TWICE at different numbers, when the page distinguishes
-        # them by loadout: Battleclade allow one COMBAT SERVITOR with a meltagun and three
-        # with another weapon. A loadout-keyed cap is a shape the model does not hold
-        # (decision #28), so one number stands for both, and it is the TIGHTER one: nothing
-        # is enforced, so its cost is a prompt to read the sentence -- which
-        # `restriction_text` carries -- rather than a refusal of a legal roster.
-        caps[name] = min(limit, caps.get(name, limit))
-    return [KeywordCap(keyword=keyword, max_operatives=limit) for keyword, limit in caps.items()]
-
-
-def _repeat_exceptions(sentence: str) -> set[str]:
-    """The keywords exempt from "each operative ... once", from "Other than CREMATOR and
-    WARRIOR operatives, ...". 44 of the 48 restriction sentences carry such a clause."""
-    match = _OTHER_THAN.search(sentence)
-    if match is None:
-        return set()
-    listed = re.split(r",| and ", match.group(1))
-    return {_clean(word).strip().upper() for word in listed if _clean(word).strip()}
-
-
-def _budget_and_shape(label: str, models: int) -> tuple[int, str]:
-    """What a composition line's number is, and which of the three printed shapes it is.
-
-    Shared by the main composition and the requisition groups, which print lines of exactly
-    the same three shapes (decision #29).
-    """
-    count = _LEADING_COUNT.match(label)
-    if count:
-        return int(count.group(1)), "budgeted"  # shape A
-    if label.lower().startswith("every"):
-        # Shape B states a fixed roster, so the number counts MODELS, not selections -- the
-        # one place `budget` changes unit, which is why the shape is stored.
-        return models, "fixed"
-    return 1, "single"  # shape C: an unnumbered line naming one operative
-
-
-def _lists_from(
-    top: Tag, datacards: list[str], keywords_of: dict[str, set[str]]
-) -> tuple[list[SelectionList], list[str]]:
-    """Every selection list in one `ul.redTriangle` tree, and the entries nobody can resolve.
-
-    Separate from `parse_composition` because a page can print more than one such tree:
-    Inquisitorial Agent carries a whole `Inquisitorial Requisition` section, one group per
-    ally it may requisition from, each a tree of exactly this shape.
-    """
-    # Which items are LISTS rather than entries, at any depth. Two teams print a second
-    # list inside the first rather than beside it: Blades of Khaine nests "7 BLADES OF
-    # KHAINE operatives ..." under its leader line, and Hunter Clade wraps "9 HUNTER
-    # CLADE operatives ..." in a div inside the same `ul`, so it is neither a direct
-    # child nor a descendant of the first line. Both were silently folded into the
-    # budget-1 line above, offering a one-operative team.
-    # A `redEmptyCircle2` list is LOADOUTS, never operatives -- measured over the 48
-    # composition trees: 149 items, not one of them an operative (157 including the
-    # requisition trees this also reads, decision #36). Skipping them costs nothing
-    # today and closes a hazard the anchor rule opens: a loadout line that happens to link a
-    # datacard ("Warden's blade" linking the Warden) would otherwise be read as an entry
-    # offering that operative. The page's own class says it is not one.
-    items: list[Tag] = [
-        item
-        for item in top.find_all("li")
-        if "redEmptyCircle2" not in (item.parent.get("class") or [] if item.parent else [])
-    ]
-
-    def enclosing_items(node: Tag) -> list[Tag]:
-        return [item for ancestor in node.parents for item in items if ancestor is item]
-
-    line_nodes: list[Tag] = [
-        item
-        for item in items
-        # A list is either an item no other item contains (however it is wrapped), or
-        # one that says so in its own text.
-        if not enclosing_items(item) or _IS_NESTED_LIST.search(_own_text(item))
-    ]
-
-    def owner_of(entry: Tag) -> Tag | None:
-        """The line an entry belongs to: its NEAREST enclosing line. A nested list's
-        entries belong to that list, not to the line that contains it."""
-        for ancestor in entry.parents:
-            if any(ancestor is line for line in line_nodes):
-                return ancestor
-        return None
-
-    lists: list[SelectionList] = []
-    unresolved: list[str] = []
-    for position, line in enumerate(line_nodes):
-        label = _own_text(line)
-        # Where this line's ambiguities start, so the gate below can tell "nothing ambiguous
-        # HERE" from "nothing ambiguous on the whole page".
-        unresolved_before = len(unresolved)
-        own_entries = [
-            entry
-            for entry in items
-            if not any(entry is other for other in line_nodes) and owner_of(entry) is line
-        ]
-        # Read every entry first, keeping the ambiguous ones aside with their candidates, so
-        # the elimination below can see what the rest of the LIST already claimed -- and so
-        # an eliminated entry keeps its printed position rather than being appended last.
-        read: list[tuple[Tag, SelectionOption | None, OperativeNotResolved | None]] = []
-        for entry in own_entries:
-            try:
-                read.append((entry, _option_from(entry, datacards), None))
-            except OperativeNotResolved as exc:
-                read.append((entry, None, exc))
-
-        claimed = {option.operative for _, option, _ in read if option is not None}
-        settled: list[SelectionOption] = []
-        for entry, option, failure in read:
-            if failure is not None:
-                # A list does not offer the same operative twice under two names, so a
-                # candidate another entry already claimed is not this one (decision #37).
-                # Hunter Clade print "WARRIOR INFILTRATOR" -- which the page LINKS to the
-                # Infiltrator Warrior (#35) -- and then "WARRIOR SICARIAN", matching both
-                # Sicarian Warriors; with the Infiltrator claimed, only the Ruststalker is
-                # left, which is how a human reads it and what the entry's own Ruststalker
-                # loadouts confirm.
-                remaining = [card for card in failure.candidates if card not in claimed]
-                # `== 1` is load-bearing, not belt-and-braces -- an earlier comment here
-                # claimed the opposite and was wrong. `candidates` carries EVERY hit at the
-                # failing rule, not only the tied ones, so a narrowed-but-still-plural list
-                # can have a unique fewest-extra-words winner and resolve: with "Alpha
-                # Warrior" claimed, ["Alpha", "Omega", "Big Omega"] Warrior answers "Omega
-                # Warrior", which is a guess. The anchor is worse -- one that matched two
-                # cards against the full list returns None (#35) and exactly one against the
-                # narrowed list, so it would answer where it had just refused.
-                if len(remaining) == 1:
-                    # The same reader, given the one candidate: no second code path, and if
-                    # even that does not resolve, the entry stays unresolved.
-                    with contextlib.suppress(OperativeNotResolved):
-                        option = _option_from(entry, remaining)
-                if option is None:
-                    # Dropped, and REPORTED -- not the old silence, which lost a real entry.
-                    # `unresolved` travels in the payload and both tools print it.
-                    unresolved.append(f"{_own_text(entry)[:60]} — {failure}")
-                    continue
-                claimed.add(option.operative)
-            if option is None:
-                continue
-            settled.append(option)
-
-        options: dict[str, SelectionOption] = {}
-        for option in settled:
-            existing = options.get(option.operative)
-            if existing is None:
-                options[option.operative] = option
-            else:  # the same operative again, with another printed loadout
-                options[option.operative] = SelectionOption(
-                    operative=existing.operative,
-                    cost=existing.cost,
-                    models=existing.models,
-                    loadout_options=[*existing.loadout_options, *option.loadout_options],
-                )
-
-        # A line with no entries beneath it names its own operative ("1 RAVENER PRIME
-        # operative", "BOSS NOB operative with one of the following options:"). Its
-        # leading number is the BUDGET, not models -- "2 BOMB SQUIG operatives" is two
-        # selections of one operative, where a nested "2 PSYCHIC FAMILIAR operatives"
-        # is two models for one selection.
-        # A line can point at another list instead of printing its options again. Checked
-        # BEFORE reading the label as an operative name, because it is not one: trying made
-        # "5 INQUISITORIAL AGENT operatives selected from the list above" match nine Agent
-        # datacards and report an ambiguity that was never a naming problem (decision #38).
-        if not options and _CROSS_REFERENCE.search(label):
-            if position:
-                budget, shape = _budget_and_shape(label, 0)
-                lists.append(
-                    SelectionList(
-                        label=label,
-                        budget=budget,
-                        position=position,
-                        shape=shape,
-                        same_options_as=position - 1,
-                    )
-                )
-                continue
-            # At position 0 there is nothing above to point at, so the line cannot be stored
-            # as a reference and falls through -- where the guard below stops it being read
-            # as a name instead.
-
-        if not options:
-            try:
-                inline = _option_from(line, datacards)
-            except OperativeNotResolved as exc:
-                # The same tolerance for a LINE that names its own operative ambiguously.
-                # Inquisitorial Agent's only line reads "5 INQUISITORIAL AGENT operatives
-                # selected from the list above, or REQUISITIONED operatives from one group",
-                # and that name matches nine Agent datacards.
-                unresolved.append(f"{label[:60]} — {exc}")
-                inline = None
-            # A line that POINTS at another list names no operative, so a name read out of it
-            # is not one -- even when it resolves cleanly. Only position 0 reaches here (the
-            # branch above returns for every other position), and a cross-reference printed
-            # first references nothing, so leaving `options` empty makes the line raise below:
-            # a page shape the parser does not understand, reported as a skip. Reading it as a
-            # name instead invented an option the page never offered, with nothing in
-            # `unresolved` to say so -- the very thing decision #38 exists to prevent.
-            if inline is not None and not _CROSS_REFERENCE.search(label):
-                options = {
-                    inline.operative: SelectionOption(
-                        operative=inline.operative,
-                        cost=inline.cost,
-                        models=1,
-                        loadout_options=inline.loadout_options,
-                    )
-                }
-
-        budget, shape = _budget_and_shape(label, sum(o.models for o in options.values()))
-
-        if not options and len(unresolved) == unresolved_before:
-            # No options AND nothing ambiguous ON THIS LINE means the parser did not recognise
-            # it at all, which is a parser gap and must be loud -- `scrape` turns the raise
-            # into a named skip rather than a failed run. A line whose entries were all
-            # ambiguous is different: it is stored with its label and NO options, which reads
-            # as "the page says this, and we could not structure it" -- honest under decision
-            # #28. No page needs that tolerance today: Inquisitorial Agent's option-less line
-            # is stored as a cross-reference (#38) before reaching here, and its six
-            # requisition groups -- four of them other kill teams, whose operatives an option
-            # may never offer (#31, #34) -- are read by `parse_requisition`.
-            #
-            # Counted per line, because `unresolved` accumulates over the whole tree: testing
-            # it whole meant that after ANY earlier ambiguity an unreadable line was stored
-            # silently instead of raising, and the elimination rule (#37) fills `unresolved`
-            # by design -- so the loudest check the parser has switched itself off precisely
-            # when the parser was already struggling. The sibling gate below is different: it
-            # asks whether the WHOLE composition came out empty, so it reads the whole list.
-            raise CompositionNotParsed(f"no operatives found for composition line {label!r}")
-        lists.append(
-            SelectionList(
-                label=label,
-                budget=budget,
-                position=position,
-                shape=shape,
-                options=list(options.values()),
-            )
-        )
-
-    if not lists and not unresolved:
-        raise CompositionNotParsed("the composition list is empty")
-
-    return lists, unresolved
-
-
-@dataclass(frozen=True)
-class RequisitionGroup:
-    """One ally a team may requisition operatives from, as its page prints it."""
-
-    source: str
-    lists: list[SelectionList] = field(default_factory=list)
-    # A group prints its own restriction sentence, and the caps and notes read out of it are
-    # the TEAM's, wherever on the page they appear -- so they travel back up with the lists.
-    keyword_caps: list[KeywordCap] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-    unresolved: list[str] = field(default_factory=list)
-
-
-def _apply_restriction(
-    top: Tag,
-    lists: list[SelectionList],
-    keywords_of: dict[str, set[str]],
-    *,
-    mint_caps: bool = True,
-) -> tuple[list[SelectionList], list[KeywordCap], list[str]]:
-    """The loose text printed under a composition tree, read and applied to its lists.
-
-    Shared by the main composition and by every requisition group, because a group prints
-    the same three things in the same place. `parse_requisition` used to read none of it:
-    five of Inquisitorial Agent's six groups lost their sentence, three lost their notes,
-    and the four operatives its Tempestus Scion group offers were stored with no repeat
-    limit, where the page states one.
-
-    `mint_caps` is False for a group whose ally is a kill team of its own. Such a cap names
-    a keyword no datacard on THIS page can carry -- Exaction Squad cap SUBDUCTOR, and their
-    operatives live on their own page -- so minting it would trip the check below and lose
-    the whole team, and an unmatched cap would be inert even if it did not. The sentence is
-    still stored, which is all decision #28 asks: the catalog describes, it does not enforce.
-    """
-    sentence, notes = _composition_text(top)
-    caps: list[KeywordCap] = []
-    if sentence and lists:
-        # Printed after the whole composition and referring to "this list", so it
-        # belongs to the last one. Two clauses are read out of it: how often an
-        # operative may repeat, and caps on whole sets of operatives.
-        #
-        # The last list it OFFERS, though, not the last one printed: those differ for
-        # Inquisitorial Agent, whose composition ends on a cross-reference naming no
-        # options of its own (decision #38). The rule landed there and was applied to an
-        # empty set, so its nine Agents were stored with no repeat limit at all. The
-        # sentence goes where the options it governs are, so a reader finds the rule and
-        # the capped options on one row. With no options anywhere in the tree it stays on
-        # the last line -- a known team's requisition group, whose sentence is an ally's
-        # rule this page only describes (decision #34). The same on 47 of the 48 teams,
-        # where the last printed list is also the last that offers anything.
-        target = max((i for i, lst in enumerate(lists) if lst.options), default=len(lists) - 1)
-        last = lists[target]
-        exempt = _repeat_exceptions(sentence)
-        repeats_capped = bool(_ONCE_EACH.search(sentence))
-        options = [
-            SelectionOption(
-                operative=option.operative,
-                cost=option.cost,
-                models=option.models,
-                # "each operative on this list once" -- except the keywords the
-                # sentence exempts, which stay uncapped beyond the budget. The
-                # exemption is a KEYWORD, matched against what the datacard carries by
-                # WORDS (see `_carries`): Raveners exempt WARRIOR and "Ravener Warrior"
-                # holds it, while Battleclade exempts the two-word COMBAT SERVITOR.
-                max_selections=1
-                if repeats_capped
-                and not any(_carries(phrase, keywords_of.get(option.operative, set())) for phrase in exempt)
-                else option.max_selections,
-                loadout_options=option.loadout_options,
-            )
-            for option in last.options
-        ]
-        # Over the restriction sentence AND its notes: Brood Brother state their
-        # BROODCOVEN cap in a footnote, not in the sentence, and a cap is team-wide
-        # wherever it is printed (see `Composition`).
-        caps = _keyword_caps(" ".join([sentence, *notes])) if mint_caps else []
-        # A cap nobody can trigger means the phrase was misread, and a cap that
-        # silently never applies is worse than none: `validate` would approve rosters
-        # it should refuse. Checked against EVERY operative on the page, not just this
-        # list's -- the sentence says "your kill team" (Brood Brother caps BROODCOVEN,
-        # which its Magus and Patriarch carry from a different list).
-        for cap in caps:
-            if not any(cap.matches(carried) for carried in keywords_of.values()):
-                raise CompositionNotParsed(
-                    f"the cap on {cap.keyword!r} matches no operative's keywords on this page"
-                )
-        # `replace` rather than a fresh SelectionList: this rebuild exists only to apply
-        # the repeat caps, and listing the fields by hand silently dropped `shape` the
-        # moment it was added -- Gellerpox has one list, so its only list is the last one,
-        # and it came back mislabelled as `budgeted` while its budget counted models.
-        lists[target] = replace(last, options=options, restriction_text=sentence)
-    return lists, caps, notes
-
-
-def parse_requisition(html: str, known_teams: Iterable[str] = ()) -> list[RequisitionGroup]:
-    """The groups under an "… Requisition" section, one per ally.
-
-    Only Inquisitorial Agent prints one, and it is why that team used to be unusable: its
-    main composition line points at these groups, so seven of its eighteen datacards were
-    offered by nothing. Each group is a `ul.redTriangle` tree of exactly the shape a
-    composition uses, under its own `h2`.
-
-    Two kinds come out, and the difference is whether the ally is a kill team of its own --
-    which is why `known_teams` is passed in rather than guessed at.
-
-    Sister of Silence and Tempestus Scion are NOT kill teams, which is precisely why this
-    page prints their datacards, as its own rows (decision #31). Their entries resolve here
-    and become ordinary lists, and that is what makes those seven operatives usable.
-
-    Death Korps, Exaction Squad, Imperial Navy Breacher and Kasrkin ARE kill teams, so their
-    operatives live on their own pages and must never be resolved against this one. Doing so
-    is not merely fruitless, it is WRONG: the resolver's last-word rule matched Death Korps'
-    "TROOPER" to this page's Tempestus Scion Trooper. Such a group keeps its printed line --
-    the label and the budget are page facts -- and offers nothing, and the reference to the
-    team it names is decision #34.
-    """
-    soup = _soup(html)
-    head = next((h for h in soup.find_all("h2") if h.get_text(strip=True).endswith("Requisition")), None)
-    if head is None:
-        return []
-
-    operatives = parse_operatives(html)
-    datacards = [operative.name for operative in operatives]
-    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
-
-    known = {name.casefold() for name in known_teams}
-    groups: list[RequisitionGroup] = []
-    for heading in head.find_all_next("h2"):
-        title = _clean(heading.get_text(strip=True))
-        if title in _AFTER_THE_TEAM:
-            break
-        top = next(
-            (
-                el
-                for el in heading.find_all_next()
-                if el.name == "ul" and "redTriangle" in (el.get("class") or [])
-            ),
-            None,
-        )
-        # `find_all_next` walks the whole document, so a group's tree must be one that comes
-        # before the NEXT heading -- otherwise the last group would borrow a later section's.
-        if top is None or (nxt := heading.find_next("h2")) is not None and nxt in top.parents:
-            continue
-        if top.find_previous("h2") is not heading:
-            continue
-
-        if title.casefold() in known:
-            # The ally has its own page, so nothing here is ours to resolve. Keep what the
-            # page states about the line and no options.
-            line = top.find("li")
-            if line is None:
-                continue
-            label = _own_text(line)
-            budget, shape = _budget_and_shape(label, 0)
-            lists = [
-                SelectionList(
-                    label=label,
-                    budget=budget,
-                    position=0,
-                    shape=shape,
-                    requisition_source=title,
-                )
-            ]
-            lists, _, notes = _apply_restriction(top, lists, keywords_of, mint_caps=False)
-            groups.append(RequisitionGroup(source=title, lists=lists, notes=notes))
-            continue
-
-        lists, unresolved = _lists_from(top, datacards, keywords_of)
-        lists, caps, notes = _apply_restriction(top, lists, keywords_of)
-        groups.append(
-            RequisitionGroup(
-                source=title,
-                lists=[replace(lst, requisition_source=title) for lst in lists],
-                keyword_caps=caps,
-                notes=notes,
-                unresolved=unresolved,
-            )
-        )
-    return groups
 
 
 def parse_in_battle_operatives(html: str) -> list[str]:
@@ -1570,23 +942,89 @@ def parse_in_battle_operatives(html: str) -> list[str]:
     return names
 
 
-def parse_composition(html: str) -> Composition:
-    """The kill team's selection lists, in printed order.
+@dataclass(frozen=True)
+class SelectionRule:
+    """One printed thing from a composition: a bullet, a sentence, a note or a heading."""
 
-    Three shapes appear across the 48 teams:
+    position: int
+    kind: str
+    text: str
+    depth: int = 0
 
-      A  "4 RAVENER operatives selected from the following list:"  -> budget 4
-      B  "Every ELUCIDIAN STARSTRIDER operative in the following list: 1 X, 1 Y"
-                                                                   -> a fixed roster,
-                                                                      budget = the sum
-      C  "BOSS NOB operative with one of the following options:"    -> an implicit 1
 
-    Anything else raises rather than guessing a budget: a wrong number would seed a
-    roster rule that looks right.
+def _printed_bullets(top: Tag) -> list[tuple[int, str]]:
+    """Every bullet in a composition tree as (indent depth, text), in printed order.
 
-    Repeated operatives collapse. Wyrmblade prints three "GUNNER with ..." lines, and
-    that is one operative with a weapon choice (KILLTEAM.md: loadouts are display
-    only), so the variants merge into one option.
+    Depth is how many list items enclose this one, which is exactly the page's indent: a
+    composition line is 0, one of its entries 1, and an entry's own weapon options 2.
+    Measured over the 48 composition trees: 740 bullets, 114 / 490 / 136 by depth.
+
+    Keeping the depth is the whole point. The alternative shapes both lie about the page.
+    Flattening a line's descendants into one list made "Servo-claw; meltagun" a sibling of
+    "AUTO-PROXY SERVITOR" rather than a loadout for the COMBAT SERVITOR above it -- wrong
+    on 45 of the 85 lines that have entries. Dropping the `redEmptyCircle2` loadout
+    bullets instead lost 157 printed lines and left two lines promising "one of the
+    following options:" and listing none.
+
+    Text only, and nothing is resolved against a datacard. That is what makes this
+    faithful: an entry names an operative the way the page writes it, and the page is not
+    always consistent with its own card names -- Hunter Clade print "WARRIOR SICARIAN"
+    for a card called Sicarian Ruststalker Warrior.
+    """
+    items = list(top.find_all("li"))
+    bullets = []
+    for item in items:
+        depth = sum(1 for ancestor in item.parents for other in items if ancestor is other)
+        if text := _own_text(item):
+            bullets.append((depth, text))
+    return bullets
+
+
+def _requisition_trees(soup: Tag) -> list[tuple[str, Tag]]:
+    """Each "... Requisition" group as (ally name, its composition tree).
+
+    Only Inquisitorial Agent prints a requisition section, and under this model its groups
+    are not special: the heading and the lines are text like any other. `known_teams` is no
+    longer needed -- there is nothing to resolve and no reference to link, so whether the
+    ally has a page of its own stops being a question the catalog answers.
+    """
+    head = next((h for h in soup.find_all("h2") if h.get_text(strip=True).endswith("Requisition")), None)
+    if head is None:
+        return []
+    trees = []
+    for heading in head.find_all_next("h2"):
+        title = _clean(heading.get_text(strip=True))
+        if title in _AFTER_THE_TEAM:
+            break
+        top = next(
+            (
+                el
+                for el in heading.find_all_next()
+                if el.name == "ul" and "redTriangle" in (el.get("class") or [])
+            ),
+            None,
+        )
+        # `find_all_next` walks the whole document, so a group's tree must come before the
+        # NEXT heading -- otherwise the last group would borrow a later section's.
+        if top is None or (nxt := heading.find_next("h2")) is not None and nxt in top.parents:
+            continue
+        if top.find_previous("h2") is not heading:
+            continue
+        trees.append((title, top))
+    return trees
+
+
+def parse_selection_rules(html: str) -> list[SelectionRule]:
+    """A kill team's composition as the page prints it, in one ordered run.
+
+    Replaces `parse_composition`'s structured output. The catalog describes composition
+    and never enforces it (decision #28), so there is no budget to compute, no option to
+    resolve, no cap to read out of a sentence and no reference to link -- and therefore
+    nothing a mis-read can get subtly wrong while looking right. A line the parser cannot
+    interpret is not a problem any more, because it is not interpreted.
+
+    `position` runs across the whole composition, lines and sentences and notes
+    interleaved as printed, so the order a reader sees is the order stored.
     """
     soup = _soup(html)
     head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
@@ -1599,119 +1037,38 @@ def parse_composition(html: str) -> Composition:
     if top is None:
         raise CompositionNotParsed("the 'Operatives' section has no composition list")
 
-    # After the structural checks, so a page with no composition reports that rather
-    # than failing on its datacards.
-    operatives = parse_operatives(html)
-    datacards = [operative.name for operative in operatives]
-    keywords_of = {operative.name: set(operative.keywords) for operative in operatives}
+    rules: list[SelectionRule] = []
 
-    lists, unresolved = _lists_from(top, datacards, keywords_of)
-    lists, caps, notes = _apply_restriction(top, lists, keywords_of)
-    return Composition(lists=lists, keyword_caps=caps, notes=notes, unresolved=unresolved)
+    def emit(kind: str, text: str, depth: int = 0) -> None:
+        rules.append(SelectionRule(position=len(rules), kind=kind, text=text, depth=depth))
 
+    def emit_tree(tree: Tag) -> None:
+        for depth, text in _printed_bullets(tree):
+            emit("line", text, depth)
+        sentence, notes = _composition_text(tree)
+        if sentence:
+            emit("restriction", sentence)
+        for note in notes:
+            emit("note", note)
 
-def composition_warnings(team: dict) -> list[str]:
-    """Things a human should look at in a scraped team. None of them is fatal.
+    emit_tree(top)
+    for title, group in _requisition_trees(soup):
+        emit("heading", title)
+        emit_tree(group)
 
-    These checks exist because a mis-read composition is SILENT: it seeds cleanly, and the
-    result is a roster rule that looks right. They found three real problems in one pass --
-    Gellerpox's three vermin (then a second composition block nothing read; it is read now,
-    and they carry `availability = in_battle`, decision #20), Void-dancer's Lead Player (a
-    tie-break that picked the wrong card), and Chaos Cult's two rule-granted operatives,
-    which turned out to be correct. Four kinds of warning come out: an unresolved entry
-    passed through from the parser, the two numbered below, and a budget no legal roster
-    can satisfy.
-
-    1. A datacard no list offers. That operative cannot be fielded, so either the page
-       grants it some other way or the composition was read wrongly. Operatives named by
-       a team RULE or an ABILITY are excluded: Chaos Cult's Mutant and Torment are
-       gained mid-game by "Accursed Gifts" and "Mutation", not selected. Equipment text
-       is deliberately NOT searched -- Gellerpox's vermin come from MUTOID VERMIN
-       equipment, and "equipment can add an operative" is a shape the model cannot hold
-       yet, so it should stay visible.
-
-    2. A list whose label names a datacard the list does not offer. This catches the
-       mis-resolutions the first check cannot: one that lands on a card offered
-       elsewhere leaves no unused datacard behind, and nothing else would notice.
-    """
-    warnings: list[str] = []
-    for entry in team.get("unresolved_entries", []):
-        warnings.append(f"a composition entry needs a human: {entry}")
-    cards = [operative["name"] for operative in team["operatives"]]
-    offered = {option["operative"] for listing in team["selection_lists"] for option in listing["options"]}
-
-    prose = " ".join(
-        [rule["description"] for rule in team["rules"]]
-        + [ability["description"] for operative in team["operatives"] for ability in operative["abilities"]]
-    )
-    prose_words = set(_words(prose.upper()))
-    in_battle = {
-        operative["name"] for operative in team["operatives"] if operative.get("availability") == "in_battle"
-    }
-    for card in cards:
-        card_words = set(_words(card.upper()))
-        # `in_battle` datacards are not rosterable BY DESIGN (decision #20), so a list not
-        # offering one is correct rather than a gap.
-        if card in offered or card in in_battle or not card_words or card_words <= prose_words:
-            continue
-        warnings.append(f"no selection list offers {card!r}, and no rule or ability names it")
-
-    for listing in team["selection_lists"]:
-        # A list no legal roster can satisfy. Battleclade reached this state once -- a budget
-        # of 8 over five options each capped at 1 -- because a two-word exemption matched
-        # nothing, and it was found by hand rather than by the pipeline. Only `budgeted` and
-        # `single` lines count selections; a `fixed` line's budget counts models (#29).
-        caps = [option["max_selections"] for option in listing["options"]]
-        if listing["shape"] != "fixed" and caps and all(cap is not None for cap in caps):
-            ceiling = sum(cap * option["cost"] for cap, option in zip(caps, listing["options"], strict=True))
-            if ceiling < listing["budget"]:
-                warnings.append(
-                    f"list {listing['position']} has a budget of {listing['budget']} but at most "
-                    f"{ceiling} can be spent on it — no legal roster exists"
-                )
-
-        label_words = set(_words(listing["label"].upper()))
-        named = [card for card in cards if _words(card.upper()) and set(_words(card.upper())) <= label_words]
-        listed = {option["operative"] for option in listing["options"]}
-        # The MOST SPECIFIC card the label names, not just any of them: a label reading
-        # "... LEAD PLAYER operative" names both `Lead Player` and `Player`, and a list
-        # offering only the second is exactly the mis-resolution being looked for.
-        best = max(named, key=lambda card: len(_words(card)), default=None)
-        if best is not None and best not in listed:
-            warnings.append(
-                f"list {listing['position']} is labelled {listing['label'][:48]!r}, "
-                f"which names {best!r}, but it offers {sorted(listed)}"
-            )
-    return warnings
+    if not rules:
+        raise CompositionNotParsed("the composition list is empty")
+    return rules
 
 
 def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bool = False) -> dict:
     """Everything one kill team's page holds, in the seed's shape.
 
-    Operative names are the DATACARD's, here and in the selection options, so the seed
-    resolves nothing: `resolve_operative` already did that while both halves of the page
-    were in hand.
+    Operative names are the DATACARD's. A composition entry's text is NOT -- it is what
+    the page printed, which is sometimes a name no datacard carries (decision #28).
     """
     html = fetch(entry.url, refresh=refresh)
-    composition = parse_composition(html)
     in_battle = set(parse_in_battle_operatives(html))
-    # A requisition group's lines are further composition lists for THIS team, continuing the
-    # print order -- and they are alternatives to one another, which `requisition_source`
-    # says (decision #33).
-    lists = list(composition.lists)
-    unresolved = list(composition.unresolved)
-    notes = list(composition.notes)
-    caps = {cap.keyword: cap.max_operatives for cap in composition.keyword_caps}
-    for group in parse_requisition(html, known_teams):
-        for listing in group.lists:
-            lists.append(replace(listing, position=len(lists)))
-        unresolved += group.unresolved
-        notes += group.notes
-        for cap in group.keyword_caps:
-            # The same keyword capped in two places keeps the TIGHTER number, as
-            # `_keyword_caps` does within one sentence -- UNIQUE(kill_team_id, keyword)
-            # holds one row, and under decision #28 a cap is a prompt, not a refusal.
-            caps[cap.keyword] = min(cap.max_operatives, caps.get(cap.keyword, cap.max_operatives))
     return {
         "name": entry.name,
         "faction": entry.faction,
@@ -1722,12 +1079,10 @@ def scrape_team(entry: NavEntry, *, known_teams: Iterable[str] = (), refresh: bo
             asdict(operative) | {"availability": "in_battle" if operative.name in in_battle else "roster"}
             for operative in parse_operatives(html)
         ],
-        "selection_lists": [asdict(lst) for lst in lists],
-        "keyword_caps": [
-            asdict(KeywordCap(keyword=keyword, max_operatives=limit)) for keyword, limit in caps.items()
-        ],
-        "composition_notes": notes,
-        "unresolved_entries": unresolved,
+        # The composition as printed: lines with their entries, the restriction sentences
+        # and the notes, in one ordered run (decision #28). Nothing derived, so there is
+        # no budget, cap or resolved option to be subtly wrong about.
+        "selection_rules": [asdict(rule) for rule in parse_selection_rules(html)],
     }
 
 
@@ -1768,9 +1123,6 @@ def scrape(*, refresh: bool = False) -> dict:
         payload["kill_teams"].append(team)
         # In the payload rather than only on the terminal, for the same reason as `skipped`:
         # a seed printing only its own counts would look like a clean catalog.
-        payload["warnings"] += [
-            {"team": entry.name, "warning": warning} for warning in composition_warnings(team)
-        ]
 
     # Available to every kill team, so stored with no kill team: Command Re-roll from
     # the core rules, and the universal equipment list.
@@ -1821,9 +1173,10 @@ def main() -> None:
         f"{sum(len(t['equipment']) for t in teams)} equipment"
     )
     print(
-        f"  {sum(len(t['selection_lists']) for t in teams)} selection lists, "
-        f"{sum(len(sel['options']) for t in teams for sel in t['selection_lists'])} options, "
-        f"{sum(len(t['keyword_caps']) for t in teams)} keyword caps"
+        f"  {sum(len(t['selection_rules']) for t in teams)} selection rules "
+        f"({sum(1 for t in teams for r in t['selection_rules'] if r['kind'] == 'line')} lines, "
+        f"{sum(1 for t in teams for r in t['selection_rules'] if r['kind'] == 'restriction')} restrictions, "
+        f"{sum(1 for t in teams for r in t['selection_rules'] if r['kind'] == 'note')} notes)"
     )
     print(
         f"  {len(payload['universal_ploys'])} universal ploys, "

@@ -5,27 +5,22 @@ scraped content. The fetch layer is shared with the 40k scraper and is not teste
 here.
 """
 
-import re
 from pathlib import Path
 
 import pytest
 
 from scripts.scrape_wahapedia_kt import (
     CompositionNotParsed,
-    KeywordCap,
     NavEntry,
     OperativeNotResolved,
-    _carries,
-    composition_warnings,
     core_rules_url,
     main,
-    parse_composition,
     parse_equipment,
     parse_in_battle_operatives,
     parse_nav,
     parse_operatives,
     parse_ploys,
-    parse_requisition,
+    parse_selection_rules,
     parse_team_rules,
     resolve_operative,
     scrape,
@@ -472,277 +467,6 @@ def test_an_empty_entry_is_not_an_operative():
 # ---- Composition: the budgeted selection lists (decision #16) ----
 
 
-def _composition():
-    return parse_composition(COMPOSITION)
-
-
-def _lists():
-    return _composition().lists
-
-
-def _options(index: int):
-    return {option.operative: option for option in _lists()[index].options}
-
-
-def test_each_printed_line_becomes_a_budgeted_list_in_order():
-    lists = _lists()
-
-    assert [(lst.position, lst.budget) for lst in lists] == [(0, 1), (1, 4), (2, 1), (3, 3)]
-    assert lists[0].label == "1 HOLLOW WARDEN operative"
-
-
-def test_a_line_naming_its_own_operative_is_a_budget_of_one():
-    # "1 HOLLOW WARDEN operative" has no entries beneath it: the line IS the option, and
-    # its number is the budget, not models. A budget-1 list over one option is what
-    # "required" means (decision #16), so no flag is needed.
-    warden = _lists()[0]
-
-    assert warden.budget == 1
-    assert [option.operative for option in warden.options] == ["Hollow Warden"]
-    assert warden.options[0].models == 1
-
-
-def test_a_numbered_line_takes_its_budget_from_the_leading_number():
-    assert _lists()[1].budget == 4
-
-
-def test_digits_inside_a_name_are_not_read_as_a_budget():
-    # The third line names "XV9 EMBER SUIT" and carries no leading count, so its budget
-    # is 1. Reading any number in the text instead would make it 9 -- the real bug my
-    # own first scan hit, where "XV26 Stealth Battlesuits" became 26 operatives.
-    suits = _lists()[2]
-
-    assert suits.budget == 1
-    assert [option.operative for option in suits.options] == ["XV9 Ember Suit"]
-
-
-def test_one_operative_printed_twice_collapses_into_one_option():
-    # Wyrmblade prints three "GUNNER with ..." lines, and 12 of the 48 teams print one like
-    # that in a composition list (25 lines collapsed in all). It is one operative with a weapon choice, and
-    # UNIQUE(selection_list_id, operative_id) would reject two rows for it.
-    sentinel = _options(1)["Hollow Sentinel"]
-
-    assert [option.operative for option in _lists()[1].options].count("Hollow Sentinel") == 1
-    assert sentinel.loadout_options == [
-        "with ash lash and rusted glaive",
-        "with cinder bolt and rusted glaive",
-    ]
-
-
-def test_an_entry_can_put_two_models_on_the_table_for_one_selection():
-    # "2 EMBER WISP operatives (still counts as one selection)".
-    wisp = _options(1)["Hollow Ember Wisp"]
-
-    assert (wisp.models, wisp.cost) == (2, 1)
-
-
-def test_an_entry_can_cost_more_than_one_selection():
-    # "ASH PROPHET (counts as two selections)" -- the parenthetical is a note about the
-    # entry, so it is stripped before the name is resolved and read for the cost.
-    assert _options(1)["Hollow Ash Prophet"].cost == 2
-
-
-def test_loadout_variants_are_collected_from_the_nested_list():
-    # "WARDEN equipped with one of the following options:" -- and "equipped with" as
-    # well as "with", which is how Nemesis Claw phrases it.
-    # Every nested group, not just the first: a line reading "equipped with one of the
-    # following options: ... Or one option from each of the following:" prints two.
-    assert _options(1)["Hollow Warden"].loadout_options == [
-        "Ash lash; rusted glaive",
-        "Cinder bolt; rusted glaive",
-        "Ember charm or ash token",
-    ]
-
-
-def test_a_loadout_line_is_not_read_as_an_operative():
-    # "Ash lash; rusted glaive" resolves to no datacard, which is how it is recognised.
-    assert "Ash lash; rusted glaive" not in _options(1)
-
-
-def test_the_restriction_sentence_is_kept_verbatim():
-    # A loose text node after the list, and the source of the caps and keyword limits
-    # read from it next. Kept whole so a human can check that reading.
-    restriction = _lists()[-1].restriction_text
-
-    # Attached to the last list that OFFERS something, which is what "this list" refers to
-    # when the sentence is printed after the whole composition. Here they are the same list;
-    # `test_a_restriction_applies_to_the_last_list_that_offers_something` pins the case where
-    # they differ.
-    assert _lists()[-1].position == 3
-    assert restriction is not None
-    assert "each operative on this list once" in restriction
-    assert "up to one EMBER operative" in restriction
-
-
-def test_a_nested_list_becomes_its_own_list():
-    # Two teams print a second list INSIDE the first rather than beside it: Blades of
-    # Khaine nests it under the leader line, and Hunter Clade wraps it in a div inside
-    # the same `ul`, so it is neither a direct child nor a descendant of another line.
-    # Both used to fold their operatives into the budget-1 line above -- silently
-    # offering a one-operative team, which is the worst kind of wrong.
-    nested = _lists()[3]
-
-    assert nested.budget == 3
-    assert {option.operative for option in nested.options} == {
-        "Hollow Ash Prophet",
-        "Hollow Ember Wisp",
-        "Hollow Sentinel",
-    }
-
-
-def test_a_nested_lists_operatives_do_not_leak_into_the_line_above():
-    # An entry belongs to its NEAREST enclosing list.
-    assert len(_lists()[2].options) == 1  # the line that contains the nested list
-
-
-def test_a_lenient_resolution_still_raises_on_an_ambiguous_entry():
-    # `resolve_operative(strict=False)` answers "is this line an operative at all?", and a
-    # lenient None once dropped a real entry as though it were a weapon loadout. So
-    # ambiguity raises even then — the composition reader catches it per entry and reports
-    # it (see the two tests below), which is a different thing from never noticing.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warrior</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Omega Warrior</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>2 THINGS selected from the following list:
-      <ul class="redCircle2"><li><span class="kwb kwbo">WARRIOR</span> *</li></ul>
-    </li></ul>
-    """
-    # the entry, in isolation: the resolver itself refuses to guess
-    with pytest.raises(OperativeNotResolved, match="several datacards"):
-        resolve_operative("WARRIOR", ["Alpha Warrior", "Omega Warrior"], strict=False)
-
-    # and the composition keeps the rest of the team, recording what it could not read
-    composition = parse_composition(html)
-    assert composition.lists[0].options == []
-    assert len(composition.unresolved) == 1
-
-
-def test_the_restriction_sentence_caps_repeats_at_one():
-    # "your kill team can only include each operative on this list once" -- 45 of the 48
-    # stored restriction sentences say this, and it is what KTSelectionOption.max_selections
-    # holds.
-    options = {option.operative: option for option in _lists()[-1].options}
-
-    assert options["Hollow Ash Prophet"].max_selections == 1
-    assert options["Hollow Ember Wisp"].max_selections == 1
-
-
-def test_an_exempt_keyword_stays_uncapped():
-    # "Other than SENTINEL operatives, ..." -- and the exemption is a KEYWORD matched
-    # against what the datacard carries, not an operative name: Raveners exempt WARRIOR
-    # and "Ravener Warrior" holds that keyword. 44 of the 48 sentences carry such a clause.
-    options = {option.operative: option for option in _lists()[-1].options}
-
-    assert options["Hollow Sentinel"].max_selections is None
-
-
-def test_a_keyword_cap_is_read_as_its_own_rule():
-    # "can only include up to one EMBER operative" caps a SET of operatives, which no
-    # per-option limit can express: two different entries both carry EMBER.
-    # On the COMPOSITION, not a list: the sentence says "your kill team", and Brood
-    # Brother caps a keyword carried by operatives from a different list than the one
-    # the sentence follows, so a list-scoped cap could never have applied.
-    assert _composition().keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
-
-
-def test_a_cap_is_matched_by_words_because_the_pages_disagree_about_keywords():
-    # Battleclade's datacards print "COMBAT, SERVITOR" -- two comma-separated keywords --
-    # while Pathfinders prints "WEAPONS EXPERT" as one. Both are capped by a sentence
-    # naming the phrase, so matching compares WORDS, as name resolution does.
-    two_keywords = KeywordCap(keyword="COMBAT SERVITOR", max_operatives=3)
-    one_keyword = KeywordCap(keyword="WEAPONS EXPERT", max_operatives=2)
-
-    assert two_keywords.matches(["BATTLECLADE", "COMBAT", "SERVITOR"])
-    assert one_keyword.matches(["PATHFINDER", "WEAPONS EXPERT"])
-    # and the other way round, since the pages are inconsistent in both directions
-    assert two_keywords.matches(["BATTLECLADE", "COMBAT SERVITOR"])
-
-
-def test_a_cap_does_not_match_an_operative_without_every_word():
-    cap = KeywordCap(keyword="COMBAT SERVITOR", max_operatives=3)
-
-    assert not cap.matches(["BATTLECLADE", "GUN", "SERVITOR"])
-    assert not cap.matches([])
-
-
-def test_a_cap_matching_nobody_on_the_page_raises():
-    # A cap that can never trigger means the phrase was misread, and it would leave
-    # `validate` approving rosters it should refuse -- silently, which is worse than
-    # failing the team.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table>
-    <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span></td></tr></table>
-    </div>
-    <div class="BreakInsideAvoid"><h2>Operatives</h2>
-    <ul class="redTriangle"><li>2 THINGS selected from the following list:
-      <ul class="redCircle2"><li><span class="kwb kwbo">A CARD</span></li></ul>
-    </li></ul>
-    Your kill team can only include up to two NOBODY operatives.
-    </div>
-    """
-    with pytest.raises(CompositionNotParsed, match="matches no operative"):
-        parse_composition(html)
-
-
-def test_only_the_list_the_sentence_belongs_to_has_its_repeats_capped():
-    # The repeat clause says "each operative on this list", so it applies to one list -- the
-    # last that offers options -- unlike the keyword cap, which is team-wide.
-    assert all(option.max_selections is None for option in _lists()[0].options)
-
-
-def test_an_unknown_quantity_in_a_cap_raises():
-    # A silently wrong cap approves illegal rosters, so an unrecognised number word
-    # stops the team instead.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <div class="BreakInsideAvoid"><h2>Operatives</h2>
-    <ul class="redTriangle"><li>2 THINGS selected from the following list:
-      <ul class="redCircle2"><li><span class="kwb kwbo">A CARD</span></li></ul>
-    </li></ul>
-    Your kill team can only include up to seventeen CARD operatives.
-    </div>
-    """
-    with pytest.raises(CompositionNotParsed, match="unknown quantity"):
-        parse_composition(html)
-
-
-def test_a_page_with_no_composition_fails_loudly():
-    # A team that seeds with no selection lists would offer a roster nothing, and look
-    # like a successful scrape.
-    with pytest.raises(CompositionNotParsed, match="no 'Operatives' section"):
-        parse_composition("<html><body><h2>Something else</h2></body></html>")
-
-
-def test_a_line_whose_operatives_cannot_be_found_fails_loudly():
-    # A line pointing above with nothing above it, and a name matching no datacard: the
-    # parser read neither an operative nor a reference, and guessing its budget would seed a
-    # roster rule that looks right. (Inquisitorial Agent's real line, which DOES point at a
-    # list above, is stored as a reference now -- decision #38.)
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>A Card</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>5 THINGS selected from the list above</li></ul>
-    """
-    with pytest.raises(CompositionNotParsed, match="no operatives found"):
-        parse_composition(html)
-
-
 # ---------------------------------------------------------------------------
 # The run itself (`scrape`): which failures are skipped, and which must not be.
 # ---------------------------------------------------------------------------
@@ -771,44 +495,6 @@ def _pages(**overrides: str) -> dict[str, str]:
         "kill-teams/": COMPOSITION,  # a whole team page: datacards + composition
     }
     return {**pages, **overrides}
-
-
-def test_a_keyword_capped_in_two_places_keeps_the_tighter_number(monkeypatch):
-    # The composition caps EMBER at one and the Ember Wardens requisition group caps it at
-    # two. A cap read anywhere on the page is the TEAM's, and UNIQUE(kill_team_id, keyword)
-    # holds a single row, so the tighter number stands -- as `_keyword_caps` already does
-    # for a keyword capped twice within one sentence.
-    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(_pages()))
-
-    team = scrape()["kill_teams"][0]
-
-    assert [(cap["keyword"], cap["max_operatives"]) for cap in team["keyword_caps"]] == [("EMBER", 1)]
-    # and a group's footnote is the team's too, after the composition's own notes
-    assert team["composition_notes"][-1] == "These operatives count as half a selection each."
-
-
-def test_an_ambiguous_page_is_skipped_and_named_while_the_rest_are_kept(monkeypatch):
-    # A page the parsers cannot read is skipped rather than failing the run, because holding
-    # 47 teams hostage to one page would be the wrong trade. No real page needs this today --
-    # all 48 parse and `skipped` is empty -- so this guards against a page CHANGING. The skip
-    # goes into the payload, not just onto the terminal, so `make seed-kt` can say the catalog
-    # it is loading is knowingly incomplete.
-    pages = _pages()
-    pages["kill-teams/rust-wardens"] = "<html><body>nothing recognisable</body></html>"
-    monkeypatch.setattr("scripts.scrape_wahapedia_kt.fetch", _serving(pages))
-
-    payload = scrape()
-
-    assert [team["name"] for team in payload["kill_teams"]] == [
-        "Hollow Sentinels",
-        "Ashen Choir",
-        "Tidewalkers",
-    ]
-    assert [entry["team"] for entry in payload["skipped"]] == ["Rust Wardens"]
-    assert "Operatives" in payload["skipped"][0]["reason"]
-    # the rest of the run still happened
-    assert payload["universal_equipment"]
-    assert payload["kill_teams"][0]["selection_lists"]
 
 
 def test_a_failure_that_is_not_an_ambiguity_fails_the_whole_run(monkeypatch):
@@ -898,116 +584,6 @@ def test_the_most_specific_card_wins_when_the_entry_carries_the_extra_words():
 # ---------------------------------------------------------------------------
 
 
-def _scraped_team(**overrides) -> dict:
-    team = {
-        "name": "Hollow Vigil",
-        "rules": [{"name": "Ember Tide", "description": "Place one Ember marker."}],
-        "operatives": [
-            {
-                "name": "Hollow Warden",
-                "abilities": [{"name": "Vigil", "description": "Does a thing."}],
-                "availability": "roster",
-            },
-            {"name": "Hollow Sentinel", "abilities": [], "availability": "roster"},
-        ],
-        "selection_lists": [
-            _scraped_list("1 HOLLOW WARDEN operative", 0, 1, [("Hollow Warden", 1, None)]),
-            _scraped_list(
-                "4 HOLLOW operatives selected from the following list:",
-                1,
-                4,
-                [("Hollow Sentinel", 1, None)],
-            ),
-        ],
-    }
-    return {**team, **overrides}
-
-
-def _scraped_list(label: str, position: int, budget: int, options: list[tuple]) -> dict:
-    """One selection list in the payload's shape, which the warnings read in full."""
-    return {
-        "label": label,
-        "position": position,
-        "budget": budget,
-        "shape": "budgeted",
-        "restriction_text": None,
-        "options": [
-            {
-                "operative": name,
-                "cost": cost,
-                "models": 1,
-                "max_selections": cap,
-                "loadout_options": [],
-            }
-            for name, cost, cap in options
-        ],
-    }
-
-
-def test_a_team_whose_composition_offers_every_datacard_is_quiet():
-    assert composition_warnings(_scraped_team()) == []
-
-
-def test_a_datacard_no_list_offers_is_flagged():
-    # A datacard no list offers cannot be fielded, so either the page grants it some other
-    # way or the composition was misread. Gellerpox's three vermin were the original finding;
-    # they are read now and carry `availability = in_battle` (#20), which the sibling test
-    # below pins as NOT a warning.
-    team = _scraped_team()
-    team["operatives"].append({"name": "Hollow Cinder Wisp", "abilities": []})
-
-    warnings = composition_warnings(team)
-
-    assert len(warnings) == 1
-    assert "no selection list offers 'Hollow Cinder Wisp'" in warnings[0]
-
-
-def test_a_datacard_a_rule_or_an_ability_names_is_not_flagged():
-    # Chaos Cult's Mutant and Torment are GAINED mid-game by "Accursed Gifts" and
-    # "Mutation", never selected, so no list offering them is correct.
-    team = _scraped_team()
-    team["operatives"].append({"name": "Hollow Revenant", "abilities": []})
-    team["rules"].append(
-        {"name": "Ashen Rebirth", "description": "Replace it with a HOLLOW REVENANT operative."}
-    )
-
-    assert composition_warnings(team) == []
-
-    # …and an ability counts the same way
-    team["rules"].pop()
-    team["operatives"][0]["abilities"].append(
-        {"name": "Rebirth", "description": "Set up a HOLLOW REVENANT operative."}
-    )
-    assert composition_warnings(team) == []
-
-
-def test_a_list_offering_a_less_specific_card_than_its_label_names_is_flagged():
-    # The mis-resolution the first check cannot see: `Player` IS offered, so no datacard
-    # goes unused, and only the label gives the game away.
-    team = _scraped_team(
-        operatives=[{"name": "Lead Player", "abilities": []}, {"name": "Player", "abilities": []}],
-        selection_lists=[
-            _scraped_list(
-                "1 VOID-DANCER TROUPE LEAD PLAYER operative with one option",
-                0,
-                1,
-                [("Player", 1, None)],
-            ),
-            _scraped_list(
-                "7 VOID-DANCER TROUPE operatives selected from the following list:",
-                1,
-                7,
-                [("Player", 1, None)],
-            ),
-        ],
-    )
-
-    warnings = composition_warnings(team)
-
-    assert [w for w in warnings if "which names 'Lead Player'" in w], warnings
-    assert any("no selection list offers 'Lead Player'" in w for w in warnings)
-
-
 def test_a_unique_action_keeps_the_conditions_printed_beside_its_effect():
     # A datacard prints an action's effect and then the conditions on performing it, in
     # two sibling divs. Reading only `actionEffect` dropped the conditions from 597 blocks
@@ -1047,174 +623,6 @@ def test_the_sites_keyword_markers_are_stripped_from_text():
     assert "<KY>" not in beacon.description and "</KY>" not in beacon.description
 
 
-def _composition_with(datacards: list[tuple[str, list[str]]], entries: list[str], sentence: str):
-    """A one-list composition over synthetic datacards, for the restriction rules."""
-    cards = "".join(
-        f"""
-        <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-          <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>{name}</div></h3></div></td>
-          <td class="pCell">APL<div class="dsStat">2</div></td>
-        </tr></table>
-        <table class="dsKeywords"><tr><td>
-          {", ".join(f'<span class="tt kwbu">{keyword}</span>' for keyword in keywords)}
-        </td></tr></table></div>"""
-        for name, keywords in datacards
-    )
-    items = "".join(f"<li>{entry}</li>" for entry in entries)
-    html = f"""
-    {cards}
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>4 THINGS selected from the following list:
-      <ul class="redCircle2">{items}</ul>
-    </li></ul>
-    {sentence}
-    """
-    return parse_composition(html)
-
-
-def test_an_exemption_split_across_two_keywords_still_exempts():
-    # Battleclade's datacards print "COMBAT, SERVITOR" as two comma-separated keywords
-    # while the sentence names "COMBAT SERVITOR", so comparing whole strings matched
-    # nothing: every option was capped at 1 and list 2 became budget 8 over five options
-    # capped at one each -- a list no legal roster can satisfy.
-    composition = _composition_with(
-        [
-            ("Alpha Combat Servitor", ["CLADE", "COMBAT", "SERVITOR"]),
-            ("Alpha Gun Servitor", ["CLADE", "GUN", "SERVITOR"]),
-        ],
-        ["COMBAT SERVITOR", "GUN SERVITOR"],
-        "Other than COMBAT SERVITOR operatives, your kill team can only include each"
-        " operative on this list once.",
-    )
-    options = {option.operative: option for option in composition.lists[0].options}
-
-    assert options["Alpha Combat Servitor"].max_selections is None
-    assert options["Alpha Gun Servitor"].max_selections == 1
-
-
-def test_an_exemption_does_not_match_part_of_a_longer_keyword():
-    # The other half of the same rule. Kommandos print "BREACHA BOY" as ONE keyword and
-    # exempt "BOY" operatives: only the plain Boy may be taken repeatedly, and every
-    # specialist is still once-only. Matching by words alone exempted all seven of them,
-    # and Kasrkin's DEMO-TROOPER and Hearthkyn's JUMP PACK WARRIOR the same way.
-    composition = _composition_with(
-        [("Alpha Boy", ["KREW", "BOY"]), ("Alpha Breacha Boy", ["KREW", "BREACHA BOY"])],
-        ["BOY", "BREACHA BOY"],
-        "Other than BOY operatives, your kill team can only include each operative on this list once.",
-    )
-    options = {option.operative: option for option in composition.lists[0].options}
-
-    assert options["Alpha Boy"].max_selections is None
-    assert options["Alpha Breacha Boy"].max_selections == 1
-
-
-def test_each_composition_line_carries_the_shape_it_was_printed_in():
-    # The shape was computed to work out the budget and then thrown away -- but it is also
-    # what the budget MEANS (decision #29). `budgeted` is a line that PRINTS its number,
-    # however small ("1 HOLLOW WARDEN operative"); `single` is an unnumbered line naming one
-    # operative ("XV9 EMBER SUIT operative"), which is an implicit 1.
-    shapes = [(lst.position, lst.shape, lst.budget) for lst in _lists()]
-
-    assert shapes == [(0, "budgeted", 1), (1, "budgeted", 4), (2, "single", 1), (3, "budgeted", 3)]
-
-
-def test_a_fixed_roster_line_says_so_rather_than_looking_budgeted():
-    # "Every X operative in the following list" is a fixed roster, so its number counts
-    # MODELS, not selections. Two real teams print it, and a reader that assumed selections
-    # reported "7 of 9 spent" for a roster the page states as nine models.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
-      <ul class="redCircle2"><li>4 SWARM</li></ul>
-    </li></ul>
-    """
-    listing = parse_composition(html).lists[0]
-
-    assert listing.shape == "fixed"
-    assert listing.budget == 4  # the models, which is what the page states
-    assert sum(option.models for option in listing.options) == 4
-
-
-def test_the_repeat_cap_rebuild_keeps_the_line_intact():
-    # The restriction sentence rebuilds the LAST list to apply its repeat caps, and listing
-    # the fields by hand dropped `shape` the moment it was added: Gellerpox has one list, so
-    # its only list is the last, and it came back labelled `budgeted` while its budget
-    # counted models. `replace` copies every field, so a new one cannot go missing again.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
-      <ul class="redCircle2"><li>4 SWARM</li></ul>
-    </li></ul>
-    Your kill team can only include each operative on this list once.
-    """
-    listing = parse_composition(html).lists[-1]
-
-    assert listing.shape == "fixed"  # not clobbered by the rebuild
-    assert listing.restriction_text is not None
-    assert listing.options[0].max_selections == 1  # the rebuild still did its job
-
-
-def test_a_footnote_marker_does_not_land_in_a_lists_label():
-    # A marker is a REFERENCE to a note printed below, not part of the line. Death Korps
-    # print "4 TROOPER operatives *" and Brood Brother a `<sup>` before the colon, which
-    # rendered into the stored label as "… the following list 3 :" -- an API would serve it.
-    labels = [lst.label for lst in _lists()]
-
-    assert labels[3] == "3 HOLLOW operatives selected from the following list:"
-    assert not any("*" in label or re.search(r"\s\d+\s*:?$", label) for label in labels)
-
-
-def test_the_notes_printed_around_a_composition_are_their_own():
-    # One field used to hold four things at once: the repeat clause, a footnote body, a
-    # designer's note and (for Kasrkin) a glossary aside -- attached to whichever list
-    # happened to precede them. The page marks the boundaries itself, so the split is exact:
-    # a marker starts a note, and a callout box is a note of its own (decision #30).
-    composition = _composition()
-
-    assert composition.notes == [
-        "You cannot select more than two of these operatives combined.",
-        "Designer's Note: the page prints this in a box beside the composition.",
-    ]
-    # …and the restriction sentence keeps only its own half
-    restriction = composition.lists[-1].restriction_text
-    assert restriction is not None
-    assert restriction.endswith("up to one EMBER operative.")
-    assert "Designer's Note" not in restriction
-    assert "more than two of these" not in restriction
-
-
-def test_a_cap_stated_in_a_note_is_still_read():
-    # Brood Brother state their BROODCOVEN cap in a footnote rather than in the sentence, and
-    # a cap is team-wide wherever it is printed -- so caps are read from the sentence AND its
-    # notes. The fixture states its EMBER cap in the sentence; this pins the other half.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Ember Wisp</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table>
-    <table class="dsKeywords"><tr><td><span class="tt kwbu">EMBER</span></td></tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
-      <ul class="redCircle2"><li>EMBER WISP</li></ul>
-    </li></ul>
-    Your kill team can only include each operative on this list once.
-    <sup>1</sup>
-    Your kill team can only include up to one EMBER operative.
-    """
-    composition = parse_composition(html)
-
-    assert composition.keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=1)]
-    assert len(composition.notes) == 1
-
-
 _TWO_CARDS = """
     <div class="dsOuterFrame"><table><tr class="pHeaderRow">
       <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Gunner</div></h3></div></td>
@@ -1229,151 +637,6 @@ _TWO_CARDS = """
 """
 
 
-def test_a_composition_wrapped_in_a_column_still_finds_its_restriction():
-    # Hunter Clade wrap the composition list in a `div.Columns2` of its own, so the list's
-    # parent holds no text and the sentence sits one level up. Reading only the parent made
-    # that team print "no restriction": it lost its repeat clause, three keyword caps and a
-    # footnote, and no warning could say so, because every check runs on this sentence.
-    html = f"""
-    {_TWO_CARDS}
-    <div class="BreakInsideAvoid">
-      <h2>Operatives</h2>
-      <div class="Columns2">
-        <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
-          <ul class="redCircle2"><li>GUNNER</li><li>DIKTAT</li></ul>
-        </li></ul>
-      </div>
-      Other than GUNNER operatives, your kill team can only include each operative on this
-      list once, and can only include up to one DIKTAT operative.
-    </div>
-    """
-    composition = parse_composition(html)
-    options = {option.operative: option for option in composition.lists[-1].options}
-
-    assert composition.lists[-1].restriction_text is not None
-    assert composition.keyword_caps == [KeywordCap(keyword="DIKTAT", max_operatives=1)]
-    assert options["Alpha Diktat"].max_selections == 1
-    assert options["Alpha Gunner"].max_selections is None  # the sentence exempts it
-
-
-def test_a_neighbouring_columns_prose_is_not_read_as_the_restriction():
-    # The climb above is allowed ONLY when the list is its wrapper's sole child. Walking up
-    # merely because the parent held no text of its own would read the column BESIDE the
-    # composition: Exodite Dragon Masters print 284 characters of another column's actions
-    # there, and Elucidian Starstrider the whole page body. Both print no restriction at all.
-    html = f"""
-    {_TWO_CARDS}
-    <div class="Columns2">
-      <div class="BreakInsideAvoid">
-        <h2>Operatives</h2>
-        <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
-          <ul class="redCircle2"><li>GUNNER</li><li>DIKTAT</li></ul>
-        </li></ul>
-        <h3>Remaining Actions</h3>
-        <ul class="redCircle2"><li>Not a composition line.</li></ul>
-      </div>
-      <div class="BreakInsideAvoid">
-        Other than GUNNER operatives, your kill team can only include each operative on
-        this list once, and can only include up to one DIKTAT operative.
-      </div>
-    </div>
-    """
-    composition = parse_composition(html)
-
-    assert composition.lists[-1].restriction_text is None
-    assert composition.keyword_caps == []
-    assert all(option.max_selections is None for option in composition.lists[-1].options)
-
-
-def test_a_space_left_before_punctuation_is_closed_up():
-    # The pages style part of a sentence, and joining inline elements leaves a space before
-    # whatever follows: "Other than GUNNER , SUBDUCTOR and …" where each keyword is a span.
-    # 941 of the 12,413 stored strings carried one, 1,740 occurrences in all.
-    restriction = _composition().lists[-1].restriction_text
-
-    assert " ," not in restriction and " ." not in restriction
-
-
-def _restricted(sentence: str, datacards: list[tuple[str, list[str]]], entries: list[str]):
-    """A one-list composition under `sentence`, for the restriction-clause rules."""
-    return _composition_with(datacards, entries, sentence)
-
-
-def test_every_cap_clause_in_a_sentence_is_read_not_just_the_first():
-    # A sentence states several caps, and the clauses after the first do not repeat
-    # "include": Exaction Squad print "… up to two GUNNER operatives (each must have a
-    # different option) and up to four SUBDUCTOR operatives", Wyrmblade three in a row.
-    # Requiring the word left three real caps unstored -- the permissive direction, which
-    # is why nothing noticed.
-    composition = _restricted(
-        "Your kill team can only include up to two GUNNER operatives (each must have a"
-        " different option) and up to four SUBDUCTOR operatives.",
-        [("Alpha Gunner", ["CLADE", "GUNNER"]), ("Alpha Subductor", ["CLADE", "SUBDUCTOR"])],
-        ["GUNNER", "SUBDUCTOR"],
-    )
-
-    assert composition.keyword_caps == [
-        KeywordCap(keyword="GUNNER", max_operatives=2),
-        KeywordCap(keyword="SUBDUCTOR", max_operatives=4),
-    ]
-
-
-def test_a_keyword_capped_twice_takes_the_tighter_number():
-    # Battleclade allow one COMBAT SERVITOR with a meltagun and three with another weapon.
-    # A loadout-keyed cap is a shape the model does not hold (decision #28), so one number
-    # stands for both: the tighter, because nothing is enforced and its cost is a prompt to
-    # read the sentence rather than a refusal of a legal roster.
-    composition = _restricted(
-        "Your kill team can only include up to one COMBAT SERVITOR operative with meltagun,"
-        " and up to three COMBAT SERVITOR operatives with heavy stubber.",
-        [("Alpha Combat Servitor", ["CLADE", "COMBAT", "SERVITOR"])],
-        ["COMBAT SERVITOR"],
-    )
-
-    assert composition.keyword_caps == [KeywordCap(keyword="COMBAT SERVITOR", max_operatives=1)]
-
-
-@pytest.mark.parametrize(
-    "wording",
-    [
-        "your kill team can only include each operative on this list once",
-        "your kill team can only include each operative above once",  # Goremonger
-        "your kill team can only include each option on this list once",  # Brood Brother
-    ],
-)
-def test_the_pages_wordings_of_once_each_all_cap_repeats(wording):
-    # Matching the one literal phrase left Goremonger's six options and Brood Brother's ten
-    # entirely uncapped, because each page words the middle of the sentence differently.
-    composition = _restricted(
-        f"Other than ASPIRANT operatives, {wording}.",
-        [("Alpha Aspirant", ["CULT", "ASPIRANT"]), ("Alpha Stalker", ["CULT", "STALKER"])],
-        ["ASPIRANT", "STALKER"],
-    )
-    options = {option.operative: option for option in composition.lists[0].options}
-
-    assert options["Alpha Aspirant"].max_selections is None  # exempt
-    assert options["Alpha Stalker"].max_selections == 1
-
-
-def test_a_sentence_that_caps_nothing_leaves_every_option_uncapped():
-    # The other direction: no repeat clause at all means the budget is the only limit.
-    composition = _restricted(
-        "Your kill team can only include up to two STALKER operatives.",
-        [("Alpha Stalker", ["CULT", "STALKER"]), ("Alpha Aspirant", ["CULT", "ASPIRANT"])],
-        ["STALKER", "ASPIRANT"],
-    )
-
-    assert [option.max_selections for option in composition.lists[0].options] == [None, None]
-
-
-def test_an_empty_keyword_phrase_matches_nothing():
-    # `_carries` answers "do these keywords carry this phrase?", and an empty phrase is
-    # vacuously a subset of anything. Without the guard it would return True and exempt
-    # every operative on the list from its repeat cap.
-    assert not _carries("", ["KOMMANDO", "BOY"])
-    assert not _carries("BOY", [])
-
-
 def test_a_card_that_begins_with_the_entry_beats_a_shorter_rearranged_one():
     # The prefix rule: a composition entry often names the start of a card's name, dropping
     # the trailing role ("SICARIAN RUSTSTALKER" for "Sicarian Ruststalker Warrior"). Without
@@ -1383,144 +646,6 @@ def test_a_card_that_begins_with_the_entry_beats_a_shorter_rearranged_one():
     cards = ["Ash Prophet Elite", "Prophet Ash"]
 
     assert resolve_operative("ASH PROPHET", cards) == "Ash Prophet Elite"
-
-
-def test_a_list_no_roster_can_satisfy_is_flagged():
-    # Battleclade reached this state once: a budget of 8 over five options each capped at 1,
-    # because a two-word exemption matched nothing. It was found by hand months later, which
-    # is the reason this check exists rather than a verification note somewhere.
-    team = _scraped_team(
-        selection_lists=[
-            _scraped_list(
-                "8 HOLLOW operatives selected from the following list:",
-                0,
-                8,
-                [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, 1)],
-            )
-        ]
-    )
-
-    warnings = composition_warnings(team)
-
-    assert any("no legal roster exists" in w for w in warnings)
-    assert any("budget of 8 but at most 2" in w for w in warnings)
-
-
-def test_a_list_with_one_uncapped_option_is_not_flagged():
-    # The budget can always be spent when something may be taken repeatedly, which is the
-    # normal case: 113 of the 116 lists that offer options have at least one uncapped option.
-    team = _scraped_team(
-        selection_lists=[
-            _scraped_list(
-                "8 HOLLOW operatives selected from the following list:",
-                0,
-                8,
-                [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, None)],
-            )
-        ]
-    )
-
-    assert composition_warnings(team) == []
-
-
-def test_a_fixed_roster_is_not_measured_in_selections():
-    # A `fixed` line's budget counts MODELS (decision #29), so comparing it against a sum of
-    # selections would flag both real fixed lists — Elucidian Starstrider and Gellerpox
-    # Infected, each budget 9 over 6–7 selections.
-    listing = _scraped_list(
-        "Every HOLLOW operative in the following list:",
-        0,
-        9,
-        [("Hollow Warden", 1, 1), ("Hollow Sentinel", 1, 1)],
-    )
-    listing["shape"] = "fixed"
-
-    assert composition_warnings(_scraped_team(selection_lists=[listing])) == []
-
-
-def test_a_page_with_no_restriction_sentence_has_notes_instead():
-    # Gellerpox print a conditional footnote and no restriction at all. Taking the first
-    # segment regardless put that footnote in the restriction slot, where a reader sees it as
-    # a constraint on the list and where the cap and repeat patterns then scan it.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Swarm</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <div class="BreakInsideAvoid">
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>4 ALPHA operatives selected from the following list:
-      <ul class="redCircle2"><li>SWARM</li></ul>
-    </li></ul>
-    If you selected the MUTOID VERMIN faction equipment:
-    </div>
-    """
-    composition = parse_composition(html)
-
-    assert composition.lists[0].restriction_text is None
-    assert composition.notes == ["If you selected the MUTOID VERMIN faction equipment:"]
-
-
-def test_an_ambiguous_entry_loses_itself_rather_than_its_team():
-    # Hunter Clade print "WARRIOR SICARIAN *", matching both Sicarian Warriors, and the
-    # footnote says which. Failing the whole team over it cost 14 datacards, 51 weapons, 8
-    # ploys, 4 equipment and a rule that all parse. The entry is dropped and REPORTED — not
-    # the old silence, which is what lost a real entry before.
-    composition = _composition_with(
-        [
-            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ranger", ["CLADE", "RANGER"]),
-        ],
-        ["WARRIOR", "RANGER"],
-        "",
-    )
-
-    assert [option.operative for option in composition.lists[0].options] == ["Alpha Ranger"]
-    assert len(composition.unresolved) == 1
-    assert "matches several datacards equally" in composition.unresolved[0]
-
-
-def test_a_line_whose_own_name_is_ambiguous_keeps_its_label_with_no_options():
-    # A line whose own label names several datacards equally. An option can only offer its
-    # OWN team's operative (decision #31), and the parser will not guess which card is meant,
-    # so the label and the report are the honest answer (#28, #32). Inquisitorial Agent's real
-    # line was the original case; it is stored as a cross-reference now (#38), so no page
-    # exercises this today — it is a guard against a page changing.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Interrogator Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>5 ALPHA AGENT operatives selected from the list above</li></ul>
-    """
-    composition = parse_composition(html)
-
-    assert len(composition.lists) == 1
-    assert composition.lists[0].options == []
-    assert composition.lists[0].budget == 5  # the page's own number survives
-    assert "ALPHA AGENT" in composition.lists[0].label
-    assert len(composition.unresolved) == 1
-
-
-def test_a_line_the_parser_does_not_recognise_at_all_still_raises():
-    # The other half of the trade: no options AND nothing ambiguous means the parser did not
-    # read the line, which is a parser gap and has to be loud.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>4 SOMETHING UNREADABLE</li></ul>
-    """
-    with pytest.raises(CompositionNotParsed, match="no operatives found"):
-        parse_composition(html)
 
 
 _TWO_WARRIORS = """
@@ -1535,111 +660,6 @@ _TWO_WARRIORS = """
     </tr></table>
     <table class="dsKeywords"><tr><td><span class="tt kwbu">CLADE</span>, <span class="tt kwbu">WARRIOR</span></td></tr></table></div>
 """
-
-
-def test_an_unreadable_line_still_raises_after_an_earlier_line_was_ambiguous():
-    # The gate counted ambiguities over the WHOLE tree, so one ambiguous entry anywhere above
-    # silenced it for every line below: the same unreadable line raised or was stored with no
-    # options depending on an unrelated line. The elimination rule (#37) fills `unresolved` by
-    # design, so the check switched itself off exactly when the parser was already struggling.
-    html = f"""
-    {_TWO_WARRIORS}
-    <h2>Operatives</h2>
-    <ul class="redTriangle">
-      <li>2 CLADE operatives selected from the following list:
-        <ul class="redCircle2"><li>WARRIOR</li></ul></li>
-      <li>4 SOMETHING UNREADABLE</li>
-    </ul>
-    """
-    with pytest.raises(CompositionNotParsed, match="no operatives found"):
-        parse_composition(html)
-
-
-def test_a_line_whose_own_entries_were_all_ambiguous_is_still_stored():
-    # The other side of the same gate, and the reason it cannot simply always raise: a line
-    # the parser DID read, whose entries it could not name, is stored as printed rather than
-    # losing the team (#28, #32, #37).
-    html = f"""
-    {_TWO_WARRIORS}
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>2 CLADE operatives selected from the following list:
-      <ul class="redCircle2"><li>WARRIOR</li></ul></li></ul>
-    """
-    composition = parse_composition(html)
-
-    assert composition.lists[0].options == []
-    assert len(composition.unresolved) == 1
-
-
-def test_an_unresolved_entry_is_reported_as_a_warning():
-    team = _scraped_team(unresolved_entries=["WARRIOR SICARIAN — matches several datacards equally"])
-
-    warnings = composition_warnings(team)
-
-    assert any("needs a human" in w for w in warnings)
-
-
-def test_a_requisition_group_whose_ally_has_no_page_offers_this_teams_datacards():
-    # Inquisitorial Agent's main line points at requisition groups, so seven of its eighteen
-    # datacards were offered by nothing at all. Sister of Silence and Tempestus Scion are not
-    # kill teams — which is exactly why that page prints their datacards, as its own rows
-    # (decision #31) — so those groups resolve here and their operatives become usable.
-    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
-
-    wardens = groups["Ember Wardens"]
-    assert [option.operative for option in wardens.lists[0].options] == [
-        "Hollow Ash Prophet",
-        "Hollow Ember Wisp",
-    ]
-    assert wardens.lists[0].budget == 3
-    assert wardens.lists[0].requisition_source == "Ember Wardens"
-
-
-def test_a_requisition_group_whose_ally_is_a_kill_team_resolves_nothing_here():
-    # Not merely fruitless — WRONG. Resolving Death Korps' entries against Inquisitorial
-    # Agent's datacards matched its "TROOPER" to a Tempestus Scion Trooper, through the
-    # resolver's last-word rule. The printed line is still a page fact, so it is kept.
-    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
-
-    choir = groups["Ashen Choir"]
-    assert choir.lists[0].options == []
-    assert (choir.lists[0].budget, choir.lists[0].requisition_source) == (5, "Ashen Choir")
-
-
-def test_a_requisition_groups_restriction_caps_the_operatives_it_offers():
-    # `parse_requisition` read the printed lines and nothing else, so five of Inquisitorial
-    # Agent's six groups lost their sentence and three lost their notes -- and its Tempestus
-    # Scion Gunner, Medic and Vox-Operator were stored with no repeat limit, where the page
-    # prints one. A group prints the sentence in the same place a composition does.
-    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
-
-    wardens = groups["Ember Wardens"]
-    options = {option.operative: option for option in wardens.lists[0].options}
-
-    assert wardens.lists[0].restriction_text is not None
-    assert options["Hollow Ember Wisp"].max_selections == 1
-    assert options["Hollow Ash Prophet"].max_selections is None  # the sentence exempts PROPHET
-    assert wardens.keyword_caps == [KeywordCap(keyword="EMBER", max_operatives=2)]
-
-
-def test_a_known_teams_group_keeps_its_sentence_without_minting_a_cap():
-    # Such a group caps a keyword no datacard on THIS page carries, because the ally's
-    # operatives live on its own page: Exaction Squad cap SUBDUCTOR. Minting it would trip
-    # the "cap matches no operative" check and lose the whole team, and the row would be
-    # inert even if it did not -- so the sentence is stored and nothing is derived from it
-    # (decision #28). The footnote is still the team's, wherever on the page it is printed.
-    groups = {group.source: group for group in parse_requisition(COMPOSITION, ["Ashen Choir"])}
-
-    choir = groups["Ashen Choir"]
-
-    assert choir.lists[0].restriction_text is not None
-    assert "CHOIRMASTER" in choir.lists[0].restriction_text
-    assert choir.keyword_caps == []
-    assert choir.notes == ["These operatives count as half a selection each."]
-
-
-def test_a_page_with_no_requisition_section_has_no_groups():
-    assert parse_requisition(TEAM, ["Ashen Choir"]) == []
 
 
 def _anchored_html(entry_html: str, cards: list[str]) -> str:
@@ -1662,199 +682,106 @@ def _anchored_html(entry_html: str, cards: list[str]) -> str:
     """
 
 
-def test_the_page_link_decides_which_datacard_an_entry_means():
-    # The site links each composition entry to the datacard it means. Measured over the 48
-    # composition trees: 444 anchors, 444 unique matches, no misses — they resolve 444 of the
-    # 470 entries that produce an option, leaving 26 for the text ladder. That is better evidence than any
-    # text rule, and it is tried first (decision #35) -- here the text alone would resolve
-    # `PLAYER` to the shorter card, which is exactly the Void-dancer mis-resolution.
-    html = _anchored_html(
-        '<li><a class="kwbOne" href="/kill-team3/x#Lead-Player">PLAYER</a></li>',
-        ["Lead Player", "Player"],
+# ---------------------------------------------------------------------------
+# The composition, as printed text (`parse_selection_rules`, decision #28).
+
+
+def _rules(html=None):
+    return parse_selection_rules(html if html is not None else COMPOSITION)
+
+
+def test_a_composition_line_and_its_entries_keep_the_pages_indent():
+    # The page prints composition as an indented list and the indent carries meaning: an
+    # entry belongs to the line above it. Depth 0 is a line, 1 one of its entries.
+    rules = _rules()
+    first = next(r for r in rules if r.kind == "line")
+
+    assert first.depth == 0
+    assert first.text == "1 HOLLOW WARDEN operative"
+    assert [r.depth for r in rules[:3]] == [0, 0, 1]
+
+
+def test_a_loadout_under_an_entry_is_nested_rather_than_a_sibling():
+    # The failure this shape exists to avoid: flattened, "Ash lash; rusted glaive" would
+    # sit beside SENTINEL as though it were another operative to choose. It is a loadout
+    # FOR the WARDEN entry above it, which depth 2 says and a flat list cannot.
+    rules = _rules()
+    options = [r for r in rules if r.depth == 2]
+
+    assert options, "the fixture prints a nested loadout list"
+    assert all(r.kind == "line" for r in options)
+    owner = max(
+        (r for r in rules if r.depth == 1 and r.position < options[0].position), key=lambda r: r.position
     )
-
-    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Lead Player"]
-
-
-def test_a_link_in_a_nested_loadout_list_is_not_the_entrys_own():
-    # Only the entry's OWN element is searched. A nested list is its loadouts, and a link
-    # there would name whatever that line mentions rather than the operative being offered.
-    html = _anchored_html(
-        """<li>SENTINEL
-             <ul class="redEmptyCircle2">
-               <li><a class="kwbOne" href="/kill-team3/x#Alpha-Warden">Warden's blade</a></li>
-             </ul>
-           </li>""",
-        ["Alpha Sentinel", "Alpha Warden"],
-    )
-
-    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Alpha Sentinel"]
+    assert "one of the following options" in owner.text
 
 
-def test_an_entry_with_no_link_still_resolves_by_text():
-    # 147 of the 591 composition items the parser reads carry no link (296 of the 740 `li` if
-    # the loadout items it skips are counted), because the site links a keyword on its FIRST
-    # appearance only — Blooded's three repeated "GUNNER with …" variants are styled and
-    # unlinked. The text ladder is what reads those.
-    html = _anchored_html("<li>SENTINEL</li>", ["Alpha Sentinel", "Alpha Warden"])
+def test_every_printed_bullet_is_kept_including_the_loadout_lists():
+    # `redEmptyCircle2` items are weapon loadouts, and the old model dropped them because
+    # resolving them as operatives was a hazard. Nothing is resolved now, so dropping them
+    # would only lose 157 lines the page prints.
+    texts = [r.text for r in _rules() if r.kind == "line"]
 
-    assert [o.operative for o in parse_composition(html).lists[0].options] == ["Alpha Sentinel"]
+    assert "Ash lash; rusted glaive" in texts
+    assert "Ember charm or ash token" in texts
 
 
-def test_a_claimed_candidate_is_eliminated_leaving_one_answer():
-    # A list does not offer the same operative twice under two names (decision #37). Hunter
-    # Clade print "WARRIOR INFILTRATOR", which the page LINKS to the Infiltrator Warrior, and
-    # then "WARRIOR SICARIAN", which matches both Sicarian Warriors — a page inconsistency,
-    # it should read "WARRIOR RUSTSTALKER". With the Infiltrator claimed, only the Ruststalker
-    # is left, which is how a human reads it and what the entry's own loadouts confirm.
-    composition = _composition_with(
-        [
-            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ranger", ["CLADE", "RANGER"]),
-        ],
-        ["WARRIOR INFILTRATOR", "WARRIOR", "RANGER"],
-        "",
-    )
+def test_the_restriction_sentence_is_its_own_rule_kept_verbatim():
+    # Nothing is read out of it any more -- no repeat cap, no keyword cap. The sentence IS
+    # the rule, which is exact where a column had to approximate (decision #28).
+    restriction = next(r for r in _rules() if r.kind == "restriction")
 
-    assert [option.operative for option in composition.lists[0].options] == [
-        "Alpha Infiltrator Warrior",
-        "Alpha Ruststalker Warrior",  # in its PRINTED position, not appended last
-        "Alpha Ranger",
+    assert restriction.depth == 0
+    assert restriction.text.startswith("Other than SENTINEL operatives")
+    assert "up to one EMBER operative" in restriction.text
+
+
+def test_the_notes_printed_around_a_composition_are_their_own_rules():
+    # A marker starts a note and a callout box is a note of its own (decision #30).
+    notes = [r.text for r in _rules() if r.kind == "note"]
+
+    assert notes == [
+        "You cannot select more than two of these operatives combined.",
+        "Designer's Note: the page prints this in a box beside the composition.",
+        # a requisition group prints footnotes too, and they are the team's (decision #30)
+        "These operatives count as half a selection each.",
     ]
-    assert composition.unresolved == []
 
 
-def test_elimination_does_not_guess_when_more_than_one_candidate_is_left():
-    # Two ambiguous entries and two candidates: nothing is claimed, so nothing is decided.
-    # Guessing here is what the whole ladder exists to avoid.
-    composition = _composition_with(
-        [
-            ("Alpha Infiltrator Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ruststalker Warrior", ["CLADE", "WARRIOR"]),
-            ("Alpha Ranger", ["CLADE", "RANGER"]),
-        ],
-        ["WARRIOR", "WARRIOR", "RANGER"],
-        "",
-    )
+def test_a_requisition_group_is_a_heading_followed_by_its_lines():
+    # Its lines are text like any other, so whether the ally has a page of its own stops
+    # being a question the catalog answers (it was decisions #33 and #34).
+    rules = _rules()
+    headings = [r for r in rules if r.kind == "heading"]
 
-    assert [option.operative for option in composition.lists[0].options] == ["Alpha Ranger"]
-    assert len(composition.unresolved) == 2
+    assert [r.text for r in headings] == ["Ember Wardens", "Ashen Choir"]
+    after = next(r for r in rules if r.position == headings[0].position + 1)
+    assert after.kind == "line" and after.depth == 0
 
 
-def test_elimination_refuses_a_winner_the_tie_break_would_pick():
-    # The sibling test above uses two candidates of equal length, which is the one shape
-    # where `len(remaining) == 1` is redundant -- the tie-break refuses either way. Three
-    # candidates of DIFFERING length is the shape that makes the guard load-bearing:
-    # `candidates` carries every hit at the failing rule, so with "Alpha Warrior" claimed the
-    # remaining two are not tied, and the fewest-extra-words rule would answer "Omega
-    # Warrior". A comment here used to claim a guess was refused either way; it is not.
-    composition = _composition_with(
-        [
-            ("Alpha Warrior", ["CLADE", "ALPHA", "WARRIOR"]),
-            ("Omega Warrior", ["CLADE", "OMEGA", "WARRIOR"]),
-            ("Big Omega Warrior", ["CLADE", "BIG", "OMEGA", "WARRIOR"]),
-        ],
-        ["ALPHA WARRIOR", "WARRIOR"],
-        "",
-    )
+def test_position_runs_across_the_whole_composition():
+    # One ordering for lines, sentences and notes together, so reading in position order
+    # and indenting by depth gives the page's section back.
+    rules = _rules()
 
-    assert [option.operative for option in composition.lists[0].options] == ["Alpha Warrior"]
-    assert len(composition.unresolved) == 1
-    assert "Omega Warrior" not in str(composition.lists[0].options)
+    assert [r.position for r in rules] == list(range(len(rules)))
 
 
-def test_a_line_pointing_at_another_list_is_a_reference_not_a_name():
-    # "5 … operatives selected from the list above" names no operative, and reading it as one
-    # matched nine Agent datacards and reported an ambiguity that was never a naming problem.
-    # Checked before resolution, so the line carries a reference and its own budget (#38).
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle">
-      <li>5 ALPHA operatives selected from the following list:
-        <ul class="redCircle2"><li>MYSTIC</li></ul>
-      </li>
-      <li>5 ALPHA operatives selected from the list above, or REQUISITIONED operatives</li>
-    </ul>
-    """
-    lists = parse_composition(html).lists
-
-    assert [lst.same_options_as for lst in lists] == [None, 0]
-    assert lists[1].options == []
-    assert lists[1].budget == 5  # the page states one, so it is kept
-    assert parse_composition(html).unresolved == []
+def test_a_page_with_no_operatives_section_fails_loudly():
+    with pytest.raises(CompositionNotParsed, match="no 'Operatives' section"):
+        parse_selection_rules("<html><body><h2>Something else</h2></body></html>")
 
 
-def test_a_restriction_applies_to_the_last_list_that_offers_something():
-    # The sentence is printed under the whole composition, so it belongs to the last list --
-    # but Inquisitorial Agent's composition ENDS on a cross-reference naming no options of
-    # its own (decision #38). The rule landed there, was applied to an empty set, and its
-    # nine Agents were stored with no repeat limit. It goes where its options are, which on
-    # 47 of the 48 teams is the same list. A tree with no options anywhere keeps it on the
-    # last line, which `test_a_known_teams_group_keeps_its_sentence_…` pins.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table>
-    <table class="dsKeywords"><tr><td><span class="tt kwbu">MYSTIC</span></td></tr></table></div>
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table>
-    <table class="dsKeywords"><tr><td><span class="tt kwbu">WARDEN</span></td></tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle">
-      <li>5 ALPHA operatives selected from the following list:
-        <ul class="redCircle2">
-          <li><span class="kwb kwbo">MYSTIC</span></li>
-          <li><span class="kwb kwbo">WARDEN</span></li>
-        </ul>
-      </li>
-      <li>5 ALPHA operatives selected from the list above, or REQUISITIONED operatives</li>
-    </ul>
-    Other than WARDEN operatives, your kill team can only include each operative on this
-    list once.
-    """
-    lists = parse_composition(html).lists
-    options = {option.operative: option for option in lists[0].options}
-
-    # the cross-reference offers nothing, so it carries neither the rule nor its effect
-    assert (lists[1].options, lists[1].restriction_text) == ([], None)
-    assert lists[0].restriction_text is not None
-    assert options["Alpha Mystic Agent"].max_selections == 1
-    assert options["Alpha Warden Agent"].max_selections is None  # the sentence exempts it
-
-
-def test_a_reference_printed_first_is_not_read_as_a_name():
-    # A cross-reference at position 0 points at nothing, so it cannot be stored as a
-    # reference -- and it used to fall through to the inline name resolution, where a label
-    # resolving to a single datacard made the parser invent an option the page never offered,
-    # with nothing in `unresolved` to say so. That is exactly what decision #38 forbids. A
-    # reference printed first is a page shape the parser does not understand, so it is loud:
-    # `scrape` turns the raise into a named skip.
-    html = """
-    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
-      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Mystic Agent</div></h3></div></td>
-      <td class="pCell">APL<div class="dsStat">2</div></td>
-    </tr></table>
-    <table class="dsKeywords"><tr><td><span class="tt kwbu">ALPHA</span>, <span class="tt kwbu">MYSTIC</span></td></tr></table></div>
-    <h2>Operatives</h2>
-    <ul class="redTriangle"><li>5 ALPHA MYSTIC operatives selected from the list above</li></ul>
-    """
-    with pytest.raises(CompositionNotParsed, match="no operatives found"):
-        parse_composition(html)
+def test_a_page_whose_operatives_section_has_no_list_fails_loudly():
+    with pytest.raises(CompositionNotParsed, match="no composition list"):
+        parse_selection_rules("<html><body><h2>Operatives</h2><p>nothing</p></body></html>")
 
 
 def test_operatives_a_condition_grants_are_marked_in_battle():
     # Gellerpox print a second block under "If you selected the MUTOID VERMIN faction
-    # equipment:", whose line reads "Specified number of …" because the number is in the
-    # equipment text. Those datacards are not rosterable at all — they arrive mid-battle
-    # (decisions #18, #20) — so they are marked rather than offered.
+    # equipment:". Those datacards are not rosterable at all -- they arrive mid-battle
+    # (decisions #18, #20) -- so they are marked rather than offered. This is the one
+    # place that still resolves an entry against a datacard.
     html = """
     <div class="dsOuterFrame"><table><tr class="pHeaderRow">
       <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
@@ -1865,23 +792,9 @@ def test_operatives_a_condition_grants_are_marked_in_battle():
       <td class="pCell">APL<div class="dsStat">1</div></td>
     </tr></table></div>
     <h2>Operatives</h2>
-    <ul class="redTriangle"><li>Every ALPHA operative in the following list:
-      <ul class="redCircle2"><li>1 WARDEN</li></ul>
-    </li></ul>
-    If you selected the VERMIN faction equipment:
-    <ul class="redTriangle"><li>Specified number of ALPHA operatives selected from the following list:
-      <ul class="redCircle2"><li>CURSEMITE</li></ul>
-    </li></ul>
+    <ul class="redTriangle"><li>1 ALPHA WARDEN operative</li></ul>
+    If you selected the MUTOID VERMIN faction equipment:
+    <ul class="redTriangle"><li>Specified number of ALPHA CURSEMITE operatives</li></ul>
     """
+
     assert parse_in_battle_operatives(html) == ["Alpha Cursemite"]
-    # and the composition still reads only the first block
-    assert len(parse_composition(html).lists) == 1
-
-
-def test_an_in_battle_datacard_is_not_reported_as_unofferable():
-    # The warning exists to say "nobody can field this". An `in_battle` operative is not
-    # meant to be fieldable from a roster, so reporting it would be noise.
-    team = _scraped_team()
-    team["operatives"].append({"name": "Alpha Cursemite", "abilities": [], "availability": "in_battle"})
-
-    assert composition_warnings(team) == []

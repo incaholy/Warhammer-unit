@@ -126,37 +126,18 @@ def test_a_listed_team_carries_its_faction_without_a_query_per_row(session, make
 # --- one team, whole ------------------------------------------------------
 
 
-def _furnish(team, *, operatives, lists, factories):
-    """Give `team` a full page's worth of rows, so a detail read has work to do.
-
-    More than one selection list, always: with a single list, dropping the nested options
-    eager load costs one lazy query and saves one eager one, so the count would not move.
-    """
-    (
-        make_operative,
-        make_weapon,
-        make_ability,
-        make_rule,
-        make_ploy,
-        make_equipment,
-        make_list,
-        make_option,
-        make_cap,
-    ) = factories
+def _furnish(team, *, operatives, rules, factories):
+    """Give `team` a full page's worth of rows, so a detail read has work to do."""
+    make_operative, make_weapon, make_ability, make_rule, make_ploy, make_equipment, make_srule = factories
     make_rule(kill_team=team, name="Burrow", position=0)
     make_ploy(kill_team=team, name="TUNNEL", position=0)
     make_equipment(kill_team=team, name="Spike", position=0)
-    make_cap(kill_team=team, keyword="GRAVIS", max_operatives=1)
-    selection_lists = [make_list(kill_team=team, position=index) for index in range(lists)]
+    for index in range(rules):
+        make_srule(kill_team=team, position=index, depth=index and 1, text=f"line {index}")
     for index in range(operatives):
         operative = make_operative(kill_team=team, name=f"Operative {index}", position=index)
         make_weapon(operative=operative, name=f"Claw {index}", position=0)
         make_ability(operative=operative, name=f"Ability {index}", position=0)
-        make_option(
-            selection_list=selection_lists[index % lists],
-            operative=operative,
-            position=index // lists,
-        )
     return team
 
 
@@ -168,9 +149,7 @@ def furnish(
     make_kill_team_rule,
     make_kt_ploy,
     make_kt_equipment,
-    make_kt_selection_list,
-    make_kt_selection_option,
-    make_kt_selection_restriction,
+    make_kt_selection_rule,
 ):
     factories = (
         make_kt_operative,
@@ -179,19 +158,17 @@ def furnish(
         make_kill_team_rule,
         make_kt_ploy,
         make_kt_equipment,
-        make_kt_selection_list,
-        make_kt_selection_option,
-        make_kt_selection_restriction,
+        make_kt_selection_rule,
     )
 
-    def _furnish_team(team, *, operatives, lists=2):
-        return _furnish(team, operatives=operatives, lists=lists, factories=factories)
+    def _furnish_team(team, *, operatives, rules=3):
+        return _furnish(team, operatives=operatives, rules=rules, factories=factories)
 
     return _furnish_team
 
 
 def test_reading_a_team_brings_back_its_whole_page(session, make_kill_team, furnish):
-    team_id = furnish(make_kill_team(name="Raveners"), operatives=3, lists=2).id
+    team_id = furnish(make_kill_team(name="Raveners"), operatives=3, rules=3).id
     session.expunge_all()  # the factories left these loaded; measure a cold read
 
     loaded = _service(session).get_kill_team(team_id)
@@ -208,19 +185,16 @@ def test_reading_a_team_brings_back_its_whole_page(session, make_kill_team, furn
     assert [rule.name for rule in loaded.rules] == ["Burrow"]
     assert [ploy.name for ploy in loaded.ploys] == ["TUNNEL"]
     assert [item.name for item in loaded.equipment] == ["Spike"]
-    assert [cap.keyword for cap in loaded.keyword_caps] == ["GRAVIS"]
-    assert len(loaded.selection_lists) == 2
-    # three operatives dealt round-robin across two lists
-    assert sum(len(lst.options) for lst in loaded.selection_lists) == 3
+    # the composition as printed: text with an indent depth, nothing derived (#28)
+    assert [(r.position, r.depth) for r in loaded.selection_rules] == [(0, 0), (1, 1), (2, 1)]
 
 
 def test_reading_a_team_costs_the_same_number_of_queries_however_big_it_is(session, make_kill_team, furnish):
-    # The reason this service exists rather than the router walking relationships: eleven
+    # The reason this service exists rather than the router walking relationships: nine
     # queries flat, whatever the team's size. Lazy loading would be a query per operative
-    # per collection, and the largest real team (Inquisitorial Agent) is 138 rows over 10
-    # selection lists -- a cost that never shows up in the result, only in production.
-    small_id = furnish(make_kill_team(name="Small"), operatives=2, lists=2).id
-    large_id = furnish(make_kill_team(name="Large"), operatives=12, lists=5).id
+    # per collection -- a cost that never shows up in the result, only in production.
+    small_id = furnish(make_kill_team(name="Small"), operatives=2, rules=3).id
+    large_id = furnish(make_kill_team(name="Large"), operatives=12, rules=20).id
     service = _service(session)
 
     session.expunge_all()
@@ -231,19 +205,36 @@ def test_reading_a_team_costs_the_same_number_of_queries_however_big_it_is(sessi
     with counting_queries(session) as for_large:
         _touch_everything(service.get_kill_team(large_id))
 
-    assert len(for_small) == len(for_large) == 11
+    assert len(for_small) == len(for_large) == 9
 
 
 def _touch_everything(team):
     """Walk every collection, so a missing eager load would issue its lazy query here."""
     assert team.faction.name is not None
-    for collection in (team.rules, team.ploys, team.equipment, team.keyword_caps):
+    for collection in (team.rules, team.ploys, team.equipment, team.selection_rules):
         [row.id for row in collection]
     for operative in team.operatives:
         [weapon.id for weapon in operative.weapons]
         [ability.id for ability in operative.abilities]
-    for selection_list in team.selection_lists:
-        [option.id for option in selection_list.options]
+
+
+def test_a_loaded_team_is_readable_once_the_session_is_done_with_it(session, make_kill_team, furnish):
+    # The query count above cannot catch a missing eager load on a DIRECT collection: it
+    # hangs off one team row, so lazy and eager both cost exactly one query -- the
+    # difference is WHEN it runs. This is the difference that matters: a router serialises
+    # the object after the request's session is finished with it, and a collection left to
+    # lazy-load then raises DetachedInstanceError instead of returning rows.
+    team_id = furnish(make_kill_team(name="Raveners"), operatives=2, rules=3).id
+    session.expunge_all()
+
+    team = _service(session).get_kill_team(team_id)
+    session.expunge(team)  # as a closed request-scoped session would leave it
+
+    assert team.faction.name
+    assert [r.position for r in team.selection_rules] == [0, 1, 2]
+    assert [r.name for r in team.rules] and [p.name for p in team.ploys]
+    assert [e.name for e in team.equipment]
+    assert all(o.weapons and o.abilities for o in team.operatives)
 
 
 def test_reading_a_team_that_does_not_exist_is_a_not_found(session):

@@ -9,7 +9,7 @@ in hand -- so this script looks rows up by natural key and never guesses.
 Running it again brings the database up to the payload: a row is created if absent and
 REWRITTEN if the source changed it, so a rebalanced stat or a reworded ploy lands on the
 next scrape. A team's selection lists are the exception -- they are replaced as a whole
-(see `_seed_composition`), because a list's identity is its print position.
+(see `_seed_rules`), because a composition rule's identity is its print position.
 
 What that leaves is a SUPERSET of the payload, not a match: outside the composition,
 rows the source has REMOVED or RENAMED stay behind, and nothing marks them as stale
@@ -38,15 +38,7 @@ killteam.json shape:
                                              "hit", "normal_damage", "crit_damage",
                                              "rules" }, ... ],
                             "abilities": [ { "name", "description" }, ... ] }, ... ],
-          "selection_lists": [ { "label", "budget", "position", "shape", "requisition_source",
-                                 "same_options_as",
-                                 "restriction_text",
-                                 "options": [ { "operative", "cost", "models",
-                                                "max_selections",
-                                                "loadout_options" }, ... ] }, ... ],
-          "keyword_caps":    [ { "keyword", "max_operatives" }, ... ],
-          "composition_notes":  [ "…", ... ],
-          "unresolved_entries": [ "…", ... ] }, ...
+          "selection_rules": [ { "position", "depth", "kind", "text" }, ... ] }, ...
       ],
       "universal_ploys":     [ { "name", "kind", "description", "cp_cost"? }, ... ],
       "universal_equipment": [ { "name", "description" }, ... ],
@@ -55,9 +47,10 @@ killteam.json shape:
     }
 
 Every key above is REQUIRED and read as such, so a scraper-side rename breaks the seed
-instead of loading 454 operatives with empty keywords. `range` and `max_selections` may
-be null (no printed Range rule, no repeat cap); `cp_cost` is the one optional key, since
-a page that prints no cost means the default.
+instead of loading 454 operatives with empty keywords. `range` may be null (no printed
+Range rule); `cp_cost` is the one optional key, since a page that prints no cost means
+the default. A selection rule's `kind` is `heading`, `line`, `restriction` or `note`, and
+`depth` is the page's indent and is 0 for every kind but `line` (see `KTSelectionRule`).
 
 `skipped` names the teams the scraper could not read (ambiguous pages, KILLTEAM.md → K6).
 It is reported at the end of a run: the catalog loads fine without them, but a seed that
@@ -82,9 +75,7 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
-    KTSelectionList,
-    KTSelectionOption,
-    KTSelectionRestriction,
+    KTSelectionRule,
     KTWeapon,
     default_range,
 )
@@ -100,13 +91,11 @@ COUNT_KEYS = (
     "operatives",
     "weapons",
     "abilities",
-    "selection_lists",
-    "selection_options",
-    "keyword_caps",
+    "selection_rules",
     "universal_ploys",
     "universal_equipment",
     "updated",  # rows that already existed and had at least one column rewritten
-    "compositions_replaced",  # teams whose selection lists were rewritten wholesale
+    "compositions_replaced",  # teams whose composition was rewritten wholesale
 )
 
 
@@ -146,11 +135,10 @@ def _check_no_duplicates(data: dict) -> None:
             (f"{where} ploy", team.get("ploys", []), lambda ploy: ploy["name"]),
             (f"{where} equipment", team.get("equipment", []), lambda item: item["name"]),
             (f"{where} operative", team.get("operatives", []), lambda op: op["name"]),
-            (f"{where} keyword cap", team.get("keyword_caps", []), lambda cap: cap["keyword"]),
             (
-                f"{where} selection list position",
-                team.get("selection_lists", []),
-                lambda listing: listing["position"],
+                f"{where} selection rule position",
+                team.get("selection_rules", []),
+                lambda rule: rule["position"],
             ),
         ]
         for operative in team.get("operatives", []):
@@ -166,14 +154,6 @@ def _check_no_duplicates(data: dict) -> None:
                     lambda ability: ability["name"],
                 ),
             ]
-        for listing in team.get("selection_lists", []):
-            sections.append(
-                (
-                    f"{where} list {listing['position']} option",
-                    listing.get("options", []),
-                    lambda option: option["operative"],
-                )
-            )
 
     for what, items, key in sections:
         repeat = _duplicate(items, key)
@@ -199,7 +179,7 @@ def _upsert(
     a guess, and anything missing collapses two source rows into one.
 
     A selection list does NOT come through here: its only stable identity is its print
-    position, which an upsert cannot follow. `_seed_composition` replaces that subtree.
+    position, which an upsert cannot follow. `_seed_rules` replaces that subtree.
 
     A `None` in `keys` is matched with `IS NULL`, which is how the universal ploys and
     equipment (`kill_team_id = NULL`) are found. SQLAlchemy would render `column == None`
@@ -312,123 +292,47 @@ def _seed_operative(
     return operative
 
 
-def _comparable(lists) -> list:
+def _comparable(rules) -> list:
     """A composition as one comparable value, independent of row order.
 
-    Options come back from the database in no particular order, so both sides are sorted
-    -- lists by position, options by operative name, each unique within its parent.
+    Rows come back from the database in no particular order, so both sides are sorted by
+    `position` -- unique within a team, and an integer, so the sort never reaches the text
+    and cannot raise comparing a string against None.
     """
-    # Sorted on the position and the operative name alone -- both unique within their
-    # parent, so the ordering never reaches `restriction_text`, which is nullable and
-    # would raise `TypeError` against a string instead of comparing.
-    return sorted(
-        (
-            (
-                position,
-                budget,
-                label,
-                restriction,
-                shape,
-                source,
-                same_as,
-                tuple(sorted(options, key=lambda option: option[0])),
-            )
-            for position, budget, label, restriction, shape, source, same_as, options in lists
-        ),
-        key=lambda row: row[0],
-    )
+    return sorted(rules, key=lambda row: row[0])
 
 
-def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: dict, counts: dict) -> None:
-    """Replace the team's selection lists when they differ from the payload.
+def _seed_rules(session: Session, team: KillTeam, data: dict, counts: dict) -> None:
+    """Replace the team's composition rules when they differ from the payload.
 
-    An upsert is wrong for this one subtree. A list is identified by its `position` --
-    the page's print order -- because nothing else on the line is stable. So a page that
-    gains, loses or reorders a line does not change one row, it SHIFTS them all: every
-    surviving row would keep its own options while being rewritten with the next list's
-    label and budget, leaving a budget-1 list offering two operatives and an option
-    costing more than the whole budget. A configuration that was never printed anywhere,
-    reported as a tidy incremental update.
+    An upsert is wrong for this subtree, for the same reason it was wrong for the lists
+    this replaces: a rule is identified by its `position` -- the page's print order --
+    because nothing else about a line is stable. A page that gains, loses or reorders a
+    line does not change one row, it SHIFTS them all, and every surviving row would be
+    rewritten with the next rule's text while reported as a tidy incremental update.
 
-    Composition is small, derived, and -- until K4 gives rosters something to reference
-    -- pointed at by nothing, so the honest operation is replace-if-changed: compare the
-    whole subtree, and when it differs delete the team's lists (options follow by
-    cascade) and write the payload's. A team whose composition matches is not touched at
-    all, which is the common case on a re-run.
+    Composition is small, derived, and pointed at by nothing, so the honest operation is
+    replace-if-changed: compare the whole run, and when it differs delete the team's rules
+    and write the payload's. A team whose composition matches is not touched, which is the
+    common case on a re-run.
+
+    Simpler than the version it replaces because there is nothing to resolve. No operative
+    to look up, no reference to link in a second pass, no position to translate back from
+    a stored id -- the rows are text, so comparing them is comparing text.
     """
-    if "selection_lists" not in data:
+    if "selection_rules" not in data:
         # Absent is NOT empty. The scraper raises rather than emitting a team without the
         # section (that team lands in `skipped`), so a missing key means a partial or
         # hand-made payload -- and reading it as "this team has no composition" would
-        # delete every list and option the team has, reported as a tidy replace. An
-        # explicit `[]` still means "replace it with nothing", which is a statement.
+        # delete every rule the team has, reported as a tidy replace. An explicit `[]`
+        # still means "replace it with nothing", which is a statement.
         return
 
-    wanted = []
-    for listing in data["selection_lists"]:
-        options = []
-        for index, option in enumerate(listing.get("options", [])):
-            if option["operative"] not in operatives:
-                # The scraper resolved this name against this page's datacards, so a
-                # miss here means the payload is inconsistent -- not something to guess
-                # past, since the option would offer an operative nobody can field.
-                raise SeedError(
-                    f"{data['name']}: selection option names {option['operative']!r}, "
-                    f"which is not one of the team's operatives"
-                )
-            options.append(
-                (
-                    option["operative"],
-                    option["cost"],
-                    option["models"],
-                    option["max_selections"],
-                    tuple(option["loadout_options"]),
-                    # Its print order, compared too: a list offering the same options in a
-                    # new order HAS changed, and storing the order is pointless if such a
-                    # change does not land.
-                    index,
-                )
-            )
-        wanted.append(
-            (
-                listing["position"],
-                listing["budget"],
-                listing["label"],
-                listing.get("restriction_text"),
-                listing["shape"],
-                listing["requisition_source"],
-                listing["same_options_as"],
-                options,
-            )
-        )
-
-    existing = session.exec(select(KTSelectionList).where(KTSelectionList.kill_team_id == team.id)).all()
-    # The payload names a referenced list by POSITION and the row holds its id, so the stored
-    # side is translated back before comparing -- otherwise every run would look changed.
-    position_of = {row.id: row.position for row in existing}
-    stored = [
-        (
-            row.position,
-            row.budget,
-            row.label,
-            row.restriction_text,
-            row.shape,
-            row.requisition_source,
-            position_of.get(row.same_options_as_id),
-            [
-                (
-                    option.operative.name,
-                    option.cost,
-                    option.models,
-                    option.max_selections,
-                    tuple(option.loadout_options),
-                    option.position,
-                )
-                for option in row.options
-            ],
-        )
-        for row in existing
+    wanted = [
+        (rule["position"], rule["depth"], rule["kind"], rule["text"]) for rule in data["selection_rules"]
     ]
+    existing = session.exec(select(KTSelectionRule).where(KTSelectionRule.kill_team_id == team.id)).all()
+    stored = [(row.position, row.depth, row.kind, row.text) for row in existing]
     if _comparable(stored) == _comparable(wanted):
         return
 
@@ -436,56 +340,23 @@ def _seed_composition(session: Session, team: KillTeam, data: dict, operatives: 
         session.delete(row)
     session.flush()  # the DELETEs must land before an INSERT reuses (kill_team_id, position)
 
-    for position, budget, label, restriction, shape, source, _same_as, options in wanted:
-        row = KTSelectionList(
-            kill_team_id=team.id,
-            position=position,
-            budget=budget,
-            label=label,
-            restriction_text=restriction,
-            shape=shape,
-            requisition_source=source,
-        )
-        session.add(row)
-        # So the list row is in the database before its options reference it. NOT for the
-        # id: `KTSelectionList.id` is a client-side `uuid4` default and exists already.
-        session.flush()
-        for name, cost, models, max_selections, loadouts, index in options:
-            session.add(
-                KTSelectionOption(
-                    selection_list_id=row.id,
-                    operative_id=operatives[name].id,
-                    # Carried explicitly: it is what both composite foreign keys reach
-                    # the option's parents through.
-                    kill_team_id=team.id,
-                    cost=cost,
-                    models=models,
-                    max_selections=max_selections,
-                    loadout_options=list(loadouts),
-                    position=index,
-                )
+    for position, depth, kind, text in wanted:
+        session.add(
+            KTSelectionRule(
+                kill_team_id=team.id,
+                position=position,
+                depth=depth,
+                kind=kind,
+                text=text,
             )
-
-    # Positions are unique within a team, so the reference resolves here -- no second pass
-    # needed, unlike a requisition pointing at another TEAM (decision #34).
-    rows = {
-        row.position: row
-        for row in session.exec(select(KTSelectionList).where(KTSelectionList.kill_team_id == team.id)).all()
-    }
-    for position, _budget, _label, _restriction, _shape, _source, same_as, _options in wanted:
-        if same_as is None:
-            continue
-        target = rows.get(same_as)
-        if target is not None and rows[position].same_options_as_id != target.id:
-            rows[position].same_options_as_id = target.id
+        )
 
     if existing:
-        # Counted per team, not per row: "3 selection lists created" would be a lie about
+        # Counted per team, not per row: "3 selection rules created" would be a lie about
         # a page that moved one line.
         counts["compositions_replaced"] += 1
     else:
-        counts["selection_lists"] += len(wanted)
-        counts["selection_options"] += sum(len(options) for *_, options in wanted)
+        counts["selection_rules"] += len(wanted)
 
 
 def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
@@ -495,7 +366,7 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
         KillTeam,
         counts,
         "kill_teams",
-        {"faction_id": faction.id, "composition_notes": data["composition_notes"]},
+        {"faction_id": faction.id},
         name=data["name"],
     )
 
@@ -534,48 +405,10 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             name=item["name"],
         )
 
-    operatives = {
-        operative["name"]: _seed_operative(session, team, operative, counts, index)
-        for index, operative in enumerate(data.get("operatives", []))
-    }
+    for index, operative in enumerate(data.get("operatives", [])):
+        _seed_operative(session, team, operative, counts, index)
 
-    _seed_composition(session, team, data, operatives, counts)
-
-    for cap in data.get("keyword_caps", []):
-        _upsert(
-            session,
-            KTSelectionRestriction,
-            counts,
-            "keyword_caps",
-            {"max_operatives": cap["max_operatives"]},
-            kill_team_id=team.id,
-            keyword=cap["keyword"],
-        )
-
-
-def _link_requisitions(session: Session, counts: dict) -> None:
-    """Point each requisition list at the kill team it names, once every team exists.
-
-    A second pass on purpose: the payload's order is the site's, so Inquisitorial Agent can
-    be read before the Death Korps team it requisitions from. Resolving during that team's
-    own pass would depend on who came first.
-
-    A reference, never shared rows -- Death Korps' operatives stay Death Korps' (decision
-    #31). A group whose operatives are this team's own (Sister of Silence, Tempestus Scion,
-    neither of which is a kill team) keeps a NULL link and offers its options directly.
-    """
-    lists = session.exec(select(KTSelectionList).where(KTSelectionList.requisition_source.is_not(None))).all()
-    if not lists:
-        return
-    by_name = {team.name: team for team in session.exec(select(KillTeam)).all()}
-    for row in lists:
-        source = by_name.get(row.requisition_source)
-        # No team of that name means the ally has no page of its own, which is why this
-        # group's operatives are on the requisitioning team's page and already offered.
-        wanted = source.id if source is not None else None
-        if row.from_kill_team_id != wanted:
-            row.from_kill_team_id = wanted
-            counts["updated"] += 1
+    _seed_rules(session, team, data, counts)
 
 
 def seed(session: Session, data: dict) -> dict[str, int]:
@@ -615,7 +448,6 @@ def seed(session: Session, data: dict) -> dict[str, int]:
                 name=item["name"],
             )
 
-        _link_requisitions(session, counts)
         session.commit()
     except Exception:
         # All or nothing. The rows written before the failure are only FLUSHED, so a

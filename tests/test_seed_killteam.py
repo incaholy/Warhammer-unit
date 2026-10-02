@@ -18,9 +18,7 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
-    KTSelectionList,
-    KTSelectionOption,
-    KTSelectionRestriction,
+    KTSelectionRule,
     KTWeapon,
 )
 from scripts.seed_killteam import SeedError, seed
@@ -93,46 +91,23 @@ SAMPLE = {
                     "abilities": [],
                 },
             ],
-            "selection_lists": [
+            "selection_rules": [
+                {"position": 0, "depth": 0, "kind": "line", "text": "1 HOLLOW WARDEN operative"},
                 {
-                    "label": "1 HOLLOW WARDEN operative",
-                    "budget": 1,
-                    "shape": "budgeted",
-                    "requisition_source": None,
-                    "same_options_as": None,
-                    "position": 0,
-                    "restriction_text": None,
-                    "options": [
-                        {
-                            "operative": "Hollow Warden",
-                            "cost": 1,
-                            "models": 1,
-                            "max_selections": None,
-                            "loadout_options": [],
-                        }
-                    ],
-                },
-                {
-                    "label": "4 HOLLOW operatives selected from the following list:",
-                    "budget": 4,
-                    "shape": "budgeted",
-                    "requisition_source": None,
-                    "same_options_as": None,
                     "position": 1,
-                    "restriction_text": "Other than SENTINEL operatives, once each.",
-                    "options": [
-                        {
-                            "operative": "Hollow Sentinel",
-                            "cost": 2,
-                            "models": 2,
-                            "max_selections": 1,
-                            "loadout_options": ["with ash lash"],
-                        }
-                    ],
+                    "depth": 0,
+                    "kind": "line",
+                    "text": "4 HOLLOW operatives selected from the following list:",
                 },
+                {"position": 2, "depth": 1, "kind": "line", "text": "SENTINEL with ash lash"},
+                {
+                    "position": 3,
+                    "depth": 0,
+                    "kind": "restriction",
+                    "text": "Other than SENTINEL operatives, once each.",
+                },
+                {"position": 4, "depth": 0, "kind": "note", "text": "A footnote the page prints."},
             ],
-            "keyword_caps": [{"keyword": "EMBER", "max_operatives": 1}],
-            "composition_notes": ["Other than SENTINEL operatives, once each."],
         }
     ],
     "universal_ploys": [
@@ -149,32 +124,6 @@ SAMPLE = {
 def test_seeding_an_empty_payload_fails_rather_than_looking_successful(session):
     with pytest.raises(SeedError, match="no kill teams"):
         seed(session, {"kill_teams": []})
-
-
-def test_every_part_of_a_kill_team_is_loaded(session):
-    counts = seed(session, SAMPLE)
-
-    assert counts == {
-        "factions": 1,
-        "kill_teams": 1,
-        "rules": 1,
-        "ploys": 2,
-        "equipment": 1,
-        "operatives": 2,
-        "weapons": 2,
-        "abilities": 2,
-        "selection_lists": 2,
-        "selection_options": 2,
-        "keyword_caps": 1,
-        "universal_ploys": 2,
-        "universal_equipment": 2,
-        "updated": 0,
-        "compositions_replaced": 0,
-    }
-    team = session.exec(select(KillTeam)).one()
-    assert team.faction.name == "Sentinels"
-    assert {o.name for o in team.operatives} == {"Hollow Warden", "Hollow Sentinel"}
-    assert [r.name for r in team.rules] == ["Ember Tide"]
 
 
 def test_a_second_run_of_the_same_payload_changes_nothing(session):
@@ -225,66 +174,6 @@ def test_the_universal_rows_belong_to_no_kill_team(session):
     team = session.exec(select(KillTeam)).one()
     assert "COMMAND RE-ROLL" not in {p.name for p in team.ploys}
     assert "1X AMMO CACHE" not in {q.name for q in team.equipment}
-
-
-def test_selection_options_carry_cost_models_and_caps(session):
-    seed(session, SAMPLE)
-
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [(row.budget, row.position) for row in lists] == [(1, 0), (4, 1)]
-    option = lists[1].options[0]
-    assert (option.cost, option.models, option.max_selections) == (2, 2, 1)
-    assert option.loadout_options == ["with ash lash"]
-    assert lists[1].restriction_text is not None
-
-
-def test_an_option_is_tied_to_the_operative_and_the_team(session):
-    # The composite foreign keys mean an option's list and operative must share a team;
-    # the seed passes the team explicitly, so a payload mismatch is refused.
-    seed(session, SAMPLE)
-
-    option = session.exec(
-        select(KTSelectionOption).join(KTOperative).where(KTOperative.name == "Hollow Warden")
-    ).one()
-    team = session.exec(select(KillTeam)).one()
-    assert option.kill_team_id == team.id
-    assert option.operative.name == "Hollow Warden"
-
-
-def test_a_keyword_cap_lands_on_the_team(session):
-    seed(session, SAMPLE)
-
-    cap = session.exec(select(KTSelectionRestriction)).one()
-    team = session.exec(select(KillTeam)).one()
-    assert (cap.kill_team_id, cap.keyword, cap.max_operatives) == (team.id, "EMBER", 1)
-
-
-def test_an_option_naming_an_unknown_operative_stops_the_seed(session):
-    # The scraper resolved that name against the page's datacards, so a miss means the
-    # payload is inconsistent -- and the option would offer an operative nobody can field.
-    payload = {
-        "kill_teams": [
-            {
-                "name": "Broken",
-                "faction": "Sentinels",
-                "composition_notes": [],
-                "operatives": [],
-                "selection_lists": [
-                    {
-                        "label": "1 X",
-                        "budget": 1,
-                        "shape": "single",
-                        "requisition_source": None,
-                        "same_options_as": None,
-                        "position": 0,
-                        "options": [{"operative": "Nobody", "cost": 1, "models": 1}],
-                    }
-                ],
-            }
-        ]
-    }
-    with pytest.raises(SeedError, match="not one of the team's operatives"):
-        seed(session, payload)
 
 
 def test_two_teams_can_share_a_faction(session):
@@ -401,11 +290,6 @@ def test_a_default_range_survives_a_re_seed_and_a_withdrawn_one_reverts(session)
             id="ability description",
         ),
         pytest.param(
-            lambda team: team["keyword_caps"][0].update(max_operatives=2),
-            lambda session: session.exec(select(KTSelectionRestriction)).one().max_operatives == 2,
-            id="keyword cap",
-        ),
-        pytest.param(
             lambda team: team.update(faction="Ashen Sentinels"),
             lambda session: session.exec(select(KillTeam)).one().faction.name == "Ashen Sentinels",
             id="faction",
@@ -430,24 +314,6 @@ def test_every_table_takes_a_source_side_change(session, edit, check):
     assert not any(count for name, count in counts.items() if name not in {"updated", "factions"})
 
 
-def test_a_team_that_fails_leaves_nothing_behind(session):
-    # One commit for the whole payload. A team that raises halfway must not leave the
-    # teams before it half-loaded, because the next run would then see a catalog that no
-    # single scrape ever produced.
-    payload = copy.deepcopy(SAMPLE)
-    broken = copy.deepcopy(SAMPLE["kill_teams"][0])
-    broken["name"] = "Broken Choir"
-    broken["selection_lists"][0]["options"][0]["operative"] = "Nobody"
-    payload["kill_teams"].append(broken)
-
-    with pytest.raises(SeedError, match="not one of the team's operatives"):
-        seed(session, payload)
-
-    assert session.exec(select(KillTeam)).all() == []
-    assert session.exec(select(KTOperative)).all() == []
-    assert session.exec(select(KTFaction)).all() == []
-
-
 def test_a_team_ploy_named_like_the_universal_one_stays_separate(session):
     # The universal rows are matched with `kill_team_id IS NULL`. Drop that from the key
     # and the universal upsert would find the TEAM's ploy of the same name and overwrite
@@ -469,178 +335,6 @@ def test_a_team_ploy_named_like_the_universal_one_stays_separate(session):
     assert rows[False].kind == "strategy"
 
 
-def test_a_list_inserted_at_the_top_does_not_corrupt_the_lists_below_it(session):
-    # The regression that made a composition a replace rather than an upsert. A list is
-    # identified by its print position, so a new line at the top shifts every list down:
-    # upserting rewrote each surviving row with the NEXT list's label and budget while it
-    # kept its own options, leaving a budget-1 list offering two operatives, one of them
-    # costing more than the whole budget -- a composition never printed anywhere.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["operatives"].append(
-        {
-            "name": "Hollow Herald",
-            "apl": 2,
-            "move": 6,
-            "save": 4,
-            "wounds": 10,
-            "keywords": ["HOLLOW", "HERALD"],
-            "availability": "roster",
-            "weapons": [],
-            "abilities": [],
-        }
-    )
-    for listing in payload["kill_teams"][0]["selection_lists"]:
-        listing["position"] += 1
-    payload["kill_teams"][0]["selection_lists"].insert(
-        0,
-        {
-            "label": "1 HOLLOW HERALD operative",
-            "budget": 1,
-            "shape": "budgeted",
-            "requisition_source": None,
-            "same_options_as": None,
-            "position": 0,
-            "restriction_text": None,
-            "options": [
-                {
-                    "operative": "Hollow Herald",
-                    "cost": 1,
-                    "models": 1,
-                    "max_selections": None,
-                    "loadout_options": [],
-                }
-            ],
-        },
-    )
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [(row.position, row.budget, row.label) for row in lists] == [
-        (0, 1, "1 HOLLOW HERALD operative"),
-        (1, 1, "1 HOLLOW WARDEN operative"),
-        (2, 4, "4 HOLLOW operatives selected from the following list:"),
-    ]
-    # each list offers exactly what the payload says, with nothing left over
-    assert [[option.operative.name for option in row.options] for row in lists] == [
-        ["Hollow Herald"],
-        ["Hollow Warden"],
-        ["Hollow Sentinel"],
-    ]
-    assert len(session.exec(select(KTSelectionOption)).all()) == 3
-
-
-def test_two_lists_that_swap_positions_end_up_with_their_own_options(session):
-    # The strictest ordering case: without deleting before inserting, reusing
-    # (kill_team_id, position) inside one run hits the unique constraint.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    first, second = payload["kill_teams"][0]["selection_lists"]
-    first["position"], second["position"] = 1, 0
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [(row.position, row.budget) for row in lists] == [(0, 4), (1, 1)]
-    assert [[option.operative.name for option in row.options] for row in lists] == [
-        ["Hollow Sentinel"],
-        ["Hollow Warden"],
-    ]
-    assert len(session.exec(select(KTSelectionOption)).all()) == 2
-
-
-def test_a_withdrawn_list_and_option_are_removed_from_the_composition(session):
-    # Composition is replaced as a whole, so a line the source dropped goes with it --
-    # unlike the rest of the catalog, where a removed row is left behind for K4.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"].pop()
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    assert [row.position for row in session.exec(select(KTSelectionList)).all()] == [0]
-    assert len(session.exec(select(KTSelectionOption)).all()) == 1
-
-
-def test_an_unchanged_composition_is_left_alone(session):
-    # The comparison is the whole subtree, so the common case writes nothing: no delete,
-    # no insert, and the rows keep their ids.
-    seed(session, SAMPLE)
-    before = {row.position: row.id for row in session.exec(select(KTSelectionList)).all()}
-
-    counts = seed(session, copy.deepcopy(SAMPLE))
-
-    assert counts["compositions_replaced"] == 0
-    assert {row.position: row.id for row in session.exec(select(KTSelectionList)).all()} == before
-
-
-def test_a_changed_budget_replaces_the_composition(session):
-    # A budget change used to hit UNIQUE(kill_team_id, position) when the budget was part
-    # of the lookup key; now the whole composition is rewritten in place.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"][1]["budget"] = 5
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [(row.position, row.budget) for row in lists] == [(0, 1), (1, 5)]
-
-
-def test_a_changed_option_alone_replaces_the_composition(session):
-    # The comparison reaches into the options, not just the lists: a list whose label,
-    # budget and position are all unchanged still has to be rewritten when what it OFFERS
-    # changed -- a cost, a repeat cap or a printed loadout.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    option = payload["kill_teams"][0]["selection_lists"][1]["options"][0]
-    option["cost"] = 1
-    option["max_selections"] = None
-    option["loadout_options"] = ["with ash lash", "with ember brand"]
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    stored = session.exec(
-        select(KTSelectionOption).join(KTOperative).where(KTOperative.name == "Hollow Sentinel")
-    ).one()
-    assert (stored.cost, stored.models, stored.max_selections) == (1, 2, None)
-    assert stored.loadout_options == ["with ash lash", "with ember brand"]
-
-
-def test_a_payload_missing_the_composition_section_leaves_it_alone(session):
-    # Absent is not empty. A team whose page could not be read never reaches the seed at
-    # all (it lands in the payload's `skipped`), so a missing key means a partial payload
-    # -- and deleting every list and option over it, reported as a replace, would be the
-    # worst possible reading.
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    del payload["kill_teams"][0]["selection_lists"]
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 0
-    assert len(session.exec(select(KTSelectionList)).all()) == 2
-    assert len(session.exec(select(KTSelectionOption)).all()) == 2
-
-
-def test_an_explicitly_empty_composition_is_a_statement_and_clears_it(session):
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"] = []
-
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    assert session.exec(select(KTSelectionList)).all() == []
-    assert session.exec(select(KTSelectionOption)).all() == []
-
-
 @pytest.mark.parametrize(
     ("edit", "message"),
     [
@@ -655,18 +349,11 @@ def test_an_explicitly_empty_composition_is_a_statement_and_clears_it(session):
             id="operative name",
         ),
         pytest.param(
-            lambda team: team["selection_lists"].append(
-                dict(copy.deepcopy(team["selection_lists"][0]), label="A second list here")
+            lambda team: team["selection_rules"].append(
+                dict(copy.deepcopy(team["selection_rules"][0]), text="A second rule here")
             ),
-            "selection list position 0 appears twice",
-            id="list position",
-        ),
-        pytest.param(
-            lambda team: team["selection_lists"][1]["options"].append(
-                copy.deepcopy(team["selection_lists"][1]["options"][0])
-            ),
-            "option 'Hollow Sentinel' appears twice",
-            id="option operative",
+            "selection rule position 0 appears twice",
+            id="rule position",
         ),
         pytest.param(
             lambda team: team["operatives"][0]["weapons"].append(
@@ -691,18 +378,6 @@ def test_a_payload_naming_the_same_thing_twice_is_refused(session, edit, message
     assert session.exec(select(KillTeam)).all() == []
 
 
-def test_the_payloads_order_becomes_the_stored_print_order(session):
-    # The payload lists a datacard's profiles in the order the page prints them, so the
-    # index IS the print order (decision #25). Stored, because rows have none of their own.
-    seed(session, SAMPLE)
-
-    warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
-    assert [(w.category, w.position) for w in warden.weapons] == [("range", 0), ("melee", 1)]
-    assert [a.position for a in warden.abilities] == [0, 1]
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [o.position for o in lists[0].options] == [0]
-
-
 def test_a_reordered_datacard_moves_the_positions(session):
     # The page swaps a profile's place. Nothing about either weapon's data changed, so
     # without `position` the seed would report "nothing changed" and keep serving the old
@@ -717,33 +392,6 @@ def test_a_reordered_datacard_moves_the_positions(session):
     assert counts["weapons"] == 0  # and neither was duplicated
     warden = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).one()
     assert [(w.category, w.position) for w in warden.weapons] == [("melee", 0), ("range", 1)]
-
-
-def test_a_reordered_option_list_is_replaced(session):
-    # Options come with their list, so a reorder goes through the composition replace.
-    payload = copy.deepcopy(SAMPLE)
-    listing = payload["kill_teams"][0]["selection_lists"][1]
-    listing["options"].append(
-        {
-            "operative": "Hollow Warden",
-            "cost": 1,
-            "models": 1,
-            "max_selections": 1,
-            "loadout_options": [],
-        }
-    )
-    seed(session, payload)
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [o.operative.name for o in lists[1].options] == ["Hollow Sentinel", "Hollow Warden"]
-
-    reordered = copy.deepcopy(payload)
-    reordered["kill_teams"][0]["selection_lists"][1]["options"].reverse()
-    counts = seed(session, reordered)
-
-    assert counts["compositions_replaced"] == 1
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [o.operative.name for o in lists[1].options] == ["Hollow Warden", "Hollow Sentinel"]
-    assert [o.position for o in lists[1].options] == [0, 1]
 
 
 def test_a_chosen_rules_group_is_stored(session):
@@ -763,22 +411,6 @@ def test_a_chosen_rules_group_is_stored(session):
     rules = {r.name: r for r in session.exec(select(KillTeamRule)).all()}
     assert rules["Ember Tide"].group is None
     assert rules["THE RISING EMBER"].group == "Warden Ember Techniques"
-
-
-def test_a_lists_shape_is_stored_and_a_changed_shape_replaces_it(session):
-    # `budget` means selections on a `budgeted` or `single` line and MODELS on a `fixed`
-    # one, so the shape has to travel with the number (decision #29).
-    seed(session, SAMPLE)
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [row.shape for row in lists] == ["budgeted", "budgeted"]
-
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"][0]["shape"] = "fixed"
-    counts = seed(session, payload)
-
-    assert counts["compositions_replaced"] == 1
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert [row.shape for row in lists] == ["fixed", "budgeted"]
 
 
 def test_every_collection_keeps_the_payloads_order(session):
@@ -840,174 +472,6 @@ def test_a_rule_is_scoped_to_its_team_even_when_two_teams_print_the_same_name(se
     assert all(r.kill_team_id is not None for r in rules)
 
 
-def test_composition_notes_are_stored_on_the_team(session):
-    # The page prints them under the whole composition, so that is where they live -- not
-    # pinned to whichever list preceded them (decision #30).
-    seed(session, SAMPLE)
-
-    team = session.exec(select(KillTeam)).one()
-    assert team.composition_notes == ["Other than SENTINEL operatives, once each."]
-
-
-def test_a_changed_note_is_rewritten(session):
-    seed(session, SAMPLE)
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["composition_notes"] = ["A reworded note.", "And a second one."]
-
-    counts = seed(session, payload)
-
-    assert counts["updated"] == 1
-    team = session.exec(select(KillTeam)).one()
-    assert team.composition_notes == ["A reworded note.", "And a second one."]
-
-
-def test_a_list_with_no_options_is_stored_as_the_page_printed_it(session):
-    # A list can offer nothing and still be a page fact. At HEAD that happens two ways, both
-    # on Inquisitorial Agent: its cross-referencing line, whose options live on the list it
-    # points at (#38), and its four requisition groups whose allies are kill teams, whose
-    # operatives live on their own pages and which an option may never offer (#31, #34). The
-    # label and the budget are stored either way.
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"].append(
-        {
-            "label": "5 HOLLOW operatives selected from the list above",
-            "budget": 5,
-            "position": 2,
-            "shape": "budgeted",
-            "requisition_source": None,
-            "same_options_as": None,
-            "restriction_text": None,
-            "options": [],
-        }
-    )
-
-    counts = seed(session, payload)
-
-    assert counts["selection_lists"] == 3
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert lists[2].options == []
-    assert (lists[2].budget, lists[2].label) == (5, "5 HOLLOW operatives selected from the list above")
-
-    # and re-seeding it is still a no-op, so an empty list is not mistaken for a change
-    assert set(seed(session, copy.deepcopy(payload)).values()) == {0}
-
-
-def test_an_operative_is_never_shared_between_kill_teams(session):
-    # The separation that matters: two teams in one faction share nothing. The same operative
-    # NAME on two teams is two rows, and an option can only offer its own team's operative --
-    # which is enforced by the composite foreign key, not by the seed remembering to check.
-    payload = copy.deepcopy(SAMPLE)
-    second = copy.deepcopy(payload["kill_teams"][0])
-    second["name"] = "Ashen Choir"
-    payload["kill_teams"].append(second)
-
-    seed(session, payload)
-
-    wardens = session.exec(select(KTOperative).where(KTOperative.name == "Hollow Warden")).all()
-    assert len(wardens) == 2
-    assert {w.kill_team.name for w in wardens} == {"Hollow Vigil", "Ashen Choir"}
-    # every option points at an operative of its OWN team
-    for option in session.exec(select(KTSelectionOption)).all():
-        assert option.operative.kill_team_id == option.selection_list.kill_team_id
-        assert option.kill_team_id == option.operative.kill_team_id
-
-
-def test_a_requisition_list_references_the_team_it_names(session):
-    # A reference, never shared rows: Death Korps' operatives stay Death Korps' (#31), and the
-    # list says "you may field that team's operatives here" (#34). Resolved in a second pass,
-    # because the payload's order is the site's — a team can be read before the one it names.
-    payload = copy.deepcopy(SAMPLE)
-    ally = copy.deepcopy(payload["kill_teams"][0])
-    ally["name"] = "Ashen Choir"
-    payload["kill_teams"][0]["selection_lists"].append(
-        {
-            "label": "5 ASHEN CHOIR operatives selected from the following list:",
-            "budget": 5,
-            "position": 2,
-            "shape": "budgeted",
-            "requisition_source": "Ashen Choir",
-            "same_options_as": None,
-            "restriction_text": None,
-            "options": [],
-        }
-    )
-    # the ally comes SECOND in the payload, so a single pass could not have linked it
-    payload["kill_teams"].append(ally)
-
-    seed(session, payload)
-
-    requisition = session.exec(
-        select(KTSelectionList).where(KTSelectionList.requisition_source.is_not(None))
-    ).one()
-    ally_row = session.exec(select(KillTeam).where(KillTeam.name == "Ashen Choir")).one()
-    assert requisition.from_kill_team_id == ally_row.id
-    assert requisition.kill_team.name == "Hollow Vigil"  # owned here, references there
-    assert requisition.options == []  # nothing is copied
-
-
-def test_a_requisition_group_with_no_team_of_its_own_keeps_a_null_reference(session):
-    # Sister of Silence and Tempestus Scion are not kill teams, which is why the page carries
-    # their datacards as its own rows — so the group offers them directly and references
-    # nothing.
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"].append(
-        {
-            "label": "5 EMBER WARDEN operatives selected from the following list:",
-            "budget": 5,
-            "position": 2,
-            "shape": "budgeted",
-            "requisition_source": "Ember Wardens",
-            "same_options_as": None,
-            "restriction_text": None,
-            "options": [
-                {
-                    "operative": "Hollow Sentinel",
-                    "cost": 1,
-                    "models": 1,
-                    "max_selections": None,
-                    "loadout_options": [],
-                }
-            ],
-        }
-    )
-
-    seed(session, payload)
-
-    requisition = session.exec(
-        select(KTSelectionList).where(KTSelectionList.requisition_source == "Ember Wardens")
-    ).one()
-    assert requisition.from_kill_team_id is None
-    assert [o.operative.name for o in requisition.options] == ["Hollow Sentinel"]
-
-
-def test_a_list_referencing_another_is_linked_within_the_team(session):
-    # Positions are unique within a team, so the reference resolves in the same pass — unlike
-    # a requisition pointing at another TEAM, which needs every team to exist first (#34).
-    payload = copy.deepcopy(SAMPLE)
-    payload["kill_teams"][0]["selection_lists"].append(
-        {
-            "label": "4 HOLLOW operatives selected from the list above",
-            "budget": 4,
-            "position": 2,
-            "shape": "budgeted",
-            "requisition_source": None,
-            "same_options_as": 1,
-            "restriction_text": None,
-            "options": [],
-        }
-    )
-
-    seed(session, payload)
-
-    lists = sorted(session.exec(select(KTSelectionList)).all(), key=lambda row: row.position)
-    assert lists[2].same_options_as_id == lists[1].id
-    assert lists[2].options == []  # stated once, on the list it points at
-    assert lists[2].budget == 4  # but the page states its own budget
-
-    # and re-seeding is still a no-op: the payload names a position, the row holds an id
-    assert set(seed(session, copy.deepcopy(payload)).values()) == {0}
-
-
 def test_an_in_battle_operative_is_stored_as_such(session):
     # Gellerpox's three Mutoid Vermin: no list offers them because no roster may take them
     # (decision #20). The flag is what says so, and what K5's add-an-operative screen needs.
@@ -1031,3 +495,76 @@ def test_an_in_battle_operative_is_stored_as_such(session):
     by_name = {o.name: o for o in session.exec(select(KTOperative)).all()}
     assert by_name["Hollow Cursemite"].availability == "in_battle"
     assert by_name["Hollow Warden"].availability == "roster"
+
+
+def test_a_composition_is_stored_as_the_page_printed_it(session):
+    # Text and an indent depth, nothing derived (decision #28): no budget, no cost, no cap
+    # and no option resolved against a datacard. Read in position order, indenting by
+    # depth, and the page's composition section is back.
+    seed(session, SAMPLE)
+
+    rules = session.exec(select(KTSelectionRule).order_by(KTSelectionRule.position)).all()
+
+    assert [(r.position, r.depth, r.kind) for r in rules] == [
+        (0, 0, "line"),
+        (1, 0, "line"),
+        (2, 1, "line"),
+        (3, 0, "restriction"),
+        (4, 0, "note"),
+    ]
+    assert rules[2].text == "SENTINEL with ash lash"
+
+
+def test_a_changed_composition_is_replaced_whole_rather_than_rewritten(session):
+    # A rule is identified by its print POSITION, because nothing else about a line is
+    # stable. A page that gains or moves a line shifts every row after it, so rewriting
+    # in place would pair each surviving row with the next rule's text and report a tidy
+    # incremental update. The whole run is replaced instead.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    rules = payload["kill_teams"][0]["selection_rules"]
+    rules.insert(0, {"position": 0, "depth": 0, "kind": "line", "text": "1 NEW LEADER operative"})
+    for index, rule in enumerate(rules):
+        rule["position"] = index
+
+    counts = seed(session, payload)
+
+    assert counts["compositions_replaced"] == 1
+    assert counts["selection_rules"] == 0  # replaced, not created alongside
+    stored = session.exec(select(KTSelectionRule).order_by(KTSelectionRule.position)).all()
+    assert [r.text for r in stored][:2] == ["1 NEW LEADER operative", "1 HOLLOW WARDEN operative"]
+    assert [r.position for r in stored] == [0, 1, 2, 3, 4, 5]
+
+
+def test_an_unchanged_composition_is_not_touched(session):
+    # The common case on a re-run, and the reason the comparison exists at all.
+    seed(session, SAMPLE)
+
+    counts = seed(session, copy.deepcopy(SAMPLE))
+
+    assert counts["compositions_replaced"] == 0
+    assert counts["selection_rules"] == 0
+
+
+def test_a_payload_with_no_composition_key_leaves_the_rules_alone(session):
+    # Absent is NOT empty. The scraper raises rather than emitting a team without the
+    # section, so a missing key means a partial or hand-made payload -- and reading it as
+    # "this team has no composition" would delete every rule, reported as a tidy replace.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    del payload["kill_teams"][0]["selection_rules"]
+
+    seed(session, payload)
+
+    assert len(session.exec(select(KTSelectionRule)).all()) == 5
+
+
+def test_an_explicitly_empty_composition_does_replace_it_with_nothing(session):
+    # The other half of absent-is-not-empty: `[]` is a statement, and it is honoured.
+    seed(session, SAMPLE)
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"][0]["selection_rules"] = []
+
+    seed(session, payload)
+
+    assert session.exec(select(KTSelectionRule)).all() == []

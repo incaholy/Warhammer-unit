@@ -12,8 +12,7 @@ Built in slices (ROADMAP K1). This module currently holds:
                         │             └→ KTAbility
                         ├→ KTPloy       (kill_team_id NULL = every team can use it)
                         ├→ KTEquipment  (same: NULL = the universal list)
-                        ├→ KTSelectionList → KTSelectionOption → KTOperative
-                        └→ KTSelectionRestriction  (team-wide keyword caps)
+                        └→ KTSelectionRule  (the composition, as printed text)
 
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
@@ -25,7 +24,7 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -69,13 +68,6 @@ class KillTeam(TimestampMixin, table=True):
     name: str = Field(unique=True, index=True, max_length=128)
     faction_id: UUID = Field(foreign_key="kt_factions.id", index=True)
 
-    # The footnotes and callouts printed around the composition, in printed order
-    # (decision #30). Display only, like a list's `restriction_text`: the page prints them
-    # under the whole composition, and they used to be pinned to whichever list happened to
-    # precede them -- some to the wrong list, and some with no marker left to say which
-    # entries the note was about. 29 notes over 20 teams today.
-    composition_notes: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
-
     # No `operative_count`: a page states its composition as budgeted LISTS, and with
     # weighted costs a headcount stops being a fact -- Brood Brother spends 4
     # selections and can field more models than that. "Is this roster legal?" is
@@ -118,22 +110,13 @@ class KillTeam(TimestampMixin, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"order_by": "KTEquipment.position"},
     )
-    # `foreign_keys` because a selection list now has TWO foreign keys to a kill team: the
-    # team that OWNS it, and the team a requisition list REFERENCES (decision #34). Without
-    # naming the owning one, SQLAlchemy cannot tell which join this relationship means.
-    selection_lists: list["KTSelectionList"] = Relationship(
+    # The composition as the page prints it: lines, restriction sentences and notes in
+    # one ordered run (see KTSelectionRule). Text, not structure -- the catalog describes
+    # composition and never enforces it (decision #28).
+    selection_rules: list["KTSelectionRule"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
-        sa_relationship_kwargs={
-            "order_by": "KTSelectionList.position",
-            "foreign_keys": "[KTSelectionList.kill_team_id]",
-        },
-    )
-    # Team-wide, not per list: see KTSelectionRestriction.
-    keyword_caps: list["KTSelectionRestriction"] = Relationship(
-        back_populates="kill_team",
-        cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KTSelectionRestriction.keyword"},
+        sa_relationship_kwargs={"order_by": "KTSelectionRule.position"},
     )
 
 
@@ -177,9 +160,6 @@ class KTOperative(TimestampMixin, table=True):
     __tablename__ = "kt_operatives"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "name"),
-        # Redundant to the primary key, and there for `KTSelectionOption`'s composite
-        # foreign key to point at: a target must be provably unique.
-        UniqueConstraint("kill_team_id", "id", name="uq_kt_operative_team_id"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
         CheckConstraint("position >= 0", name="ck_kt_operative_position"),
@@ -230,7 +210,6 @@ class KTOperative(TimestampMixin, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"order_by": "KTAbility.position"},
     )
-    offered_by: list["KTSelectionOption"] = Relationship(back_populates="operative", cascade_delete=True)
 
 
 def default_range(category: str | None) -> int:
@@ -449,212 +428,62 @@ class KTEquipment(TimestampMixin, table=True):
     kill_team: KillTeam | None = Relationship(back_populates="equipment")
 
 
-class KTSelectionList(TimestampMixin, table=True):
-    """One of the lists a roster is built from (KILLTEAM.md decision #16).
+class KTSelectionRule(TimestampMixin, table=True):
+    """One printed thing from a kill team's composition, kept as TEXT.
 
-    A page states its composition as budgeted lists rather than as a headcount with a
-    leader: "1 RAVENER PRIME operative", then "4 RAVENER operatives selected from the
-    following list". Each is a list with a `budget` -- how many selections may be
-    spent on it -- and its options.
+    Replaces three tables -- selection lists, their options and the keyword caps --
+    which held `budget`, `cost`, `models`, `shape`, `max_selections` and a cap per
+    keyword. That was enforcement machinery with no enforcer: decision #28 already said
+    the catalog DESCRIBES composition and never decides legality, and keeping the
+    columns anyway is what produced every problem in that area. A budget that summed to
+    43 selections for a team that fields 7. A cap on COMBAT SERVITOR matching none of
+    the seven operatives that carry it, because the datacard prints the phrase as two
+    keywords. Two conditional clauses stored at opposite strictnesses because a column
+    had to pick one. Four rows that looked identical while meaning four different
+    things. Text is exact where a column had to approximate, and a tracker that allows
+    CUSTOM games should not imply a restriction it will not apply.
 
-    This covers the shapes a flag could not. A budget of 1 over a single option IS
-    "required", so nothing needs marking as such; a budget of 1 over several options is
-    "choose one of these"; and an option costing two selections (Brood Brother's Magus)
-    spends the budget without another column anywhere else.
+    So this is the page's own words, in the page's own order, and nothing derived. A
+    roster offers every operative of its kill team (K4), and these rows are what a
+    player reads beside it.
 
-    `restriction_text` keeps the sentence printed beside the list -- usually the one the
-    caps were read from ("Other than WARRIOR operatives, your kill team can only include
-    each operative on this list once"). Usually, because a requisition group whose ally is
-    a kill team of its own has its sentence STORED and no cap minted from it: the keyword
-    names an ally's datacard, which this page does not carry (decision #40). The structured
-    columns drive validation; the sentence is what lets a human check the parse read it
-    correctly, and for those five it is the only record of the rule.
+    `kind` says what the page printed:
+
+      `heading`      an ally's name above a requisition group ("Death Korps")
+      `line`         one printed bullet, at the `depth` the page indents it to
+      `restriction`  the sentence under a tree ("Other than WARRIOR operatives, ...")
+      `note`         a footnote body or a designer's-note callout (decision #30)
+
+    `position` is the only ordering, and it spans the whole composition -- bullets,
+    sentences and notes interleaved as printed -- so `UNIQUE(kill_team_id, position)`
+    holds and the whole subtree is replaced rather than rewritten when a page changes.
+    Position plus depth is the printed document: read in order, indenting by depth, and
+    you have the page's composition section back.
     """
 
-    __tablename__ = "kt_selection_lists"
+    __tablename__ = "kt_selection_rules"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "position"),
-        # The three shapes a page prints, and the vocabulary a reader can rely on
-        # (decision #29). Same style as `KTWeapon.category` and `KTPloy.kind`.
-        CheckConstraint("shape IN ('budgeted', 'fixed', 'single')", name="ck_kt_selection_list_shape"),
-        # As above: the target of a composite foreign key from `KTSelectionOption`.
-        UniqueConstraint("kill_team_id", "id", name="uq_kt_selection_list_team_id"),
-        CheckConstraint("budget >= 1", name="ck_kt_selection_list_budget"),
-        CheckConstraint("position >= 0", name="ck_kt_selection_list_position"),
-    )
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
-    # As printed, so a roster builder can show the page's own wording.
-    label: str = Field(max_length=256)
-    # What the line's number counts, which DEPENDS ON `shape` (decision #29):
-    #   budgeted  "4 RAVENER operatives selected from the following list"  -> selections
-    #   single    "BOSS NOB operative with one of the following options"   -> selections (1)
-    #   fixed     "Every GELLERPOX INFECTED operative in the following list" -> MODELS
-    # A selection is not a model: an option may field several (a pair of familiars) or
-    # cost several (Brood Brother's Magus). Two lists in the catalog are `fixed`, and
-    # reading their budget as selections is how a counter says "7 of 9" for a roster the
-    # page states as nine models.
-    budget: int
-    # Which printed shape the line is. Stored rather than re-derived from the label,
-    # because the label is prose and the parser already knows.
-    shape: str = Field(max_length=16, index=True)
-    # The requisition group this line belongs to, as the page heads it, or NULL for an
-    # ordinary composition line (decision #33). Lists carrying one are ALTERNATIVES to each
-    # other and to the line that points at them -- "REQUISITIONED operatives from one group"
-    # -- not further lists to spend a budget on. Only Inquisitorial Agent has any.
-    requisition_source: str | None = Field(default=None, max_length=128, index=True)
-    # The kill team a requisition group's operatives belong to, when the ally HAS a team of
-    # its own (decision #34). A reference, never shared rows: Death Korps' operatives stay
-    # Death Korps' (decision #31), and this list says "you may field that team's operatives
-    # here" without copying them. NULL when the group's operatives are this team's own rows
-    # (Sister of Silence, Tempestus Scion) or when the line is not a requisition at all.
-    from_kill_team_id: UUID | None = Field(
-        default=None, foreign_key="kt_kill_teams.id", ondelete="SET NULL", index=True
-    )
-    # The list whose options this one offers, when the page says so rather than printing them
-    # again (decision #38): "5 INQUISITORIAL AGENT operatives selected from the list above".
-    # A reference, so the options are stated once -- and the line still carries its own
-    # budget, because the page states one.
-    same_options_as_id: UUID | None = Field(
-        default=None, foreign_key="kt_selection_lists.id", ondelete="SET NULL", index=True
-    )
-    position: int  # print order
-    restriction_text: str | None = Field(default=None)
-
-    # The team that owns this list, not the one a requisition list references.
-    kill_team: KillTeam = Relationship(
-        back_populates="selection_lists",
-        sa_relationship_kwargs={"foreign_keys": "[KTSelectionList.kill_team_id]"},
-    )
-    # `overlaps` is the price of the composite foreign keys below: this relationship
-    # and `KTOperative.offered_by` both write an option's `kill_team_id`, which is
-    # deliberate -- it is one column reached through two parents -- and SQLAlchemy wants
-    # that stated rather than inferred.
-    options: list["KTSelectionOption"] = Relationship(
-        back_populates="selection_list",
-        cascade_delete=True,
-        sa_relationship_kwargs={"overlaps": "offered_by", "order_by": "KTSelectionOption.position"},
-    )
-
-
-class KTSelectionOption(TimestampMixin, table=True):
-    """One operative a list offers, and on what terms.
-
-    `cost` is what taking it spends from the list's budget (Brood Brother's Magus
-    counts as two selections). `models` is how many operatives one selection puts on
-    the table -- "2 PSYCHIC FAMILIAR operatives (still counts as one selection)" is
-    `cost=1, models=2`, a different axis from cost and so its own column.
-    `max_selections` caps repeats, NULL meaning no limit beyond the budget: Raveners
-    allow each specialist once and Warriors freely.
-
-    `loadout_options` holds the weapon loadouts the page prints for this entry, and is
-    **display only -- nothing validates it**. Wyrmblade offers "GUNNER with flamer and
-    gun butt", "GUNNER with grenade launcher and gun butt" and "GUNNER with webber and
-    gun butt": one operative with a weapon choice, so it is ONE option (12 of the 48
-    teams print one like that in a composition list, 25 lines collapsed) with its printed
-    variants kept here. A list,
-    not a string, because there is usually more than one.
-
-    Which weapons a roster actually took is recorded when the roster is built (K4) and
-    snapshotted into a game (K5), from the operative's own profiles. The catalog says
-    what an operative CAN use; it deliberately does not encode which combinations are
-    legal -- that is a rule, and decision #1 leaves rules to the players.
-    """
-
-    __tablename__ = "kt_selection_options"
-    __table_args__ = (
-        UniqueConstraint("selection_list_id", "operative_id"),
-        # An option's list and its operative must belong to the SAME kill team. Two
-        # plain foreign keys cannot say that -- each only promises "some list" and
-        # "some operative" -- so the option carries `kill_team_id` and reaches both
-        # parents THROUGH it. Offering another team's operative then fails in the
-        # database rather than needing a service to remember to check.
-        ForeignKeyConstraint(
-            ["kill_team_id", "selection_list_id"],
-            ["kt_selection_lists.kill_team_id", "kt_selection_lists.id"],
-            ondelete="CASCADE",
-            name="fk_kt_selection_option_list_same_team",
-        ),
-        ForeignKeyConstraint(
-            ["kill_team_id", "operative_id"],
-            ["kt_operatives.kill_team_id", "kt_operatives.id"],
-            ondelete="CASCADE",
-            name="fk_kt_selection_option_operative_same_team",
-        ),
-        CheckConstraint("cost >= 1", name="ck_kt_selection_option_cost"),
-        CheckConstraint("models >= 1", name="ck_kt_selection_option_models"),
+        CheckConstraint("position >= 0", name="ck_kt_selection_rule_position"),
+        CheckConstraint("depth >= 0", name="ck_kt_selection_rule_depth"),
         CheckConstraint(
-            "max_selections IS NULL OR max_selections >= 1",
-            name="ck_kt_selection_option_max_selections",
+            "kind IN ('heading', 'line', 'restriction', 'note')",
+            name="ck_kt_selection_rule_kind",
         ),
-        CheckConstraint("position >= 0", name="ck_kt_selection_option_position"),
-    )
-
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    # Denormalised on purpose: it is what makes the two composite foreign keys above
-    # possible, and they in turn keep it honest -- it cannot disagree with either
-    # parent's team.
-    kill_team_id: UUID = Field(index=True)
-    selection_list_id: UUID = Field(index=True)
-    operative_id: UUID = Field(index=True)
-    cost: int = Field(default=1)
-    models: int = Field(default=1)
-    max_selections: int | None = Field(default=None)
-    # Display only. See the class docstring: not validated, and not the record of what
-    # a roster took.
-    loadout_options: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
-    # The order the page lists this option in, so a roster builder offers them as printed
-    # (decision #25). `KTSelectionList` already carries its own `position`.
-    position: int = Field(default=0)
-
-    selection_list: KTSelectionList = Relationship(
-        back_populates="options", sa_relationship_kwargs={"overlaps": "offered_by"}
-    )
-    operative: KTOperative = Relationship(
-        back_populates="offered_by", sa_relationship_kwargs={"overlaps": "options,selection_list"}
-    )
-
-
-class KTSelectionRestriction(TimestampMixin, table=True):
-    """A cap on how many operatives CARRYING A KEYWORD a kill team may include.
-
-    Deathwatch: "your kill team can only include each operative on this list once, and
-    can only include up to one GRAVIS operative." The first half is per-option
-    (`KTSelectionOption.max_selections`); the second is a different shape, and
-    `max_selections` cannot express it -- GRAVIS is carried by several entries, so
-    capping each at one still allows two GRAVIS operatives.
-
-    Not an exception: 14 of the 48 kill teams state a cap like this (Novitiates two
-    PURGATUS, Hunter Clade one DIKTAT, Farstalker Kinband two HOUND, ...) -- 20 caps in
-    all, three each for Hunter Clade and Wyrmblade -- which is what earns it a table
-    rather than a sentence in `restriction_text`. Left unstructured, `validate` would
-    quietly approve illegal rosters for 14 of the 48 teams.
-
-    Evaluated against `KTOperative.keywords`, which the catalog already stores, so the
-    rule needs nothing beyond the keyword and its limit. A team may carry several.
-
-    Scoped to the KILL TEAM rather than a list, because that is what the sentence says:
-    "your kill team can only include up to one GRAVIS operative", where the repeat clause
-    beside it says "each operative on this list once". Brood Brother is the proof -- it
-    caps BROODCOVEN, and the operatives carrying that keyword are offered by a different
-    list than the one the sentence follows, so a list-scoped cap could never have applied.
-
-    The keyword is the phrase as printed, matched by WORDS: Battleclade's datacards carry
-    COMBAT and SERVITOR separately while its cap names "COMBAT SERVITOR", and Pathfinders
-    carries "WEAPONS EXPERT" as one (`KeywordCap.matches` in the scraper).
-    """
-
-    __tablename__ = "kt_selection_restrictions"
-    __table_args__ = (
-        UniqueConstraint("kill_team_id", "keyword"),
-        CheckConstraint("max_operatives >= 1", name="ck_kt_selection_restriction_max"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", ondelete="CASCADE", index=True)
-    # Stored as keywords are: upper case, as printed on a datacard.
-    keyword: str = Field(max_length=128, index=True)
-    max_operatives: int
+    # Print order across the WHOLE composition, not per kind.
+    position: int = Field(default=0)
+    kind: str = Field(max_length=16, index=True)
+    # The line, sentence, note or heading as printed.
+    text: str
+    # How far the bullet is indented, for a `line`: 0 for a composition line, 1 for one of
+    # its entries, 2 for an entry's own weapon options. The page prints composition as an
+    # indented list and the indent carries meaning -- "Servo-claw; meltagun" is a loadout
+    # FOR the COMBAT SERVITOR above it, not a sibling of it. Flattening lost that on 45 of
+    # the 85 lines with entries. Always 0 for a heading, restriction or note.
+    depth: int = Field(default=0)
 
-    kill_team: KillTeam = Relationship(back_populates="keyword_caps")
+    kill_team: KillTeam = Relationship(back_populates="selection_rules")
