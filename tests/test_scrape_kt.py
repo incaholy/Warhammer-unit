@@ -767,6 +767,66 @@ def test_position_runs_across_the_whole_composition():
     assert [r.position for r in rules] == list(range(len(rules)))
 
 
+def test_a_second_composition_block_is_read_with_its_condition_between_them():
+    # Gellerpox Infected print two blocks: the roster, then "If you selected the MUTOID
+    # VERMIN faction equipment:" and the three vermin that equipment adds. Reading only
+    # the first block lost four printed lines. It was unmodellable while composition was
+    # a structure -- "Specified number of" has no budget, the number lives in the
+    # equipment text -- and as text there is nothing to model. The two blocks share a
+    # wrapper and the condition is printed between them, which is where it is stored.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <div class="BreakInsideAvoid">
+      <ul class="redTriangle"><li>Every ALPHA operative in the following list:
+        <ul class="redCircle2"><li>1 WARDEN</li></ul>
+      </li></ul>
+      If you selected the MUTOID VERMIN faction equipment:
+      <ul class="redTriangle"><li>Specified number of ALPHA operatives:
+        <ul class="redCircle2"><li>CURSEMITE</li></ul>
+      </li></ul>
+    </div>
+    """
+
+    rules = parse_selection_rules(html)
+
+    assert [(r.kind, r.depth, r.text) for r in rules] == [
+        ("line", 0, "Every ALPHA operative in the following list:"),
+        ("line", 1, "1 WARDEN"),
+        ("note", 0, "If you selected the MUTOID VERMIN faction equipment:"),
+        ("line", 0, "Specified number of ALPHA operatives:"),
+        ("line", 1, "CURSEMITE"),
+    ]
+
+
+def test_a_list_from_a_later_section_is_not_claimed_by_the_composition():
+    # `find_all_next` walks the whole document, so the blocks have to be cut off at the
+    # next heading -- otherwise "Operatives" would swallow the Faction Rules lists.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <!-- wrapped as the real pages wrap it: without the div, the block's "wrapper" is the
+         document and its loose text picks up the datacard's own stats. -->
+    <div class="BreakInsideAvoid">
+      <ul class="redTriangle"><li>1 ALPHA WARDEN operative</li></ul>
+    </div>
+    <h2>Faction Rules</h2>
+    <div class="BreakInsideAvoid">
+      <ul class="redTriangle"><li>Not part of the composition at all</li></ul>
+    </div>
+    """
+
+    lines = [r.text for r in parse_selection_rules(html) if r.kind == "line"]
+
+    assert lines == ["1 ALPHA WARDEN operative"]
+
+
 def test_a_page_with_no_operatives_section_fails_loudly():
     with pytest.raises(CompositionNotParsed, match="no 'Operatives' section"):
         parse_selection_rules("<html><body><h2>Something else</h2></body></html>")

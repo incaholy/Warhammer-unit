@@ -627,6 +627,7 @@ named. Gellerpox Infected's equipment-conditional datacards still carry
 `availability = in_battle` (#20), which is the one thing in a composition that is still
 read structurally.
 
-What remains is small and unrelated to composition: Gellerpox's second block as
-display-only text, and the `weapon_rules` asterisks and double spellings, before the
-frontend renders them as chips.
+Gellerpox's second block is read now — every top-level block under the Operatives
+heading is, so its condition and the three vermin it grants are stored as printed text
+with the condition between the two blocks. What remains is unrelated to composition: the
+`weapon_rules` asterisks and double spellings, before the frontend renders them as chips.

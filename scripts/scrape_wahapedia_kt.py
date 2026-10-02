@@ -1014,6 +1014,16 @@ def _requisition_trees(soup: Tag) -> list[tuple[str, Tag]]:
     return trees
 
 
+def _before_the_next_heading(element: Tag, head: Tag) -> bool:
+    """Whether `element` belongs to `head`'s section rather than a later one.
+
+    `find_all_next` walks the whole document, so a section's blocks have to be cut off
+    at the next heading -- otherwise "Operatives" would claim the Faction Rules lists.
+    """
+    previous = element.find_previous(["h2", "h3"])
+    return previous is head or previous is None
+
+
 def parse_selection_rules(html: str) -> list[SelectionRule]:
     """A kill team's composition as the page prints it, in one ordered run.
 
@@ -1030,11 +1040,22 @@ def parse_selection_rules(html: str) -> list[SelectionRule]:
     head = next((h for h in soup.find_all(["h2", "h3"]) if h.get_text(strip=True) == "Operatives"), None)
     if head is None:
         raise CompositionNotParsed("no 'Operatives' section on the page")
-    top = next(
-        (el for el in head.find_all_next() if el.name == "ul" and "redTriangle" in (el.get("class") or [])),
-        None,
-    )
-    if top is None:
+    # EVERY top-level block under the heading, not just the first. Gellerpox Infected
+    # print a second one -- "If you selected the MUTOID VERMIN faction equipment:" and
+    # then the three vermin -- and reading only the first lost those four printed lines.
+    # It was unmodellable while composition was a structure: "Specified number of" has no
+    # budget, because the number lives in the equipment's own text. As text there is
+    # nothing to model. Those datacards are still marked `in_battle` (decision #20), which
+    # is the one thing about this block that is read structurally.
+    blocks = [
+        el
+        for el in head.find_all_next()
+        if el.name == "ul"
+        and "redTriangle" in (el.get("class") or [])
+        and el.find_parent("ul") is None
+        and _before_the_next_heading(el, head)
+    ]
+    if not blocks:
         raise CompositionNotParsed("the 'Operatives' section has no composition list")
 
     rules: list[SelectionRule] = []
@@ -1042,19 +1063,27 @@ def parse_selection_rules(html: str) -> list[SelectionRule]:
     def emit(kind: str, text: str, depth: int = 0) -> None:
         rules.append(SelectionRule(position=len(rules), kind=kind, text=text, depth=depth))
 
-    def emit_tree(tree: Tag) -> None:
-        for depth, text in _printed_bullets(tree):
-            emit("line", text, depth)
+    def emit_loose(tree: Tag) -> None:
         sentence, notes = _composition_text(tree)
         if sentence:
             emit("restriction", sentence)
         for note in notes:
             emit("note", note)
 
-    emit_tree(top)
+    for index, block in enumerate(blocks):
+        for depth, text in _printed_bullets(block):
+            emit("line", text, depth)
+        # The loose text once, after the first block. Gellerpox's two blocks share one
+        # wrapper and the condition is printed BETWEEN them, so this is where it belongs;
+        # on the 47 single-block pages it is the text after the only block, as before.
+        if index == 0:
+            emit_loose(block)
+
     for title, group in _requisition_trees(soup):
         emit("heading", title)
-        emit_tree(group)
+        for depth, text in _printed_bullets(group):
+            emit("line", text, depth)
+        emit_loose(group)
 
     if not rules:
         raise CompositionNotParsed("the composition list is empty")
