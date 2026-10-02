@@ -95,6 +95,17 @@ class KTOperative_Read(SQLModel):
     abilities: list[KTAbility_Read] = []
 
 
+class KTOperative_ListRead(KTOperative_Read):
+    """The flat form (`GET /operatives`), which carries the team it belongs to.
+
+    The nested form inside a team detail can omit it, because its parent supplies it --
+    the same split the 40k catalog makes between `Subfaction_Read` and
+    `Subfaction_ListRead`.
+    """
+
+    kill_team_id: UUID
+
+
 class KillTeamRule_Read(SQLModel):
     id: UUID
     name: str
@@ -214,6 +225,51 @@ def get_kill_team(
     registers one handler against `CodedError`, so nothing is mapped here.
     """
     return service.get_kill_team(kill_team_id)
+
+
+@router.get("/teams/{kill_team_id}/composition", response_model=list[KTSelectionRule_Read])
+def read_composition(
+    kill_team_id: UUID,
+    service: KillTeamService = Depends(get_killteam_service),
+) -> list[KTSelectionRule_Read]:
+    """A team's composition without its datacards.
+
+    The detail already carries these (#47); this is for a reader that wants the printed
+    rules alone -- a roster view beside its picker. It saves less than it looks: the
+    composition is 2-29% of a detail response, median 10%.
+
+    Unpaginated, like `/universal`: this is one document, and a page of a team's
+    composition would be a page of half a printed section.
+
+    404 for an unknown team rather than an empty list, because "no composition" and "no
+    such team" are different answers.
+    """
+    return service.list_selection_rules(kill_team_id)
+
+
+@router.get("/operatives", response_model=Page[KTOperative_ListRead])
+def list_operatives(
+    kill_team_id: UUID | None = None,
+    keyword: str | None = None,
+    page: PageParams = Depends(),
+    service: KillTeamService = Depends(get_killteam_service),
+) -> Page[KTOperative_ListRead]:
+    """Operatives across teams, optionally narrowed by team or keyword.
+
+    The cross-team question a nested operative cannot answer: "every operative with
+    LEADER", "compare these two teams' Warriors". Ordered by team then printed position.
+
+    `keyword` is matched EXACTLY against what the datacard prints, upper-cased: `GUN`
+    finds Battleclade's Gun Servitor, which prints `GUN` and `SERVITOR` as two keywords,
+    and not Inquisitorial Agent's, which prints `GUN SERVITOR` as one. A substring match
+    would conflate them. On Postgres this is `keywords @> '["GUN"]'` against a GIN index
+    (decision #26); on SQLite it scans with `json_each`, so the default test tier
+    exercises the same filter.
+    """
+    items = service.list_operatives(
+        kill_team_id=kill_team_id, keyword=keyword, limit=page.limit, offset=page.offset
+    )
+    return paginate(items, service.count_operatives(kill_team_id, keyword), page)
 
 
 @router.get("/universal", response_model=Universal_Read)

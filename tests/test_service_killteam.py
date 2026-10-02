@@ -266,3 +266,99 @@ def test_universal_equipment_is_the_list_no_team_owns(session, make_kt_equipment
     names = [item.name for item in _service(session).list_universal_equipment()]
 
     assert names == ["AMMO"]
+
+
+# --- the composition on its own --------------------------------------------
+
+
+def test_the_composition_can_be_read_without_the_datacards(session, make_kill_team, make_kt_selection_rule):
+    # The detail already carries these (#47); this is for a reader that wants the printed
+    # rules alone. In position order, because that plus depth IS the printed section.
+    team = make_kill_team()
+    make_kt_selection_rule(kill_team=team, position=1, depth=1, text="SENTINEL")
+    make_kt_selection_rule(kill_team=team, position=0, depth=0, text="4 HOLLOW operatives:")
+
+    rules = _service(session).list_selection_rules(team.id)
+
+    assert [(r.position, r.text) for r in rules] == [(0, "4 HOLLOW operatives:"), (1, "SENTINEL")]
+
+
+def test_a_team_with_no_composition_reads_as_empty(session, make_kill_team):
+    assert _service(session).list_selection_rules(make_kill_team().id) == []
+
+
+def test_reading_the_composition_of_a_team_that_does_not_exist_is_a_not_found(session):
+    # "No composition" and "no such team" are different answers, and only one is a 404.
+    with pytest.raises(NotFoundError):
+        _service(session).list_selection_rules(uuid.uuid4())
+
+
+# --- operatives across teams -----------------------------------------------
+
+
+def test_operatives_can_be_narrowed_to_one_team(session, make_kill_team, make_kt_operative):
+    a, b = make_kill_team(name="A"), make_kill_team(name="B")
+    make_kt_operative(kill_team=a, name="Alpha One", position=0)
+    make_kt_operative(kill_team=b, name="Beta One", position=0)
+    service = _service(session)
+
+    assert [o.name for o in service.list_operatives(kill_team_id=a.id)] == ["Alpha One"]
+    assert service.count_operatives(kill_team_id=a.id) == 1
+    assert service.count_operatives() == 2
+
+
+def test_a_keyword_filter_matches_the_whole_keyword_and_not_a_prefix(
+    session, make_kill_team, make_kt_operative
+):
+    # The reason this is a containment test and not a LIKE: the pages print `GUN` and
+    # `SERVITOR` as two keywords on one datacard and `GUN SERVITOR` as one on another, so
+    # they are genuinely different keywords and a substring match would conflate them.
+    team = make_kill_team()
+    make_kt_operative(kill_team=team, name="Battleclade Gunner", keywords=["GUN", "SERVITOR"])
+    make_kt_operative(kill_team=team, name="Requisitioned Servitor", keywords=["GUN SERVITOR"])
+    service = _service(session)
+
+    assert [o.name for o in service.list_operatives(keyword="GUN")] == ["Battleclade Gunner"]
+    assert [o.name for o in service.list_operatives(keyword="GUN SERVITOR")] == ["Requisitioned Servitor"]
+    assert service.count_operatives(keyword="GUN") == 1
+
+
+def test_a_keyword_filter_is_upper_cased_the_way_a_datacard_prints_it(
+    session, make_kill_team, make_kt_operative
+):
+    make_kt_operative(kill_team=make_kill_team(), name="Leader", keywords=["LEADER"])
+
+    assert [o.name for o in _service(session).list_operatives(keyword="leader")] == ["Leader"]
+
+
+def test_a_keyword_matching_nothing_is_an_empty_result(session, make_kill_team, make_kt_operative):
+    make_kt_operative(kill_team=make_kill_team(), keywords=["LEADER"])
+    service = _service(session)
+
+    assert service.list_operatives(keyword="NOBODY") == []
+    assert service.count_operatives(keyword="NOBODY") == 0
+
+
+def test_a_listed_operative_brings_its_datacard_with_it(
+    session, make_kill_team, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    # An operative without its weapons and abilities is not much of an answer, and lazily
+    # it would be two queries per row.
+    #
+    # TWO operatives, not one: with a single row, lazy loading costs the same three
+    # queries as eager (one per collection), so the assertion could not fail. An N+1
+    # hides whenever N is 1 -- the same trap as the detail read's query count.
+    team = make_kill_team()
+    for name in ("Warden", "Sentinel"):
+        operative = make_kt_operative(kill_team=team, name=name)
+        make_kt_weapon(operative=operative, name=f"{name}'s blade")
+        make_kt_ability(operative=operative, name=f"{name}'s vigil")
+    session.expunge_all()
+
+    with counting_queries(session) as statements:
+        rows = _service(session).list_operatives()
+        _ = [(w.name, a.name) for o in rows for w in o.weapons for a in o.abilities]
+
+    assert sorted(o.name for o in rows) == ["Sentinel", "Warden"]
+    # operatives, then ONE query for all their weapons and one for all their abilities
+    assert len(statements) == 3

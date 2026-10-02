@@ -165,6 +165,14 @@ class KTOperative(TimestampMixin, table=True):
         CheckConstraint("position >= 0", name="ck_kt_operative_position"),
         # Decision #20's vocabulary, same style as a weapon's category and a ploy's kind.
         CheckConstraint("availability IN ('roster', 'in_battle')", name="ck_kt_operative_availability"),
+        # What JSONB was chosen for (decision #26): "which operatives carry this keyword?"
+        # is `keywords @> '["LEADER"]'`, and only a GIN index can serve that. Declared
+        # once, so `alembic check` stays quiet and the migration carries it; on Postgres
+        # it is a GIN index and on SQLite a plain b-tree over the JSON text, which that
+        # backend will never use -- its half of `json_list_contains` scans with
+        # `json_each`. Harmless there: 454 rows, and the test tier rebuilds the schema
+        # per test anyway.
+        Index("ix_kt_operative_keywords", "keywords", postgresql_using="gin"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)

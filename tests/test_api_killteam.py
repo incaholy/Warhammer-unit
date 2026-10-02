@@ -221,3 +221,91 @@ def test_the_universal_route_is_not_paged(client, make_kt_ploy):
 
     assert set(body) == {"ploys", "equipment"}
     assert "total" not in body and "limit" not in body
+
+
+# --- the composition on its own --------------------------------------------
+
+
+def test_the_composition_route_serves_the_printed_rules_alone(client, make_kill_team, make_kt_selection_rule):
+    # The detail already carries these (#47); this is for a reader that wants the rules
+    # without the datacards. Unpaginated: a page of a team's composition would be a page
+    # of half a printed section.
+    team = make_kill_team()
+    make_kt_selection_rule(kill_team=team, position=0, depth=0, text="4 HOLLOW operatives:")
+    make_kt_selection_rule(kill_team=team, position=1, depth=1, text="SENTINEL")
+
+    resp = client.get(f"{BASE}/teams/{team.id}/composition")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert isinstance(body, list)
+    assert [(r["position"], r["depth"], r["text"]) for r in body] == [
+        (0, 0, "4 HOLLOW operatives:"),
+        (1, 1, "SENTINEL"),
+    ]
+
+
+def test_the_composition_of_an_unknown_team_is_a_404(client):
+    assert client.get(f"{BASE}/teams/{uuid.uuid4()}/composition").status_code == 404
+
+
+def test_a_team_with_no_composition_serves_an_empty_list(client, make_kill_team):
+    resp = client.get(f"{BASE}/teams/{make_kill_team().id}/composition")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# --- operatives across teams -----------------------------------------------
+
+
+def test_the_operatives_route_names_the_team_each_belongs_to(client, make_kill_team, make_kt_operative):
+    # A flat listing carries the parent id; the nested form inside a detail omits it,
+    # because its parent supplies it.
+    team = make_kill_team()
+    make_kt_operative(kill_team=team, name="Warden", position=0)
+
+    operative = client.get(f"{BASE}/operatives").json()["items"][0]
+
+    assert operative["kill_team_id"] == str(team.id)
+    assert operative["name"] == "Warden"
+    assert "weapons" in operative and "abilities" in operative
+
+
+def test_operatives_can_be_filtered_by_team_and_by_keyword(client, make_kill_team, make_kt_operative):
+    a, b = make_kill_team(name="A"), make_kill_team(name="B")
+    make_kt_operative(kill_team=a, name="Alpha Leader", keywords=["LEADER"], position=0)
+    make_kt_operative(kill_team=a, name="Alpha Warrior", keywords=["WARRIOR"], position=1)
+    make_kt_operative(kill_team=b, name="Beta Leader", keywords=["LEADER"], position=0)
+
+    by_team = client.get(f"{BASE}/operatives", params={"kill_team_id": str(a.id)}).json()
+    by_keyword = client.get(f"{BASE}/operatives", params={"keyword": "LEADER"}).json()
+
+    assert sorted(o["name"] for o in by_team["items"]) == ["Alpha Leader", "Alpha Warrior"]
+    assert by_team["total"] == 2
+    assert sorted(o["name"] for o in by_keyword["items"]) == ["Alpha Leader", "Beta Leader"]
+    assert by_keyword["total"] == 2
+
+
+def test_a_keyword_filter_does_not_match_a_longer_keyword(client, make_kill_team, make_kt_operative):
+    # Runs on BOTH tiers: `keywords @> '["GUN"]'` on Postgres against the GIN index, and a
+    # `json_each` scan on SQLite. The pages print `GUN`/`SERVITOR` as two keywords on one
+    # datacard and `GUN SERVITOR` as one on another, so a substring match would be wrong.
+    team = make_kill_team()
+    make_kt_operative(kill_team=team, name="Battleclade Gunner", keywords=["GUN", "SERVITOR"], position=0)
+    make_kt_operative(kill_team=team, name="Requisitioned Servitor", keywords=["GUN SERVITOR"], position=1)
+
+    gun = client.get(f"{BASE}/operatives", params={"keyword": "GUN"}).json()
+    gun_servitor = client.get(f"{BASE}/operatives", params={"keyword": "GUN SERVITOR"}).json()
+
+    assert [o["name"] for o in gun["items"]] == ["Battleclade Gunner"]
+    assert [o["name"] for o in gun_servitor["items"]] == ["Requisitioned Servitor"]
+
+
+def test_a_keyword_matching_nothing_is_an_empty_page(client, make_kill_team, make_kt_operative):
+    make_kt_operative(kill_team=make_kill_team(), keywords=["LEADER"])
+
+    resp = client.get(f"{BASE}/operatives", params={"keyword": "NOBODY"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0, "limit": 50, "offset": 0}

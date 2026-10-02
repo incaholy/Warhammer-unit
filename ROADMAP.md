@@ -584,14 +584,16 @@ everything nested (#47), because operatives are reachable only that way — and 
 carries `created_at`/`updated_at` or a nested row's parent FK. `openapi.json` is checked
 in and CI fails if it drifts, so a route is not finished until `make openapi` has run.
 
-**Deferred, left out deliberately rather than forgotten:** `KillTeamService` has no
-reader for a team's composition on its own and none for a single selection rule, because
-#47 puts them in the detail — where composition is 2–29% of the bytes, median 10%, so
-splitting it would save little. If a roster view ever wants it without the datacards
-(27–71% of the bytes, median 61%), that is the reader to add, with a
-`/teams/{id}/composition` route over it. The same goes for a standalone operative reader
-and the keyword filter the JSONB column was chosen to allow (#26): neither has a caller,
-and no GIN index exists yet.
+Two more routes answer what the nested form cannot: `GET /teams/{id}/composition`
+serves a team's printed rules without its datacards, and `GET /operatives` lists
+operatives across teams with `?kill_team_id=` and `?keyword=`. The keyword filter is
+`keywords @> '["LEADER"]'` against a GIN index on Postgres and a `json_each` scan on
+SQLite, so the default test tier exercises it too — the index is what decision #26 chose
+JSONB for.
+
+**Still deferred:** no reader for a single selection rule. A composition line has no
+identity a client would hold onto — it is one bullet of a page, and its id changes
+whenever the composition is replaced.
 
 ## K4. Roster
 

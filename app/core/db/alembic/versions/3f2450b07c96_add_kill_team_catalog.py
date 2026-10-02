@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 7b997f132085
+Revision ID: 3f2450b07c96
 Revises: 44441c6a9671
-Create Date: 2026-10-02 15:08:34.255662
+Create Date: 2026-10-02 16:29:16.847823
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '7b997f132085'
+revision: str = '3f2450b07c96'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -93,6 +93,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('kill_team_id', 'name')
     )
+    op.create_index('ix_kt_operative_keywords', 'kt_operatives', ['keywords'], unique=False, postgresql_using='gin')
     op.create_index(op.f('ix_kt_operatives_availability'), 'kt_operatives', ['availability'], unique=False)
     op.create_index(op.f('ix_kt_operatives_kill_team_id'), 'kt_operatives', ['kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_operatives_name'), 'kt_operatives', ['name'], unique=False)
@@ -189,6 +190,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_kt_operatives_name'), table_name='kt_operatives')
     op.drop_index(op.f('ix_kt_operatives_kill_team_id'), table_name='kt_operatives')
     op.drop_index(op.f('ix_kt_operatives_availability'), table_name='kt_operatives')
+    op.drop_index('ix_kt_operative_keywords', table_name='kt_operatives', postgresql_using='gin')
     op.drop_table('kt_operatives')
     op.drop_index(op.f('ix_kt_kill_team_rules_kill_team_id'), table_name='kt_kill_team_rules')
     op.drop_index(op.f('ix_kt_kill_team_rules_group'), table_name='kt_kill_team_rules')

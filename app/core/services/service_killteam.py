@@ -17,12 +17,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import json_list_contains
 from app.core.db.models_killteam import (
     KillTeam,
     KTEquipment,
     KTFaction,
     KTOperative,
     KTPloy,
+    KTSelectionRule,
 )
 from app.core.services.errors import NotFoundError
 
@@ -115,6 +117,78 @@ class KillTeamService:
         if team is None:
             raise NotFoundError(f"kill team {kill_team_id} not found")
         return team
+
+    # --- the composition on its own ---------------------------------------
+
+    def list_selection_rules(self, kill_team_id: UUID) -> list[KTSelectionRule]:
+        """A team's composition, without its datacards.
+
+        The team detail already carries these (decision #47), so this exists for a reader
+        that wants the printed rules and nothing else -- a roster view beside its picker.
+        It saves little on its own: composition is 2-29% of a detail response, median 10%,
+        where the operatives and their datacards are 27-71%.
+
+        Raises `NotFoundError` for an unknown team rather than returning an empty list,
+        because "this team has no composition" and "there is no such team" are different
+        answers and only one of them is a 404.
+        """
+        if self.session.get(KillTeam, kill_team_id) is None:
+            raise NotFoundError(f"kill team {kill_team_id} not found")
+        statement = (
+            select(KTSelectionRule)
+            .where(KTSelectionRule.kill_team_id == kill_team_id)
+            .order_by(KTSelectionRule.position)
+        )
+        return list(self.session.exec(statement).all())
+
+    # --- operatives across teams ------------------------------------------
+
+    def list_operatives(
+        self,
+        kill_team_id: UUID | None = None,
+        keyword: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[KTOperative]:
+        """Operatives, optionally narrowed to one team or one keyword.
+
+        The cross-team view the nested form cannot give: "every operative with LEADER",
+        "compare these two teams' Warriors". Ordered by team then printed position, so a
+        page of them still arrives in an order a reader recognises.
+
+        Weapons and abilities are eager-loaded, because an operative without its datacard
+        is not much of an answer and lazily it would be two queries per row.
+        """
+        statement = select(KTOperative).options(
+            selectinload(KTOperative.weapons),  # type: ignore[arg-type]
+            selectinload(KTOperative.abilities),  # type: ignore[arg-type]
+        )
+        statement = self._narrow_operatives(statement, kill_team_id, keyword)
+        statement = statement.order_by(KTOperative.kill_team_id, KTOperative.position, KTOperative.id).offset(
+            offset
+        )
+        return list(self.session.exec(statement.limit(limit)).all())
+
+    def count_operatives(self, kill_team_id: UUID | None = None, keyword: str | None = None) -> int:
+        statement = self._narrow_operatives(select(func.count(KTOperative.id)), kill_team_id, keyword)
+        return self.session.exec(statement).one()
+
+    def _narrow_operatives(self, statement, kill_team_id: UUID | None, keyword: str | None):
+        """The two filters, shared so the listing and the count can never disagree."""
+        if kill_team_id is not None:
+            statement = statement.where(KTOperative.kill_team_id == kill_team_id)
+        if keyword:
+            # A keyword is stored upper case, as a datacard prints it, so the filter is
+            # matched exactly rather than case-insensitively -- a substring match would
+            # make `GUN` find `GUN SERVITOR`, which is a different keyword.
+            statement = statement.where(
+                json_list_contains(
+                    KTOperative.__table__.c.keywords,
+                    keyword.upper(),
+                    dialect=self.session.get_bind().dialect.name,
+                )
+            )
+        return statement
 
     # --- the rows that belong to no team ----------------------------------
 
