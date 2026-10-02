@@ -13,6 +13,7 @@ from scripts.scrape_wahapedia_kt import (
     CompositionNotParsed,
     NavEntry,
     OperativeNotResolved,
+    _weapon_rules,
     core_rules_url,
     main,
     parse_equipment,
@@ -196,6 +197,33 @@ def test_a_weapon_without_a_printed_range_leaves_it_to_the_column_default():
     assert weapons["Cinder bolt"].range is None
     assert weapons["Cinder bolt"].rules == ["Piercing 1"]
     assert weapons["Rusted glaive"].range is None
+
+
+def test_a_weapon_rule_styled_mid_word_is_not_split():
+    # The pages style game terms inline wherever they appear, including part of a word:
+    # `Conceal</span></span>ed Position`, because Conceal is an order. Joining the cell's
+    # nodes with a space split it into "Conceal ed Position" on three teams, and did the
+    # same after a hyphen and an opening bracket. Taking the source's own spacing instead
+    # fixes all three -- and the comma-separated list still reads correctly, which is what
+    # the separator had been there for.
+    html = """
+    <table class="dsWeapon"><tr class="pHeaderRow">
+      <td class="dsWeaponName">Sniper rifle</td>
+    </tr><tr>
+      <td>Sniper rifle</td><td>4</td><td>3</td><td>3/3</td>
+      <td>Silent, <span class="tt"><span class="kwbu">Conceal</span></span>ed Position<span class="ast">*</span>, Anti-<b>PSYKER</b>, Heavy (<b>Dash</b> Only)</td>
+    </tr></table>
+    """
+    from bs4 import BeautifulSoup
+
+    cell = BeautifulSoup(html, "html.parser").find_all("td")[-1]
+
+    assert _weapon_rules(cell) == [
+        "Silent",
+        "Concealed Position*",
+        "Anti-PSYKER",
+        "Heavy (Dash Only)",
+    ]
 
 
 def test_a_weapon_with_no_rules_reads_as_an_empty_list():

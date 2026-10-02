@@ -95,17 +95,38 @@ def _soup(html: str) -> BeautifulSoup:
 _PSEUDO_TAGS = re.compile(r"</?KY>")
 
 
-# `get_text(" ")` joins inline elements with a space, so a page that styles part of a
-# sentence leaves one before the punctuation that follows: "SQUIG , BREAKA" where the
-# keyword is a span, and "the following list :" once a `<sup>` marker is removed.
+# A space the SOURCE leaves before punctuation: "Other than GUNNER , SUBDUCTOR and ..."
+# where each keyword is a span and the markup has whitespace before the comma. Five
+# stored strings; it used to be 941, because joining inline elements with a space put one
+# there ourselves -- `_text` no longer does (see its docstring).
 _SPACED_PUNCTUATION = re.compile(r"\s+([:;,.!?])")
 
 
 def _clean(text: str) -> str:
     """Text as we store it: no &nbsp; padding, no curly quotes, no `<KY>` markers, and no
-    space left before punctuation by joining inline elements."""
+    space before punctuation where the source left one."""
     text = _PSEUDO_TAGS.sub("", text.replace("\xa0", " ")).translate(_TYPOGRAPHIC)
     return _SPACED_PUNCTUATION.sub(r"\1", text).strip()
+
+
+def _text(node) -> str:
+    """A node's text as we store it: the source's own spacing, collapsed and cleaned.
+
+    No separator, deliberately. `get_text(" ")` joins every text node with a space, which
+    the WR column needs for its comma-separated rule names -- and which is wrong wherever
+    the source has no space at a boundary. Wahapedia style game terms inline wherever they
+    appear, including mid-word, so joining with a space split words:
+
+        Conceal</span></span>ed Position  ->  "Conceal ed Position"
+        Anti-<b>PSYKER                    ->  "Anti- PSYKER"
+        Heavy (<b>Dash</b> Only)          ->  "Heavy ( Dash Only)"
+
+    The separator was there because `strip=True` removes each node's own whitespace,
+    including the space after a comma, so without a separator the list fused. Dropping
+    BOTH keeps the source's spacing exactly: `Silent, Concealed Position*`. It changed 671
+    stored strings and not one of them in any way but whitespace.
+    """
+    return re.sub(r"\s+", " ", _clean(node.get_text())).strip()
 
 
 def parse_nav(html: str) -> list[NavEntry]:
@@ -133,12 +154,12 @@ def parse_nav(html: str) -> list[NavEntry]:
     for el in content.find_all(["div", "a"]):
         classes = el.get("class") or []
         if el.name == "div" and "factionGroup_KT" in classes:
-            faction = _clean(el.get_text())
+            faction = _text(el)
         elif el.name == "a" and "kill-teams/" in (el.get("href") or ""):
             if faction is None:
-                raise ValueError(f"kill team {_clean(el.get_text())!r} appears before any faction group")
+                raise ValueError(f"kill team {_text(el)!r} appears before any faction group")
             slug = el["href"].rstrip("/").rsplit("/", 1)[-1]
-            entries.append(NavEntry(name=_clean(el.get_text()), faction=faction, slug=slug))
+            entries.append(NavEntry(name=_text(el), faction=faction, slug=slug))
     if not entries:
         raise ValueError("the 'Kill Teams' dropdown contained no kill team links")
     return entries
@@ -214,15 +235,23 @@ def _stat_line(frame: Tag) -> dict[str, int | None]:
         value = cell.find(class_="dsStat")
         if value is None:
             continue
+        # The ONE place a separator is still needed: the cell is `APL<div>3</div>` with no
+        # whitespace between label and value, so without one they fuse into "APL3". This
+        # is reading a label, not storing text, so a stray space costs nothing.
         label = cell.get_text(" ", strip=True).split()[0].upper()
-        stats[label] = _stat_int(_clean(value.get_text(" ", strip=True)).replace(" ", ""))
+        stats[label] = _stat_int(_text(value).replace(" ", ""))
     return stats
 
 
 def _weapon_rules(cell: Tag) -> list[str]:
-    """The WR column: rule names with their parameters, as printed."""
-    text = _clean(cell.get_text(" ", strip=True))
-    return [re.sub(r"\s+", " ", rule).strip() for rule in text.split(",") if rule.strip()]
+    """The WR column: rule names with their parameters, as printed.
+
+    A comma-separated list, which is why the extractor's separator mattered here most:
+    the cell styles each rule name and sometimes only PART of a word, so joining with a
+    space produced "Conceal ed Position" on three teams and "Anti- PSYKER" on a fourth
+    (see `_text`). 103 distinct rules over 2,328 strings.
+    """
+    return [rule.strip() for rule in _text(cell).split(",") if rule.strip()]
 
 
 def _parse_weapon(name_row: Tag) -> Weapon | None:
@@ -236,7 +265,7 @@ def _parse_weapon(name_row: Tag) -> Weapon | None:
     data_row = name_row.find_next_sibling("tr")
     if data_row is None:
         return None
-    cells = [_clean(td.get_text(" ", strip=True)) for td in data_row.find_all("td")]
+    cells = [_text(td) for td in data_row.find_all("td")]
     values = [c for c in cells if c]
     # name, ATK, HIT, DMG, then WR (which may be absent)
     if len(values) < 4:
@@ -249,7 +278,7 @@ def _parse_weapon(name_row: Tag) -> Weapon | None:
     printed_range = next((int(m.group(1)) for rule in rules if (m := _RANGE_RULE.match(rule))), None)
 
     return Weapon(
-        name=_clean(name_row.get_text(" ", strip=True)),
+        name=_text(name_row),
         category=category,
         attacks=_stat_int(attacks) or 0,
         hit=_stat_int(hit) or 0,
@@ -269,7 +298,7 @@ def _keywords(frame: Tag) -> list[str]:
     # Joined with a SPACE, not a comma: the strip already prints commas between
     # keywords, while a multi-word keyword ("GREAT DEVOURER") is several spans --
     # comma-joining every element split that into two keywords.
-    text = _clean(table.get_text(" ", strip=True))
+    text = _text(table)
     keywords = []
     for chunk in text.split(","):
         # The base size trails the LAST keyword in the same chunk ("PRIME ⌀40mm"), so
@@ -304,8 +333,8 @@ def _abilities(frame: Tag) -> list[Ability]:
         label = block.find("span", class_="redfont")
         if label is None:
             continue
-        name = _clean(label.get_text(" ", strip=True)).lstrip("*").strip()
-        text = _clean(block.get_text(" ", strip=True))
+        name = _text(label).lstrip("*").strip()
+        text = _text(block)
         # The block repeats the name, then a colon, then the rule.
         _, _, description = text.partition(":")
         abilities.append(Ability(name=name, description=re.sub(r"\s+", " ", description).strip()))
@@ -318,16 +347,16 @@ def _abilities(frame: Tag) -> list[Ability]:
         cost_text = _clean(cost.get_text(strip=True)) if cost else ""
         if cost:
             cost.extract()  # so the name is not "TOXIC LUNGE1AP"
-        name = _clean(heading.get_text(" ", strip=True))
+        name = _text(heading)
         # Effect THEN conditions, the order the page prints them. Reading only the effect
         # dropped every "you cannot perform this action while ..." clause, which turns a
         # conditional action into an unconditional one on a reference sheet.
         parts = [block.find("div", class_=cls) for cls in ("actionEffect", "actionConditions")]
-        body = " ".join(_clean(part.get_text(" ", strip=True)) for part in parts if part is not None)
+        body = " ".join(_text(part) for part in parts if part is not None)
         if not body:
             # Pathfinders wraps an action's body in a plain <div> with no class, so keying
             # on `actionEffect` left ten MARKERLIGHT rows reading just "1AP".
-            body = _clean(block.get_text(" ", strip=True)).removeprefix(name).lstrip(" :.").strip()
+            body = _text(block).removeprefix(name).lstrip(" :.").strip()
         # Joined rather than stripped: `.strip(". ")` also took the body's final full stop,
         # so 191 of the 193 action descriptions read as though they had been cut off.
         description = f"{cost_text}. {body}" if cost_text and body else (body or cost_text)
@@ -356,7 +385,7 @@ def parse_operatives(html: str) -> list[Operative]:
         ]
         operatives.append(
             Operative(
-                name=_clean(heading.get_text(" ", strip=True)),
+                name=_text(heading),
                 apl=stats.get("APL") or 0,
                 move=stats.get("MOVE") or 0,
                 save=stats.get("SAVE") or 0,
@@ -468,7 +497,7 @@ def _own_text(el: Tag) -> str:
     own = _own_element(el)
     for marker in own.find_all(["sup"]) + own.find_all("span", class_="ast"):
         marker.extract()  # `_own_element` already works on a copy
-    return re.sub(r"\s+", " ", _clean(own.get_text(" ", strip=True))).strip()
+    return _text(own)
 
 
 def _words(name: str) -> list[str]:
@@ -603,12 +632,12 @@ def _rule_text(block: Tag, name_el: Tag) -> str:
     clone = copy(block)
     for fluff in clone.find_all("p", class_="ShowFluff"):
         fluff.extract()
-    wanted = _clean(name_el.get_text(" ", strip=True))
+    wanted = _text(name_el)
     for candidate in clone.find_all(name_el.name):
-        if _clean(candidate.get_text(" ", strip=True)) == wanted:
+        if _text(candidate) == wanted:
             candidate.extract()
             break
-    return re.sub(r"\s+", " ", _clean(clone.get_text(" ", strip=True))).strip()
+    return _text(clone)
 
 
 def parse_team_rules(html: str) -> list[TeamRule]:
@@ -631,7 +660,7 @@ def parse_team_rules(html: str) -> list[TeamRule]:
             continue
         rules.append(
             TeamRule(
-                name=_clean(node.get_text(" ", strip=True)),
+                name=_text(node),
                 description=_rule_text(block, node),
             )
         )
@@ -652,9 +681,9 @@ def parse_team_rules(html: str) -> list[TeamRule]:
             continue
         rules.append(
             TeamRule(
-                name=_clean(name_el.get_text(" ", strip=True)),
+                name=_text(name_el),
                 description=_rule_text(wrapper, name_el),
-                group=_clean(heading.get_text(" ", strip=True)),
+                group=_text(heading),
             )
         )
     return rules
@@ -674,7 +703,7 @@ def parse_ploys(html: str) -> list[Ploy]:
         block = name_el.find_parent("div", class_="stratWrapper")
         if block is None:
             continue
-        printed = _clean(name_el.get_text(" ", strip=True))
+        printed = _text(name_el)
         cost = _PLOY_COST.search(printed)
         ploys.append(
             Ploy(
@@ -743,7 +772,7 @@ def parse_equipment(html: str) -> list[Equipment]:
             continue
         equipment.append(
             Equipment(
-                name=_clean(name_el.get_text(" ", strip=True)),
+                name=_text(name_el),
                 description=_rule_text(block, name_el),
             )
         )
@@ -808,7 +837,7 @@ def _text_wrapper(top: Tag) -> Tag | None:
     wrapper = top.parent
     if wrapper is None:
         return None
-    if _without_structure(wrapper).get_text(" ", strip=True):
+    if _without_structure(wrapper).get_text():
         return wrapper
     children = [child for child in wrapper.children if getattr(child, "name", None)]
     if len(children) == 1 and children[0] is top and wrapper.parent is not None:
@@ -847,8 +876,8 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
         if name == "sup" or (name == "span" and "ast" in classes):
             segments.append([])  # a marker: everything after it is its note
             continue
-        text = child.get_text(" ", strip=True) if hasattr(child, "get_text") else str(child).strip()
-        if not text:
+        text = child.get_text() if hasattr(child, "get_text") else str(child)
+        if not text.strip():
             continue
         if name == "div" and "Corner25" in classes:
             segments.append([text])  # a callout box stands alone
@@ -856,7 +885,9 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
             continue
         segments[-1].append(text)
 
-    cleaned = [re.sub(r"\s+", " ", _clean(" ".join(parts))).strip() for parts in segments if any(parts)]
+    # Filtered AFTER cleaning, not before: a segment of whitespace-only children is
+    # truthy but cleans away to nothing, and storing it put an empty `note` on a team.
+    cleaned = [text for parts in segments if (text := re.sub(r"\s+", " ", _clean(" ".join(parts))).strip())]
     if not cleaned:
         return None, []
     # The first segment is the restriction sentence only if it READS like one. Gellerpox

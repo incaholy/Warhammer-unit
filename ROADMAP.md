@@ -633,16 +633,14 @@ Gellerpox's second block is read now — every top-level block under the Operati
 heading is, so its condition and the three vermin it grants are stored as printed text
 with the condition between the two blocks.
 
-What remains is unrelated to composition: **`weapon_rules` needs normalising before the
-frontend renders them as chips.** 103 distinct rules over 2,328 strings, of which 48
-carry a trailing `*` footnote marker, and four pairs are the same rule spelled two ways.
-Three of those four are an extraction artefact, not source inconsistency: the site styles
-a game term inline and the word continues outside the span, so joining elements with a
-space splits it —
+The word-splitting in `weapon_rules` is fixed: text is taken with the SOURCE's own
+spacing rather than joining inline elements with a space, which is what split
+`Conceal</span></span>ed Position` into "Conceal ed Position". 671 stored strings
+changed, none in any way but whitespace, and the distinct rule count fell from 103 to
+101 as the artefacts merged with their correct spellings.
 
-    Conceal</span></span>ed Position   ->  "Conceal ed Position"   (3 teams)
-    Anti-<b>PSYKER                    ->  "Anti- PSYKER"           (1 team)
-    Heavy (<b>Dash Only)              ->  "Heavy ( Dash Only)"
-
-`_clean` already closes a space BEFORE punctuation (941 strings carried one); this is the
-mirror case, a space inserted where the source has none.
+What remains is a judgement call rather than a defect. Two pairs are still spelled two
+ways, and neither is ours: `Torrent 0"` / `Torrent 0"*`, where the asterisk is a footnote
+marker 48 of the 101 rules carry, and `Heavy (Dash Only)` / `Heavy (Dash only)`, where
+the source itself disagrees about the capital. Decide when the frontend renders them as
+chips whether a marker is stripped, kept, or resolved to the footnote it points at.
