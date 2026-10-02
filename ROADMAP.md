@@ -570,13 +570,15 @@ admin write — an admin edit would be silently undone by the next `make seed-kt
 (KILLTEAM.md decision #21). One assertion over the published OpenAPI document proves it
 (#49), so a route added later cannot slip a write past it.
 
-Four routes:
+Six routes:
 
 | Route | Serves |
 |---|---|
 | `GET /kill-team/factions` | the 22 factions, paged |
 | `GET /kill-team/teams` | the 48 teams, paged, `?faction_id=` |
 | `GET /kill-team/teams/{id}` | one team whole — 17–47 KB, median 24, in nine queries flat |
+| `GET /kill-team/teams/{id}/composition` | its printed rules alone, unpaginated |
+| `GET /kill-team/operatives` | operatives across teams, paged, `?kill_team_id=` and `?keyword=` |
 | `GET /kill-team/universal` | the ploy and equipment list no team owns, unpaginated (#48) |
 
 A read names a parent by id and never copies its name (#46). The detail carries
@@ -584,9 +586,7 @@ everything nested (#47), because operatives are reachable only that way — and 
 carries `created_at`/`updated_at` or a nested row's parent FK. `openapi.json` is checked
 in and CI fails if it drifts, so a route is not finished until `make openapi` has run.
 
-Two more routes answer what the nested form cannot: `GET /teams/{id}/composition`
-serves a team's printed rules without its datacards, and `GET /operatives` lists
-operatives across teams with `?kill_team_id=` and `?keyword=`. The keyword filter is
+The last two answer what the nested form cannot. The keyword filter is
 `keywords @> '["LEADER"]'` against a GIN index on Postgres and a `json_each` scan on
 SQLite, so the default test tier exercises it too — the index is what decision #26 chose
 JSONB for.
@@ -631,5 +631,18 @@ read structurally.
 
 Gellerpox's second block is read now — every top-level block under the Operatives
 heading is, so its condition and the three vermin it grants are stored as printed text
-with the condition between the two blocks. What remains is unrelated to composition: the
-`weapon_rules` asterisks and double spellings, before the frontend renders them as chips.
+with the condition between the two blocks.
+
+What remains is unrelated to composition: **`weapon_rules` needs normalising before the
+frontend renders them as chips.** 103 distinct rules over 2,328 strings, of which 48
+carry a trailing `*` footnote marker, and four pairs are the same rule spelled two ways.
+Three of those four are an extraction artefact, not source inconsistency: the site styles
+a game term inline and the word continues outside the span, so joining elements with a
+space splits it —
+
+    Conceal</span></span>ed Position   ->  "Conceal ed Position"   (3 teams)
+    Anti-<b>PSYKER                    ->  "Anti- PSYKER"           (1 team)
+    Heavy (<b>Dash Only)              ->  "Heavy ( Dash Only)"
+
+`_clean` already closes a space BEFORE punctuation (941 strings carried one); this is the
+mirror case, a space inserted where the source has none.
