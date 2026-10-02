@@ -564,26 +564,34 @@ Tested against **synthetic** fixtures, so no scraped content is committed.
 
 ## K3. Catalog routes
 
-**Status: In progress — `KillTeamService` is done, the router is not.** Read-only routes
-under `/api/v1/kill-team`: public read and **no write route at all**, unlike the 40k
-catalog's admin write — an admin edit would be silently undone by the next `make seed-kt`
-(decision #21), and one assertion over the published OpenAPI document proves it (#49).
+**Status: ✅ Done.** Read-only routes under `/api/v1/kill-team`, over
+`KillTeamService`: public read and **no write route at all**, unlike the 40k catalog's
+admin write — an admin edit would be silently undone by the next `make seed-kt`
+(KILLTEAM.md decision #21). One assertion over the published OpenAPI document proves it
+(#49), so a route added later cannot slip a write past it.
 
-Three routes: `/factions` and `/teams` paged (`?faction_id=`), `/teams/{id}` carrying the
-team whole — rules, ploys, equipment, operatives with their datacards, and the selection
-rules (#47). Operatives are reachable only nested, so there is no standalone operative
-resource and no keyword filter until something asks for one.
+Four routes:
 
-**Deferred service work**, left out deliberately rather than forgotten: `KillTeamService`
-has no reader for a team's composition on its own, and none for a single selection rule,
-because #47 puts them in the team detail. If a roster view ever wants the composition
-without the datacards — 7–18% of a detail response — that is the reader to add, with a
-`/teams/{id}/composition` route over it. The same applies to a standalone operative
-reader and the keyword filter the JSONB column was chosen to allow (#26); neither has a
-caller, and no GIN index exists yet. A read names a parent by id
-and never copies its name (#46). `/universal` carries the two collections that belong to
-no team (#48). `openapi.json` is checked in and CI fails if it drifts, so a new route is
-not finished until `make openapi` has run.
+| Route | Serves |
+|---|---|
+| `GET /kill-team/factions` | the 22 factions, paged |
+| `GET /kill-team/teams` | the 48 teams, paged, `?faction_id=` |
+| `GET /kill-team/teams/{id}` | one team whole — 17–47 KB, median 24, in nine queries flat |
+| `GET /kill-team/universal` | the ploy and equipment list no team owns, unpaginated (#48) |
+
+A read names a parent by id and never copies its name (#46). The detail carries
+everything nested (#47), because operatives are reachable only that way — and no schema
+carries `created_at`/`updated_at` or a nested row's parent FK. `openapi.json` is checked
+in and CI fails if it drifts, so a route is not finished until `make openapi` has run.
+
+**Deferred, left out deliberately rather than forgotten:** `KillTeamService` has no
+reader for a team's composition on its own and none for a single selection rule, because
+#47 puts them in the detail — where composition is 2–29% of the bytes, median 10%, so
+splitting it would save little. If a roster view ever wants it without the datacards
+(27–71% of the bytes, median 61%), that is the reader to add, with a
+`/teams/{id}/composition` route over it. The same goes for a standalone operative reader
+and the keyword filter the JSONB column was chosen to allow (#26): neither has a caller,
+and no GIN index exists yet.
 
 ## K4. Roster
 

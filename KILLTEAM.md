@@ -208,7 +208,7 @@ times. Checked against all 48 team pages: all 48 parse and seed, with no warning
 | `KTPloy` | name, `kind` (`strategy`/`firefight`), `cp_cost` (default 1 — **most** pages print none; the core rules and Blades of Khaine print theirs), `description`, `position`; FK kill team, **or null for a ploy every team can use** (Command Re-roll) |
 | `KTEquipment` | name, `description`, `position`; FK kill team, **or null for the universal list** (see "Equipment"). No cost column — equipment is selected up to an allowance, not bought |
 
-Planned for K3. `app/core/services/service_killteam.py` exists; the router does not.
+Built in K3: `app/core/services/service_killteam.py` and `app/api/killteam.py`.
 
 - `app/core/services/service_killteam.py`, `app/api/killteam.py`.
 - Routes under `/api/v1/kill-team/...`, **read-only**: public read and no writes at
