@@ -466,6 +466,8 @@ class KTSelectionRule(TimestampMixin, table=True):
     `position` is the only ordering, and it spans the whole composition -- bullets,
     sentences and notes interleaved as printed -- so `UNIQUE(kill_team_id, position)`
     holds and the whole subtree is replaced rather than rewritten when a page changes.
+    `text` is never empty and only a `line` carries a `depth`: both are CHECKs, not
+    conventions, because an audit inserted rows breaking each and the database took them.
     Position plus depth is the printed document: read in order, indenting by depth, and
     you have the page's composition section back.
     """
@@ -479,6 +481,18 @@ class KTSelectionRule(TimestampMixin, table=True):
             "kind IN ('heading', 'line', 'restriction', 'note')",
             name="ck_kt_selection_rule_kind",
         ),
+        # Two invariants this table's docstring states, now enforced rather than observed.
+        # Both held across all 897 rows, but by the behaviour of the one writer: an audit
+        # inserted a rule with empty text and a heading at depth 3 and the database took
+        # both. A documented fact that nothing checks is a convention.
+        #
+        # A rule IS its text -- an empty one renders as a blank line in a printed section
+        # and means nothing. The parser came within one list comprehension of storing one.
+        CheckConstraint("length(trim(text)) > 0", name="ck_kt_selection_rule_text"),
+        # Indent belongs to a bullet. A heading, a restriction sentence and a note are each
+        # printed at the top level, so a depth on one of them would be meaningless rather
+        # than merely unused.
+        CheckConstraint("kind = 'line' OR depth = 0", name="ck_kt_selection_rule_depth_kind"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)

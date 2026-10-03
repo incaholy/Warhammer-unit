@@ -1,8 +1,8 @@
 """add kill team catalog
 
-Revision ID: 3f2450b07c96
+Revision ID: 48bd98b9ee2e
 Revises: 44441c6a9671
-Create Date: 2026-10-02 16:29:16.847823
+Create Date: 2026-10-02 17:41:04.691286
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '3f2450b07c96'
+revision: str = '48bd98b9ee2e'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -125,8 +125,10 @@ def upgrade() -> None:
     sa.Column('kind', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
     sa.Column('text', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('depth', sa.Integer(), nullable=False),
+    sa.CheckConstraint("kind = 'line' OR depth = 0", name='ck_kt_selection_rule_depth_kind'),
     sa.CheckConstraint("kind IN ('heading', 'line', 'restriction', 'note')", name='ck_kt_selection_rule_kind'),
     sa.CheckConstraint('depth >= 0', name='ck_kt_selection_rule_depth'),
+    sa.CheckConstraint('length(trim(text)) > 0', name='ck_kt_selection_rule_text'),
     sa.CheckConstraint('position >= 0', name='ck_kt_selection_rule_position'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),

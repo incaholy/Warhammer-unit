@@ -471,6 +471,42 @@ def test_two_profiles_may_share_a_position(session, make_kt_operative, make_kt_w
     assert len(warden.weapons) == 2
 
 
+def test_a_selection_rule_with_no_text_is_refused(session, make_kill_team):
+    # A rule IS its text: an empty one renders as a blank line in a printed section and
+    # means nothing. The parser came within one list comprehension of storing one, so this
+    # is enforced rather than observed.
+    session.add(KTSelectionRule(kill_team_id=make_kill_team().id, kind="note", text="   "))
+
+    with pytest.raises(IntegrityError, match="ck_kt_selection_rule_text"):
+        session.commit()
+
+
+@pytest.mark.parametrize("kind", ["heading", "restriction", "note"])
+def test_only_a_line_may_carry_an_indent(session, make_kill_team, kind):
+    # Indent belongs to a bullet. A heading, a sentence and a note are each printed at the
+    # top level, so a depth on one of them would be meaningless rather than merely unused.
+    session.add(KTSelectionRule(kill_team_id=make_kill_team().id, kind=kind, text="Something", depth=1))
+
+    with pytest.raises(IntegrityError, match="ck_kt_selection_rule_depth_kind"):
+        session.commit()
+
+
+def test_a_line_may_carry_any_indent(session, make_kill_team):
+    # The other side of the same constraint: a bullet's depth is how far the page indents
+    # it, and the real pages go to 2.
+    team = make_kill_team()
+    for depth in (0, 1, 2):
+        session.add(
+            KTSelectionRule(
+                kill_team_id=team.id, kind="line", text=f"depth {depth}", position=depth, depth=depth
+            )
+        )
+
+    session.commit()  # no constraint stands in the way
+
+    assert len(session.exec(select(KTSelectionRule)).all()) == 3
+
+
 @pytest.mark.parametrize(
     ("build", "constraint"),
     [
