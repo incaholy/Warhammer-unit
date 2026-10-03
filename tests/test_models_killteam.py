@@ -711,11 +711,31 @@ def test_deleting_a_roster_takes_its_operatives_and_leaves_the_catalog(
     assert session.exec(select(KTOperative)).all(), "the catalog operative survives"
 
 
-def test_deleting_a_user_takes_their_rosters(session, make_user, make_kt_roster):
+def test_deleting_a_user_takes_their_rosters_and_the_rows_on_them(
+    session, make_user, make_kt_roster, make_kt_roster_operative
+):
+    """Two cascade legs, both of them the DATABASE's, which is why the rows matter.
+
+    There is no `User -> KTRoster` relationship, so the ORM knows nothing about these
+    rosters: `session.delete(user)` emits one DELETE on `users` and the rest is
+    `ON DELETE CASCADE`. That takes the rosters through `kt_rosters.owner_user_id`, and
+    then their rows through `fk_kt_roster_operative_roster` -- the composite leg.
+
+    The second leg is the one worth testing, because it is the one the ORM cannot stand
+    in for: `cascade_delete=True` on `KTRoster.operatives` only fires when a roster is
+    deleted through a session, which is not what happens here. This test built a roster
+    with NO operatives, so the leg never fired and the assertion could not fail. The
+    same shape as the N+1 tests that pass because N is 1; here N was 0.
+    """
     user = make_user()
-    make_kt_roster(owner=user)
+    roster = make_kt_roster(owner=user)
+    make_kt_roster_operative(roster=roster)
+    make_kt_roster_operative(roster=roster)
+    assert session.exec(select(KTRosterOperative)).all(), "the rows exist before the delete"
 
     session.delete(user)
     session.commit()
 
     assert session.exec(select(KTRoster)).all() == []
+    assert session.exec(select(KTRosterOperative)).all() == []
+    assert session.exec(select(KTOperative)).all(), "the catalog operative survives"
