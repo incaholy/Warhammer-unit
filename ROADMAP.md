@@ -597,7 +597,8 @@ whenever the composition is replaced.
 
 ## K4. Roster
 
-**Status: Planned.** Kill team rosters under `/api/v1/me/kill-team`, mirroring `Army`.
+**Status: In progress — models and migration done, service and routes not.** Kill team
+rosters under `/api/v1/me/kill-team`, mirroring `Army`.
 Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
 since the rules pick it per battle. A roster offers **every operative of its kill team**
 and nothing narrows that: composition is the page's words shown beside the roster, never

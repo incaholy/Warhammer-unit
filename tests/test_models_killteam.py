@@ -17,6 +17,8 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
+    KTRoster,
+    KTRosterOperative,
     KTSelectionRule,
     KTWeapon,
 )
@@ -596,3 +598,124 @@ def test_an_availability_outside_the_vocabulary_is_refused(session, make_kill_te
     )
     with pytest.raises(IntegrityError, match="ck_kt_operative_availability"):
         session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Rosters (K4). A row is ONE operative, and it cannot belong to another team.
+
+
+def test_a_roster_may_field_the_same_operative_twice(session, make_kt_roster, make_kt_operative):
+    # Decision #50: a row is an individual, not a count, so two Warriors are two rows.
+    # There is deliberately no UNIQUE(roster_id, operative_id) to stop it.
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team, name="Warrior")
+    for position in (0, 1):
+        session.add(
+            KTRosterOperative(
+                roster_id=roster.id,
+                operative_id=operative.id,
+                kill_team_id=roster.kill_team_id,
+                position=position,
+            )
+        )
+
+    session.commit()
+
+    assert [row.position for row in session.exec(select(KTRosterOperative)).all()] == [0, 1]
+
+
+def test_a_roster_cannot_field_another_teams_operative(
+    session, make_kt_roster, make_kill_team, make_kt_operative
+):
+    # The pair of composite foreign keys both go through `kill_team_id`, so this is
+    # unrepresentable rather than merely checked -- the guarantee decision #31 wanted and
+    # a service could forget.
+    roster = make_kt_roster()
+    stranger = make_kt_operative(kill_team=make_kill_team(name="Someone Else"))
+    session.add(
+        KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=stranger.id,
+            kill_team_id=roster.kill_team_id,  # claims the roster's team
+            position=0,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_a_roster_row_cannot_claim_a_team_that_is_not_its_rosters(
+    session, make_kt_roster, make_kill_team, make_kt_operative
+):
+    # The other leg: naming the operative's team on the row does not help, because the
+    # roster side of the pair then fails instead.
+    roster = make_kt_roster()
+    other = make_kill_team(name="Someone Else")
+    stranger = make_kt_operative(kill_team=other)
+    session.add(
+        KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=stranger.id,
+            kill_team_id=other.id,  # claims the operative's team
+            position=0,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_a_rosters_operatives_come_back_in_the_players_order(
+    session, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    # Unlike every `position` in the catalog, this one is the PLAYER's (decision #25 is
+    # about the page's order; a roster's is its owner's to set).
+    roster = make_kt_roster()
+    for name, position in (("Third", 2), ("First", 0), ("Second", 1)):
+        operative = make_kt_operative(kill_team=roster.kill_team, name=name)
+        make_kt_roster_operative(roster=roster, operative=operative, position=position)
+    session.expire_all()
+
+    names = [row.operative.name for row in session.get(KTRoster, roster.id).operatives]
+
+    assert names == ["First", "Second", "Third"]
+
+
+def test_a_negative_roster_position_is_refused(session, make_kt_roster, make_kt_operative):
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    session.add(
+        KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=operative.id,
+            kill_team_id=roster.kill_team_id,
+            position=-1,
+        )
+    )
+
+    with pytest.raises(IntegrityError, match="ck_kt_roster_operative_position"):
+        session.commit()
+
+
+def test_deleting_a_roster_takes_its_operatives_and_leaves_the_catalog(
+    session, make_kt_roster, make_kt_roster_operative
+):
+    roster = make_kt_roster()
+    make_kt_roster_operative(roster=roster)
+
+    session.delete(roster)
+    session.commit()
+
+    assert session.exec(select(KTRosterOperative)).all() == []
+    assert session.exec(select(KTOperative)).all(), "the catalog operative survives"
+
+
+def test_deleting_a_user_takes_their_rosters(session, make_user, make_kt_roster):
+    user = make_user()
+    make_kt_roster(owner=user)
+
+    session.delete(user)
+    session.commit()
+
+    assert session.exec(select(KTRoster)).all() == []

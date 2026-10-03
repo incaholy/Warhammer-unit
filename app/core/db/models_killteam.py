@@ -14,6 +14,8 @@ Built in slices (ROADMAP K1). This module currently holds:
                         ├→ KTEquipment  (same: NULL = the universal list)
                         └→ KTSelectionRule  (the composition, as printed text)
 
+    User → KTRoster → KTRosterOperative → KTOperative   (K4)
+
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
 
@@ -24,7 +26,7 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Index, UniqueConstraint, text
+from sqlalchemy import JSON, CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -161,6 +163,11 @@ class KTOperative(TimestampMixin, table=True):
     __tablename__ = "kt_operatives"
     __table_args__ = (
         UniqueConstraint("kill_team_id", "name"),
+        # Redundant to the primary key, and there for `KTRosterOperative`'s composite
+        # foreign key to point at: a target must be provably unique. It was deleted with
+        # the selection-options table (#44) and is back for the roster (#53), which needs
+        # the same guarantee for the same reason.
+        UniqueConstraint("kill_team_id", "id", name="uq_kt_operative_team_id"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
         CheckConstraint("position >= 0", name="ck_kt_operative_position"),
@@ -510,3 +517,96 @@ class KTSelectionRule(TimestampMixin, table=True):
     depth: int = Field(default=0)
 
     kill_team: KillTeam = Relationship(back_populates="selection_rules")
+
+
+class KTRoster(TimestampMixin, table=True):
+    """A player's kill team roster: which operatives they field, for one kill team.
+
+    Mirrors `Army`, with four deliberate differences, all recorded: no points of any
+    kind, so no `points_limit` (#50's section); no equipment, because a game picks that
+    (#17); no `validate`, because nothing narrows what a roster may take (#28, #44); and
+    a row of `KTRosterOperative` is ONE operative rather than a count of them (#50).
+    """
+
+    __tablename__ = "kt_rosters"
+    __table_args__ = (
+        # Redundant to the primary key, and there for `KTRosterOperative`'s composite
+        # foreign key: it is what makes "this operative belongs to this roster's kill
+        # team" a thing the database can check rather than a service remembering to.
+        UniqueConstraint("kill_team_id", "id", name="uq_kt_roster_team_id"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # delete a user -> their rosters go with them, as an army does
+    owner_user_id: UUID = Field(foreign_key="users.id", ondelete="CASCADE", index=True)
+    # The team this roster is FOR. Not nullable: a roster with no kill team could hold no
+    # operative, since every operative belongs to one.
+    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", index=True)
+    name: str = Field(max_length=128)
+    description: str | None = Field(default=None)
+
+    kill_team: KillTeam = Relationship()
+    operatives: list["KTRosterOperative"] = Relationship(
+        back_populates="roster",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTRosterOperative.position"},
+    )
+
+
+class KTRosterOperative(TimestampMixin, table=True):
+    """One operative on a roster -- an individual, not a count (decision #50).
+
+    Taking two Warriors is two rows. An `amount` works for `ArmyUnit` because a 40k unit
+    is a group you move and shoot as one; a Kill Team operative activates, takes wounds
+    and holds its order and tokens by itself, and a game gives each one its own record
+    with its own stats. `{operative: Warrior, amount: 2}` cannot say which of the two is
+    wounded, and decision #19's transform -- which keeps a row's id, tokens and board
+    status while its catalog pointer moves -- cannot apply to half a row.
+
+    So there is **no** `UNIQUE(roster_id, operative_id)`: a repeat is legitimate, add
+    appends, and a row is addressed by its own id.
+
+    `kill_team_id` is carried so the two composite foreign keys below can reach both
+    parents through it, which is what makes a roster holding ANOTHER team's operative
+    unrepresentable rather than merely checked.
+    """
+
+    __tablename__ = "kt_roster_operatives"
+    __table_args__ = (
+        # Both legs go through `kill_team_id`, so a row cannot name a roster of one team
+        # and an operative of another: the pair has to exist on both sides.
+        ForeignKeyConstraint(
+            ["kill_team_id", "roster_id"],
+            ["kt_rosters.kill_team_id", "kt_rosters.id"],
+            ondelete="CASCADE",
+            name="fk_kt_roster_operative_roster",
+        ),
+        ForeignKeyConstraint(
+            ["kill_team_id", "operative_id"],
+            ["kt_operatives.kill_team_id", "kt_operatives.id"],
+            name="fk_kt_roster_operative_operative",
+        ),
+        CheckConstraint("position >= 0", name="ck_kt_roster_operative_position"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    roster_id: UUID = Field(index=True)
+    operative_id: UUID = Field(index=True)
+    # Reached by both composite foreign keys above, which is why it is stored rather than
+    # read through the roster.
+    kill_team_id: UUID = Field(index=True)
+    # The player's own order, which is theirs to set -- unlike every `position` in the
+    # catalog, which is the page's (decision #25).
+    position: int = Field(default=0)
+
+    # `overlaps` on both: the two composite foreign keys share `kill_team_id`, so each
+    # relationship writes a column the other also writes. SQLAlchemy cannot tell that is
+    # intended -- it is the whole point, since the shared column is what ties the pair to
+    # one team -- so both are told about the other.
+    roster: KTRoster = Relationship(
+        back_populates="operatives",
+        sa_relationship_kwargs={"overlaps": "operative"},
+    )
+    operative: KTOperative = Relationship(
+        sa_relationship_kwargs={"overlaps": "operatives,roster"},
+    )

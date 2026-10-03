@@ -28,6 +28,8 @@ from app.core.db.models_killteam import (
     KTFaction,
     KTOperative,
     KTPloy,
+    KTRoster,
+    KTRosterOperative,
     KTSelectionRule,
     KTWeapon,
 )
@@ -433,6 +435,44 @@ def make_kt_equipment(session, make_kill_team):
         session.commit()
         session.refresh(item)
         return item
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_roster(session, make_user, make_kill_team):
+    def _make(owner=None, kill_team=None, **overrides):
+        owner = owner or make_user()
+        kill_team = kill_team or make_kill_team()
+        data = dict(name=f"Roster {next(_counter)}")
+        data.update(overrides)
+        roster = KTRoster(owner_user_id=owner.id, kill_team_id=kill_team.id, **data)
+        session.add(roster)
+        session.commit()
+        session.refresh(roster)
+        return roster
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_roster_operative(session, make_kt_roster, make_kt_operative):
+    """One operative on a roster. Pass `operative=` to field one that already exists."""
+
+    def _make(roster=None, operative=None, **overrides):
+        roster = roster or make_kt_roster()
+        operative = operative or make_kt_operative(kill_team=roster.kill_team)
+        row = KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=operative.id,
+            # Carried so both composite foreign keys can reach their parents through it.
+            kill_team_id=roster.kill_team_id,
+            **overrides,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
 
     return _make
 
