@@ -411,8 +411,8 @@ def test_a_nav_without_the_universal_equipment_link_fails_loudly():
 # ---- Matching a composition entry to a datacard ----
 #
 # A page names each operative twice: the composition says FELLTALON, the datacard says
-# "Ravener Felltalon". `KTSelectionOption` needs the datacard, and the scraper is the
-# only place holding both halves.
+# "Ravener Felltalon". `availability` needs the datacard name, and the scraper is the only
+# place holding both halves -- the one job left for the resolver (decision #44).
 
 RAVENERS = ["Ravener Prime", "Ravener Felltalon", "Ravener Warrior", "Ravener Wrecker"]
 SPECTRES = ["Spectre Gunner", "Spectre Heavy Gunner", "Spectre Stub-Gunner", "Spectre Guide"]
@@ -490,9 +490,6 @@ def test_an_empty_entry_is_not_an_operative():
     assert resolve_operative("", RAVENERS, strict=False) is None
     with pytest.raises(OperativeNotResolved):
         resolve_operative("   ", RAVENERS)
-
-
-# ---- Composition: the budgeted selection lists (decision #16) ----
 
 
 # ---------------------------------------------------------------------------
@@ -607,8 +604,8 @@ def test_the_most_specific_card_wins_when_the_entry_carries_the_extra_words():
 
 
 # ---------------------------------------------------------------------------
-# `composition_warnings`: a mis-read composition seeds cleanly, so it has to be said
-# out loud. Synthetic teams, in the payload's shape.
+# Abilities and unique actions: an action's conditions are as load-bearing as its
+# effect, so both halves have to survive the read.
 # ---------------------------------------------------------------------------
 
 

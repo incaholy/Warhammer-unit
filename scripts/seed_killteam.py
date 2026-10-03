@@ -8,20 +8,21 @@ in hand -- so this script looks rows up by natural key and never guesses.
 
 Running it again brings the database up to the payload: a row is created if absent and
 REWRITTEN if the source changed it, so a rebalanced stat or a reworded ploy lands on the
-next scrape. A team's selection lists are the exception -- they are replaced as a whole
+next scrape. A team's selection RULES are the exception -- they are replaced as a whole
 (see `_seed_rules`), because a composition rule's identity is its print position.
 
 What that leaves is a SUPERSET of the payload, not a match: outside the composition,
 rows the source has REMOVED or RENAMED stay behind, and nothing marks them as stale
-(`updated_at` cannot -- it only moves when a row is written). A withdrawn keyword cap
-therefore keeps being enforced and a renamed team leaves its old subtree beside the new
-one. Deleting safely is a question about the rosters that will reference these rows, so
-it belongs with K4.
+(`updated_at` cannot -- it only moves when a row is written). A withdrawn ploy therefore
+keeps being served and a renamed team leaves its old subtree beside the new one. Deleting
+safely is a question about the rosters that will reference these rows, so it belongs with
+K4.
 
 Everything happens in one transaction, so a team that fails mid-run leaves nothing
 half-written.
 
-No service layer yet (that is ROADMAP K3), so this writes the models directly. Every
+No service layer in between: `KillTeamService` (ROADMAP K3) reads the catalog and never
+writes it, so a seed writes the models directly. Every
 rule still applies: the constraints in `models_killteam.py` are what reject a bad row,
 and a seed cannot get past them any more than an API request could.
 

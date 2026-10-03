@@ -84,8 +84,8 @@ class KillTeam(TimestampMixin, table=True):
     # Rows have no order of their own, so without this each list comes back in whatever the
     # storage gives, which held by luck until a `VACUUM FULL` or a rewritten row moved one.
     #
-    # The single exception is `keyword_caps`, which are read out of a SENTENCE rather than a
-    # printed list, so they have no page order to keep; the keyword is their stable one.
+    # Since decision #44 there is no exception: a restriction sentence is a selection rule
+    # with a printed position like everything else.
     rules: list["KillTeamRule"] = Relationship(
         back_populates="kill_team",
         cascade_delete=True,
@@ -152,9 +152,10 @@ class KillTeamRule(TimestampMixin, table=True):
 class KTOperative(TimestampMixin, table=True):
     """One operative on a kill team's roster list, with its datacard stats.
 
-    Whether a roster may take it, and how many times, is NOT here: that is stated by
-    the selection list offering it, and two lists can offer the same operative on
-    different terms. `KTSelectionOption` carries it (KILLTEAM.md decision #16).
+    Whether a roster may take it, and how many times, is NOT here -- and since decision
+    #44 it is not anywhere in the catalog either. The composition states it in the page's
+    own words (`KTSelectionRule`) and nothing derives a limit from them, which is what
+    lets a custom game be built. A roster offers every operative of its kill team (K4).
     """
 
     __tablename__ = "kt_operatives"

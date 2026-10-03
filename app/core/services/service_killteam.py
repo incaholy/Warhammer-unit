@@ -92,9 +92,7 @@ class KillTeamService:
         row and make the result set the product of nine independent lists.
 
         Nothing is sorted here. Every relationship declares its own `order_by`
-        (decision #25), so print order arrives with the rows -- and `keyword_caps`
-        orders by keyword, since a cap is read out of a sentence and has no printed
-        position of its own.
+        (decision #25), so print order arrives with the rows.
 
         `selection_rules` is the composition as the page prints it -- text with an indent
         depth, nothing derived (decision #28). Read in `position` order, indenting by

@@ -521,8 +521,10 @@ def _words(name: str) -> list[str]:
 class OperativeNotResolved(ValueError):
     """A composition entry could not be tied to exactly one datacard.
 
-    `candidates` holds the datacards it matched equally, so a caller can narrow them with
-    what it knows -- see the elimination pass in `_lists_from` (decision #37).
+    `candidates` holds the datacards it matched equally, so a caller could narrow them with
+    what it knows. Nothing does now: the only caller left is `parse_in_battle_operatives`,
+    which suppresses this rather than narrowing it (the elimination pass that used it went
+    with the composition structure, decision #44).
     """
 
     def __init__(self, message: str, candidates: Iterable[str] = ()) -> None:
@@ -535,8 +537,10 @@ def resolve_operative(entry: str, datacards: list[str], *, strict: bool = True) 
 
     A page names its operatives twice, differently: the composition says `FELLTALON`
     or `EXACTION SQUAD PROCTOR-EXACTANT`, while the datacards say `Ravener Felltalon`
-    and `Arbites Proctor-Exactant`. `KTSelectionOption.operative_id` needs the second,
-    so the two have to be matched -- and the scraper is the only place holding both.
+    and `Arbites Proctor-Exactant`. `KTOperative.availability` needs the second, so the two
+    have to be matched -- and the scraper is the only place holding both halves of a page.
+    That is now the ONLY reason this exists: a composition entry is stored as the text the
+    page printed and is never resolved (decision #44).
 
     Rules run strongest first, and each needs a UNIQUE winner or falls through, so a
     loose rule can never steal a match from a strict one. Six rungs, strongest first:
@@ -823,7 +827,7 @@ def _text_wrapper(top: Tag) -> Tag | None:
     holds no text and the sentence sits one level up -- where nothing looked, and the team was read as
     printing no restriction at all. It cost that team its repeat clause, three keyword
     caps (DIKTAT, SURVEYOR, SICARIAN), four capped options and a footnote, and no warning
-    could report it because every check runs on the sentence this function returns.
+    could report it, because the checks that existed all read the sentence this returns.
 
     The climb is allowed only when `top` is the wrapper's SOLE element child, which is
     what distinguishes a container from a column of content. Climbing merely because the
@@ -859,7 +863,8 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     a guess: a `sup` or `span.ast` marker STARTS a note (it is a reference to the note
     that follows), and a `div.Corner25` callout -- the page's "Designer's Note" box -- is
     a note of its own. Everything before the first marker is the restriction sentence,
-    which is the half the repeat clause and the exemptions are read from.
+    which used to be the half the repeat clause and the exemptions were read from; since
+    decision #44 it is stored as printed and nothing is derived from it.
 
     Notes belong to the composition rather than to a list (decision #30): that is where
     the page prints them, and it is the only attachment that is never wrong.
@@ -894,7 +899,8 @@ def _composition_text(top: Tag) -> tuple[str | None, list[str]]:
     # print a conditional footnote and no restriction at all ("If you selected the MUTOID
     # VERMIN faction equipment:"), which otherwise landed in the restriction slot -- where a
     # reader sees a footnote presented as a constraint on that list, and where the cap and
-    # repeat patterns then scan it. 48 of the 49 leading segments carry one of these phrases.
+    # 48 of the 49 leading segments carry one of these phrases. Nothing is read OUT of the
+    # sentence any more (decision #44) -- the distinction is only which kind it is stored as.
     if not _IS_RESTRICTION.search(cleaned[0]):
         return None, cleaned
     return cleaned[0], cleaned[1:]
