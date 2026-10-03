@@ -73,6 +73,9 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 
 | 50 | A roster row is ONE operative | `KTRosterOperative` carries no `amount`: taking two Warriors is two rows, each with its own `position`. So **no** `UNIQUE(roster_id, operative_id)`, add APPENDS rather than 409ing on a repeat, and a row is addressed by its own id rather than by the operative it points at — three deliberate divergences from the `ArmyUnit` it otherwise mirrors | An `amount` works in 40k because a unit is a GROUP you move and shoot as one. A Kill Team operative is an individual: it activates, takes wounds, holds its order and its tokens separately, and in a game each one will have its own stats to track. `{operative: Warrior, amount: 2}` cannot answer "which of my two Warriors is on 4 wounds?". Two decisions already made need it too: #19 transforms an operative IN PLACE, keeping its id, tokens, order and board status while its catalog pointer moves — which is only expressible if a row is one operative — and #22 snapshots the whole datacard per operative, which is one snapshot per row under this shape and a duplicating loop under an `amount`. The roster row and the game row correspond one to one, so K5 copies rather than expands |
 
+| 51 | `availability` is information, not a constraint | A roster may take ANY operative of its kill team. `availability = in_battle` is read by the game screen's "add an operative" picker (#20) and by a frontend deciding what to grey out; no route refuses a row because of it | The catalog describes and never enforces (#28, #44), and a roster-level refusal would be the catalog applying a rule after all. It is also unnecessary: a session service creates its own per-operative record, which is where an operative's stats are tracked (#50), so whether a datacard arrives by roster or mid-battle is a question that record answers rather than the roster |
+| 52 | What a roster read carries | The roster's operatives with their datacards embedded, plus the team's rules, the team's ploys, the universal ploys, the team's equipment and the universal equipment list. The two equipment lists are the pool a game CHOOSES from -- the choice itself stays per game (#17), so there is no `KTRosterEquipment` | It is what a player has in front of them while building and then playing: the datacards they will field and every rule, ploy and piece of kit that applies. The cost is stated rather than discovered: measured over the 48 teams a ten-operative roster read is 20-36 KB, median 26 -- LARGER than the team detail it overlaps (14-38 KB, median 20), since it repeats that team's rules, ploys and equipment and adds 7.3 KB of universal rows. Accepted deliberately: the alternative is a roster that carries ids and makes every client join against a team detail it may not have fetched |
+
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
 ## Separation from the 40k army list builder
@@ -314,6 +317,11 @@ Mirrors `Army`.
   own, decided then, not a column inherited from the catalog.
 - No points, so none of `Army`'s `points_limit`, `points_total` or `/shortfall` has an
   equivalent.
+- A roster may take **any** operative of its kill team: `availability` informs a picker,
+  it does not refuse a row (decision #51).
+- A roster read carries its operatives with their datacards, the team's rules and ploys,
+  the universal ploys, and both equipment lists as the pool a GAME chooses from
+  (decisions #52, #17).
 
 ### Composition: the page's own words
 
