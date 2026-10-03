@@ -1,0 +1,283 @@
+"""KTRosterService — a player's kill team rosters and the operatives on them.
+
+Session-injected. `NotFoundError` for not-found, `ConflictError` for a duplicate
+name, and `KTRosterValidationError` for bad input, per the SPEC conventions.
+
+Kept apart from `KillTeamService`, which is the CATALOG and read-only (decision
+#21): a roster is the player's own data and the only Kill Team thing they write.
+This service reads catalog rows to check a reference exists; it never writes one.
+
+**Nothing here decides what a roster may contain.** A roster may field any
+operative of its kill team, as many times as the player likes (decisions #50,
+#51), and composition is the page's own words shown beside it rather than a rule
+the catalog applies (#28, #44). So there is no `validate`, no budget, no cap and
+no refusal -- which is what lets a custom game be built. The checks that remain
+are referential, not legal: does this kill team exist, is this operative one of
+its own, is this row on this roster.
+"""
+
+from uuid import UUID
+
+from sqlalchemy import func
+from sqlalchemy.orm import selectinload
+from sqlmodel import Session, select
+
+from app.core.db.columns import not_nullable_fields
+from app.core.db.models import User
+from app.core.db.models_killteam import (
+    KillTeam,
+    KTOperative,
+    KTRoster,
+    KTRosterOperative,
+)
+from app.core.errors import CodedError, ErrorCode
+from app.core.services.errors import ConflictError, NotFoundError
+
+
+class KTRosterValidationError(CodedError, ValueError):
+    """Bad roster input."""
+
+    code = ErrorCode.VALIDATION
+
+    def __init__(self, field: str, message: str):
+        text = f"{field}: {message}"
+        super().__init__(text)
+        self.message = text
+        self.field = field
+
+
+class KTRosterService:
+    """A player's rosters, and the operatives on them."""
+
+    # Fields a PATCH may set. `kill_team_id` is NOT among them: changing a roster's team
+    # would orphan every operative on it, and the composite foreign keys would refuse the
+    # write halfway through. Build a new roster instead.
+    _UPDATABLE = {"name", "description"}
+    # Of those, the ones backed by NOT NULL columns, read off the mapped table rather than
+    # hand-listed so a new NOT NULL column cannot be forgotten here.
+    _NOT_NULLABLE = not_nullable_fields(KTRoster, _UPDATABLE)
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    # ------------------------------ rosters ------------------------------
+
+    def create_roster(
+        self,
+        user_id: UUID,
+        kill_team_id: UUID,
+        name: str,
+        description: str | None = None,
+    ) -> KTRoster:
+        """A new, empty roster for one kill team.
+
+        The team is fixed at creation and not updatable: every operative on the roster
+        is held to it by a composite foreign key (#50's section), so changing it later
+        would mean emptying the roster first.
+        """
+        if self.session.get(User, user_id) is None:
+            raise NotFoundError(f"user {user_id} not found")
+        if self.session.get(KillTeam, kill_team_id) is None:
+            raise NotFoundError(f"kill team {kill_team_id} not found")
+        self._require_name_free(user_id, name)
+
+        roster = KTRoster(
+            owner_user_id=user_id,
+            kill_team_id=kill_team_id,
+            name=name,
+            description=description,
+        )
+        self.session.add(roster)
+        self.session.flush()
+        self.session.refresh(roster)
+        return roster
+
+    def get_roster(self, roster_id: UUID) -> KTRoster:
+        """One roster with its operatives and their datacards.
+
+        Eager-loaded two levels down, because a roster read embeds each operative's
+        weapons and abilities (decision #52) and lazily that is two queries per row.
+        Whether the CALLER may see it is the router's business: `get_owned_roster`
+        answers that, and 404s rather than 403s so existence is not disclosed.
+        """
+        statement = (
+            select(KTRoster)
+            .where(KTRoster.id == roster_id)
+            .options(
+                selectinload(KTRoster.kill_team),  # type: ignore[arg-type]
+                selectinload(KTRoster.operatives)  # type: ignore[arg-type]
+                .selectinload(KTRosterOperative.operative)
+                .selectinload(KTOperative.weapons),
+                selectinload(KTRoster.operatives)  # type: ignore[arg-type]
+                .selectinload(KTRosterOperative.operative)
+                .selectinload(KTOperative.abilities),
+            )
+        )
+        roster = self.session.exec(statement).first()
+        if roster is None:
+            raise NotFoundError(f"roster {roster_id} not found")
+        return roster
+
+    def list_rosters(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[KTRoster]:
+        """A player's rosters, oldest first: a name, a kill team and its faction.
+
+        `created_at` then `id`, the way armies are listed: the id breaks a timestamp tie
+        so paging is stable.
+
+        Deliberately NOT the operatives, and so not their datacards either. A listing
+        answers "which rosters do I have?", and a roster's detail read is 20-36 KB
+        (decision #52) -- a page of fifty of those is megabytes to answer a question the
+        name and the team already answer. The team's faction comes along because that is
+        how a team is named to a reader ("Raveners, Tyranids"), and one more query for
+        the whole page is cheaper than the client resolving it.
+        """
+        statement = (
+            select(KTRoster)
+            .where(KTRoster.owner_user_id == user_id)
+            .options(
+                selectinload(KTRoster.kill_team).selectinload(KillTeam.faction),  # type: ignore[arg-type]
+            )
+            .order_by(KTRoster.created_at, KTRoster.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(self.session.exec(statement).all())
+
+    def count_rosters(self, user_id: UUID) -> int:
+        return self.session.exec(
+            select(func.count(KTRoster.id)).where(KTRoster.owner_user_id == user_id)
+        ).one()
+
+    def update_roster(self, roster_id: UUID, **fields) -> KTRoster:
+        roster = self._require_roster(roster_id)
+        unknown = set(fields) - self._UPDATABLE
+        if unknown:
+            raise KTRosterValidationError("fields", f"cannot update {sorted(unknown)}")
+        # A PATCH that explicitly sends null for a NOT NULL column survives
+        # `exclude_unset` and would reach the database as an IntegrityError. Rejected
+        # here as a clean 400 instead.
+        for field in sorted(fields):
+            if field in self._NOT_NULLABLE and fields[field] is None:
+                raise KTRosterValidationError(field, "cannot be null")
+        if "name" in fields:
+            self._require_name_free(roster.owner_user_id, fields["name"], except_id=roster.id)
+
+        for key, value in fields.items():
+            setattr(roster, key, value)
+        self.session.add(roster)
+        self.session.flush()
+        self.session.refresh(roster)
+        return roster
+
+    def delete_roster(self, roster_id: UUID) -> None:
+        """Delete a roster and the rows on it. Catalog operatives are untouched."""
+        roster = self._require_roster(roster_id)
+        self.session.delete(roster)  # `cascade_delete` takes its operatives
+        self.session.flush()
+
+    # ------------------------ operatives on a roster ------------------------
+
+    def add_operative(self, roster_id: UUID, operative_id: UUID) -> KTRosterOperative:
+        """Field one more operative -- an APPEND, not a create-or-409.
+
+        A roster row is an individual, not a count (decision #50), so fielding the same
+        datacard twice is two rows and a repeat is legitimate. That is the one place this
+        deliberately diverges from `ArmyService.add_unit`, which is create-only because
+        an incrementing add is not retry-safe: there is no quantity to increment here, so
+        a retried add appends a second operative, which is a real outcome rather than a
+        double-applied one. A caller that must not double-add removes the extra row by id.
+
+        The new row goes last. `position` is the PLAYER's order, so it is theirs to
+        rearrange with `move_operative`.
+        """
+        roster = self._require_roster(roster_id)
+        operative = self.session.get(KTOperative, operative_id)
+        if operative is None:
+            raise NotFoundError(f"operative {operative_id} not found")
+        # Referential, not legal: an operative belongs to exactly one kill team, and the
+        # composite foreign keys would refuse this row anyway. Checked here so the caller
+        # gets a 404 naming the problem rather than an IntegrityError.
+        if operative.kill_team_id != roster.kill_team_id:
+            raise NotFoundError(f"operative {operative_id} is not one of kill team {roster.kill_team_id}'s")
+
+        row = KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=operative_id,
+            # Carried so both composite foreign keys reach their parents through it.
+            kill_team_id=roster.kill_team_id,
+            position=self._next_position(roster.id),
+        )
+        self.session.add(row)
+        self.session.flush()
+        self.session.refresh(row)
+        return row
+
+    def move_operative(self, roster_id: UUID, row_id: UUID, position: int) -> KTRosterOperative:
+        """Set one row's position. Absolute, not a delta, so a retry is harmless.
+
+        Addressed by the ROW's id rather than the operative's, because two rows may name
+        the same operative (decision #50).
+        """
+        if position < 0:
+            raise KTRosterValidationError("position", "cannot be negative")
+        row = self._require_row(roster_id, row_id)
+        row.position = position
+        self.session.add(row)
+        self.session.flush()
+        self.session.refresh(row)
+        return row
+
+    def remove_operative(self, roster_id: UUID, row_id: UUID) -> None:
+        """Take one row off the roster. By row id, for the same reason as above."""
+        self.session.delete(self._require_row(roster_id, row_id))
+        self.session.flush()
+
+    def list_roster_operatives(self, roster_id: UUID) -> list[KTRosterOperative]:
+        """The roster's rows in the player's order, with the operative each names."""
+        self._require_roster(roster_id)
+        statement = (
+            select(KTRosterOperative)
+            .where(KTRosterOperative.roster_id == roster_id)
+            .options(selectinload(KTRosterOperative.operative))  # type: ignore[arg-type]
+            .order_by(KTRosterOperative.position, KTRosterOperative.id)
+        )
+        return list(self.session.exec(statement).all())
+
+    # ------------------------------- helpers -------------------------------
+
+    def _require_roster(self, roster_id: UUID) -> KTRoster:
+        roster = self.session.get(KTRoster, roster_id)
+        if roster is None:
+            raise NotFoundError(f"roster {roster_id} not found")
+        return roster
+
+    def _require_row(self, roster_id: UUID, row_id: UUID) -> KTRosterOperative:
+        """One row, and only if it is on THIS roster.
+
+        Scoped to the roster so a row id from someone else's roster reads as missing
+        rather than as something the caller may touch.
+        """
+        row = self.session.get(KTRosterOperative, row_id)
+        if row is None or row.roster_id != roster_id:
+            raise NotFoundError(f"roster entry {row_id} is not on roster {roster_id}")
+        return row
+
+    def _require_name_free(self, user_id: UUID, name: str, except_id: UUID | None = None) -> None:
+        """One name per player, so a list of rosters is readable.
+
+        Enforced here rather than by a UNIQUE constraint because it is a usability rule
+        rather than an integrity one -- two players may both call a roster "Raveners",
+        and the schema has nothing to say about it.
+        """
+        statement = select(KTRoster.id).where(KTRoster.owner_user_id == user_id, KTRoster.name == name)
+        if except_id is not None:
+            statement = statement.where(KTRoster.id != except_id)
+        if self.session.exec(statement).first() is not None:
+            raise ConflictError(f"a roster called {name!r} already exists", field="name")
+
+    def _next_position(self, roster_id: UUID) -> int:
+        """One past the roster's last row, so an add appends."""
+        highest = self.session.exec(
+            select(func.max(KTRosterOperative.position)).where(KTRosterOperative.roster_id == roster_id)
+        ).one()
+        return 0 if highest is None else highest + 1
