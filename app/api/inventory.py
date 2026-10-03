@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
-from app.api.fields import INT32_MAX
+from app.api.fields import INT32_MAX, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
@@ -25,12 +25,12 @@ class UserUnit_Read(SQLModel):
     amount: int
 
 
-class InventoryAdd(SQLModel):
+class InventoryAdd(WriteSchema):
     unit_id: UUID
     amount: int = Field(default=1, ge=1, le=INT32_MAX)
 
 
-class AmountSet(SQLModel):
+class AmountSet(WriteSchema):
     # Top bound only: the service raises a 400 below 1.
     amount: int = Field(le=INT32_MAX)
 

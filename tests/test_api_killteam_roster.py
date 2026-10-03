@@ -178,14 +178,41 @@ def test_a_roster_can_be_renamed(auth_client, make_kill_team, make_kt_faction):
 
 
 def test_a_patch_cannot_move_a_roster_to_another_kill_team(auth_client, make_kill_team, make_kt_faction):
-    # Not in `KTRoster_Update`, so FastAPI drops it; the service would reject it too.
+    """`kill_team_id` is not in `KTRoster_Update`, and an unknown key is now a 422.
+
+    It used to be DROPPED: the request validated clean, the service was handed `{}`,
+    and the route answered 200 with the roster unchanged -- which reads as "the move
+    was applied" to anything that only checks the status. `WriteSchema` forbids extras,
+    so the refusal is now explicit and names the field.
+    """
     team = _team(make_kill_team, make_kt_faction)
     other = _team(make_kill_team, make_kt_faction, name="Gellerpox", faction="Nurgle")
     roster = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Mine"}).json()
 
-    body = auth_client.patch(f"{BASE}/{roster['id']}", json={"kill_team_id": str(other.id)}).json()
+    resp = auth_client.patch(f"{BASE}/{roster['id']}", json={"kill_team_id": str(other.id)})
 
-    assert body["kill_team_id"] == str(team.id)
+    assert resp.status_code == 422
+    # Same error envelope as a service-raised `CodedError` -- `app/main.py` routes a
+    # `RequestValidationError` through `_error_response` too, so a client reads `field`
+    # the same way whichever layer refused it.
+    assert resp.json()["field"] == "kill_team_id"
+    # And the roster really did not move.
+    assert auth_client.get(f"{BASE}/{roster['id']}").json()["kill_team_id"] == str(team.id)
+
+
+def test_a_misspelled_patch_field_is_refused_rather_than_reported_as_success(
+    auth_client, make_kill_team, make_kt_faction
+):
+    # The general case of the above, and the reason it is worth a 422: a typo used to
+    # answer 200 having changed nothing, so a client could not tell a successful rename
+    # from a silently discarded one.
+    team = _team(make_kill_team, make_kt_faction)
+    roster = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Old"}).json()
+
+    resp = auth_client.patch(f"{BASE}/{roster['id']}", json={"nmae": "New"})
+
+    assert resp.status_code == 422
+    assert auth_client.get(f"{BASE}/{roster['id']}").json()["name"] == "Old"
 
 
 def test_a_roster_can_be_deleted(auth_client, make_kill_team, make_kt_faction):

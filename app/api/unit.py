@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.api.deps import get_current_admin, get_owned_by
-from app.api.fields import Name, Stat
+from app.api.fields import Name, Stat, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
 from app.core.services.service_unit import UnitService
@@ -55,7 +55,7 @@ class Unit_Read(SQLModel):
     abilities: list[Ability_Read] = []
 
 
-class Unit_Create(SQLModel):
+class Unit_Create(WriteSchema):
     faction_id: UUID
     unit_name: Name
     movement: Stat
@@ -70,7 +70,7 @@ class Unit_Create(SQLModel):
     keywords: list[str] | None = None
 
 
-class Unit_Update(SQLModel):
+class Unit_Update(WriteSchema):
     unit_name: Name | None = None
     faction_id: UUID | None = None
     subfaction_id: UUID | None = None
@@ -93,11 +93,11 @@ class UnitFacets(SQLModel):
     by_faction: dict[UUID, int]
 
 
-class WeaponLink(SQLModel):
+class WeaponLink(WriteSchema):
     weapon_id: UUID
 
 
-class AbilityLink(SQLModel):
+class AbilityLink(WriteSchema):
     ability_id: UUID
 
 

@@ -20,7 +20,8 @@ reported as a 409, as though it conflicted with another resource — so it gains
 
 from typing import Annotated
 
-from pydantic import AfterValidator, Field, StringConstraints
+from pydantic import AfterValidator, ConfigDict, Field, StringConstraints
+from sqlmodel import SQLModel
 
 #: The largest value a Postgres `integer` column holds. Above it, psycopg raises
 #: `NumericValueOutOfRange` mid-flush, which is a `DataError` rather than a `CodedError`
@@ -68,3 +69,24 @@ DiceValue = Annotated[str, StringConstraints(min_length=1, max_length=16), After
 #: `test_create_weapon_invalid_category_returns_400` pins that status. This bounds the
 #: length so an over-long value cannot reach the column instead.
 WeaponCategory = Annotated[str, StringConstraints(min_length=1, max_length=8), AfterValidator(_not_blank)]
+
+
+class WriteSchema(SQLModel):
+    """Base for every `*_Create`/`*_Update`: an unknown key is a 422, not a shrug.
+
+    Pydantic ignores unknown keys by default, so `PATCH {"nmae": "Renamed"}` validated
+    clean, reached the service as `{}`, updated nothing and answered **200 OK**. A
+    client typo was indistinguishable from a successful rename. `KTRoster_Update` also
+    carried a comment claiming the service refused a `kill_team_id` with a 400; it was
+    dropped here instead and the PATCH succeeded.
+
+    Set through `model_config` rather than as a class keyword: `class X(SQLModel,
+    extra="forbid")` is accepted by SQLModel's metaclass and **silently does nothing**
+    -- `model_config["extra"]` stays `None`. Inheriting it merges with SQLModel's own
+    config rather than replacing it, so `from_attributes` and `registry` survive.
+
+    Publishes `additionalProperties: false`, which the frontend's generated types
+    already satisfy: they are generated from this same document.
+    """
+
+    model_config = ConfigDict(extra="forbid")  # type: ignore[assignment]

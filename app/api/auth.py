@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import EmailStr
 from sqlmodel import Field, Session, SQLModel
 
-from app.api.fields import Username
+from app.api.fields import Username, WriteSchema
 from app.api.user import User_Read
 from app.core.db.connection import get_session
 from app.core.security import UnauthorizedError, create_access_token
@@ -18,7 +18,7 @@ from app.core.services.service_auth import AuthService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-class Register_Create(SQLModel):
+class Register_Create(WriteSchema):
     # Bounded at both ends and refused when blank: `min_length=3` alone accepted "   ",
     # and nothing bounded the top against a `VARCHAR(64)` column.
     username: Username

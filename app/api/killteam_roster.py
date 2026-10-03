@@ -30,7 +30,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
-from app.api.fields import INT32_MAX, Name
+from app.api.fields import INT32_MAX, Name, WriteSchema
 from app.api.killteam import (
     KillTeamRule_Read,
     KTEquipment_Read,
@@ -132,24 +132,28 @@ class KTRoster_Read(SQLModel):
     universal_equipment: list[KTEquipment_Read] = []
 
 
-class KTRoster_Create(SQLModel):
+class KTRoster_Create(WriteSchema):
     kill_team_id: UUID
     name: Name
     description: str | None = None
 
 
-class KTRoster_Update(SQLModel):
+class KTRoster_Update(WriteSchema):
     # `kill_team_id` is absent on purpose: changing it would orphan every operative on
-    # the roster. The service rejects it as a 400 if a caller sends it anyway.
+    # the roster, and the composite foreign keys would refuse the write halfway through.
+    # A caller that sends it anyway gets a 422 naming the field, from `WriteSchema`
+    # forbidding extras -- NOT the 400 an earlier version of this comment claimed. The
+    # service never sees the key, so it could not have refused it: before extras were
+    # forbidden the request answered 200 with the roster unchanged.
     name: Name | None = None
     description: str | None = None
 
 
-class KTRosterOperative_Create(SQLModel):
+class KTRosterOperative_Create(WriteSchema):
     operative_id: UUID
 
 
-class KTRosterOperative_Update(SQLModel):
+class KTRosterOperative_Update(WriteSchema):
     # Absolute, not a delta, so a retried move is harmless (the reasoning of decision #7).
     # Bounded at the top only: the service raises a 400 for a negative position and that
     # status is tested, where anything past `INT32_MAX` had no refusal at all.

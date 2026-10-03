@@ -71,7 +71,34 @@ def test_every_json_write_schema_bounds_its_strings_and_ints():
     assert _unbounded_write_fields() == UNBOUNDED_TEXT
 
 
-# --- the values themselves, over the wire -----------------------------------
+def test_every_json_write_schema_forbids_an_unknown_key():
+    """`additionalProperties: false` on every request body, published.
+
+    Pydantic ignores unknown keys by default, so a `PATCH {"nmae": "x"}` validated
+    clean, reached the service as `{}` and answered 200 having changed nothing -- a
+    typo indistinguishable from success. Every write schema inherits `WriteSchema`,
+    which forbids extras; this asserts it over the document so a new router that
+    subclasses `SQLModel` directly fails here rather than in production.
+
+    Note `class X(SQLModel, extra="forbid")` is accepted by SQLModel's metaclass and
+    does NOTHING -- `model_config["extra"]` stays `None`. That form would pass a test
+    that only read the class and not the document.
+    """
+    doc = app.openapi()
+    schemas = doc["components"]["schemas"]
+    bodies = {
+        op["requestBody"]["content"]["application/json"]["schema"]["$ref"].split("/")[-1]
+        for spec in doc["paths"].values()
+        for op in spec.values()
+        if isinstance(op, dict) and "application/json" in op.get("requestBody", {}).get("content", {})
+    }
+
+    assert bodies, "no JSON request bodies found -- the routers are not mounted"
+    permissive = {n for n in bodies if schemas[n].get("additionalProperties") is not False}
+    assert permissive == set()
+
+
+# - the values themselves, over the wire -----------------------------------
 
 
 @pytest.mark.parametrize(
