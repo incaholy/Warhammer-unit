@@ -627,8 +627,33 @@ battle's equipment, the actions each operative has used, and the operatives that
 equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#24).
 The game screen doubles as the reference sheet: any operative opens to its full datacard,
 and the team's rules and ploys travel with the game, so a battle needs no catalog call.
-Tac Ops land here too, which is when the team's **archetypes** get scraped and stored —
-they gate the choice, so they are a game concern rather than a catalog one.
+**Tac Ops do NOT land here** — decision #59 withdraws that. Neither they nor the
+archetypes that gate them are scraped (`archetype` appears 0 times in the payload, and
+the scraper fetches only the nav and the per-team pages, so the Tac Ops are on a page it
+has never visited). A Tac Op a player takes is a per-game pick in `KTGame.choices`,
+beside the Accursed Gift, which is #1's line: the tracker records that things exist and
+the players apply what they do.
+
+Three things the design left open are settled before the models:
+
+- **#57** — the equipment allowance is REPORTED, not enforced. A game read carries
+  `equipment_limit` (4) the way `Army_Read` carries `points_limit`, and the fifth piece
+  is accepted. Narrows #17. The per-team override the old deferral waited on does not
+  exist in the pages at all.
+- **#58** — an event's payload names the fields touched with their `before` and `after`,
+  and `undo` writes the `before` back, appends a compensating event and marks the
+  original `undone_by`. Field-scoped rather than whole-row: 40 bytes against 1,129 for a
+  datacard copy, on the most frequent event in a game.
+- **#59** — Tac Ops and archetypes are out of v1, as above.
+
+Two mechanisms here are new to this codebase, which is why K5 is larger than K4: the
+append-only event log with `undo` (#8), and `version` for optimistic concurrency with a
+stale write answering 409 (#9).
+
+One sizing note. A game's snapshot is the roster detail turned into stored JSON, and a
+roster detail measures 24–42 KB (#52), so each game carries roughly that much at rest,
+forever. So `GET /games` is lean the way `GET /rosters` is — 287 bytes a row — and the
+detail is the only route that carries the bundle.
 
 ## K6. Widen to every kill team
 
