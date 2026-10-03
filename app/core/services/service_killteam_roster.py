@@ -252,7 +252,18 @@ class KTRosterService:
         self.session.flush()
 
     def list_roster_operatives(self, roster_id: UUID) -> list[KTRosterOperative]:
-        """The roster's rows in the player's order, with the operative each names."""
+        """The roster's rows in the player's order, with the operative each names.
+
+        **No route reaches this, deliberately.** A roster detail already carries its
+        operatives (decision #52), and a subset route would cost API surface no client
+        has asked for -- `add_operative` and `move_operative` both return the affected
+        row, so a client never has to re-read to stay in step.
+
+        It is here for K5: creating a game copies these rows, one game record per roster
+        row (decision #22), and wants exactly this shape -- the rows in `(position, id)`
+        order with the operative each names eager-loaded -- rather than the detail
+        read's bundle of rules, ploys and two equipment lists.
+        """
         self._require_roster(roster_id)
         statement = (
             select(KTRosterOperative)
