@@ -27,9 +27,10 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlmodel import Session, SQLModel
+from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
+from app.api.fields import INT32_MAX, Name
 from app.api.killteam import (
     KillTeamRule_Read,
     KTEquipment_Read,
@@ -133,14 +134,14 @@ class KTRoster_Read(SQLModel):
 
 class KTRoster_Create(SQLModel):
     kill_team_id: UUID
-    name: str
+    name: Name
     description: str | None = None
 
 
 class KTRoster_Update(SQLModel):
     # `kill_team_id` is absent on purpose: changing it would orphan every operative on
     # the roster. The service rejects it as a 400 if a caller sends it anyway.
-    name: str | None = None
+    name: Name | None = None
     description: str | None = None
 
 
@@ -150,7 +151,9 @@ class KTRosterOperative_Create(SQLModel):
 
 class KTRosterOperative_Update(SQLModel):
     # Absolute, not a delta, so a retried move is harmless (the reasoning of decision #7).
-    position: int
+    # Bounded at the top only: the service raises a 400 for a negative position and that
+    # status is tested, where anything past `INT32_MAX` had no refusal at all.
+    position: int = Field(le=INT32_MAX)
 
 
 def _listed(roster: KTRoster) -> KTRoster_ListRead:

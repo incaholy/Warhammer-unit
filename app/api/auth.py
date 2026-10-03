@@ -9,6 +9,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import EmailStr
 from sqlmodel import Field, Session, SQLModel
 
+from app.api.fields import Username
 from app.api.user import User_Read
 from app.core.db.connection import get_session
 from app.core.security import UnauthorizedError, create_access_token
@@ -18,7 +19,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class Register_Create(SQLModel):
-    username: str = Field(min_length=3)  # non-empty, not trivially short
+    # Bounded at both ends and refused when blank: `min_length=3` alone accepted "   ",
+    # and nothing bounded the top against a `VARCHAR(64)` column.
+    username: Username
     # Format/syntax validation via EmailStr (malformed addresses → 422). This
     # does NOT check deliverability — a valid-but-nonexistent domain still
     # passes; that DNS/MX check is a deferred roadmap item.

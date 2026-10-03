@@ -3094,6 +3094,7 @@
         "properties": {
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "title": "Amount"
           }
         },
@@ -3112,6 +3113,7 @@
           },
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Amount",
             "default": 1
@@ -3144,6 +3146,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "faction_id": {
@@ -3177,7 +3181,9 @@
           "points_limit": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3279,7 +3285,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3325,7 +3333,9 @@
           "points_limit": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3468,6 +3478,7 @@
           },
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Amount",
             "default": 1
@@ -3790,6 +3801,7 @@
         "properties": {
           "position": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "title": "Position"
           }
         },
@@ -3808,6 +3820,8 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
@@ -3990,7 +4004,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -4587,6 +4603,7 @@
         "properties": {
           "username": {
             "type": "string",
+            "maxLength": 64,
             "minLength": 3,
             "title": "Username"
           },
