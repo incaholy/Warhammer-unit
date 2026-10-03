@@ -71,6 +71,8 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 48 | Reading the rows no team owns | One route, `/kill-team/universal`, carrying both the universal ploy and the universal equipment list | They are one concept — the rows with `kill_team_id` NULL — and one thing a client wants: fetch once, keep for the session, use with every team. Folding them into each team detail instead would add 8 KB to every response (a third again on a median team) and re-send it on every team view, to save a call that happens once per GAME |
 | 49 | Proving the catalog takes no writes | A test over `app.openapi()` asserting no `/kill-team` path declares any method but `get` | #21 says there is no write route at all, and until now nothing checked it. One assertion that cannot be outgrown by new routes, rather than a 405 test per path — the likely failure is a later slice mirroring the 40k routers, which are ~80% write code, and adding a `POST` nobody questions |
 
+| 50 | A roster row is ONE operative | `KTRosterOperative` carries no `amount`: taking two Warriors is two rows, each with its own `position`. So **no** `UNIQUE(roster_id, operative_id)`, add APPENDS rather than 409ing on a repeat, and a row is addressed by its own id rather than by the operative it points at — three deliberate divergences from the `ArmyUnit` it otherwise mirrors | An `amount` works in 40k because a unit is a GROUP you move and shoot as one. A Kill Team operative is an individual: it activates, takes wounds, holds its order and its tokens separately, and in a game each one will have its own stats to track. `{operative: Warrior, amount: 2}` cannot answer "which of my two Warriors is on 4 wounds?". Two decisions already made need it too: #19 transforms an operative IN PLACE, keeping its id, tokens, order and board status while its catalog pointer moves — which is only expressible if a row is one operative — and #22 snapshots the whole datacard per operative, which is one snapshot per row under this shape and a duplicating loop under an `amount`. The roster row and the game row correspond one to one, so K5 copies rather than expands |
+
 Build order and status are tracked in ROADMAP.md (K1–K6), not here.
 
 ## Separation from the 40k army list builder
@@ -296,12 +298,15 @@ Kill teams are grouped by a flat faction list of their own, one level deep:
 
 Mirrors `Army`.
 
-- `KTRoster` (owner, kill team, name) and `KTRosterOperative`. **No
-  `KTRosterEquipment`**: equipment is chosen per GAME, not per roster (decision #17), so
-  a roster that held it would mean "a roster for one battle".
+- `KTRoster` (owner, kill team, name) and `KTRosterOperative` — **one row per
+  operative**, no `amount` (decision #50), because each one has its own stats to track
+  once a game starts. **No `KTRosterEquipment`**: equipment is chosen per GAME, not per
+  roster (decision #17), so a roster that held it would mean "a roster for one battle".
 - Under `/api/v1/me/kill-team/rosters/...`; add is create-only (409 on repeat),
-  PATCH for changes. Ownership is checked the way `Army` checks it — a roster you do not
-  own 404s rather than 403s, so its existence is not disclosed.
+  PATCH for changes — except that **add appends** and a row is addressed by its own id,
+  since two rows may name the same operative (decision #50). Ownership is checked the way
+  `Army` checks it — a roster you do not own 404s rather than 403s, so its existence is
+  not disclosed.
 - **No `validate`.** A roster offers every operative of its kill team and nothing narrows
   that: composition is the page's own words shown beside the roster, never a rule the
   catalog applies (decisions #28, #44). So there is nothing to report, and that is what
