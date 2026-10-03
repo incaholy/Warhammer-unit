@@ -3011,6 +3011,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
@@ -3054,7 +3056,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -4663,6 +4667,8 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           }
         },
@@ -4768,40 +4774,58 @@
           },
           "unit_name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Unit Name"
           },
           "movement": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Movement"
           },
           "toughness": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Toughness"
           },
           "armor_save": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Armor Save"
           },
           "wounds": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Wounds"
           },
           "leadership": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Leadership"
           },
           "objective_control": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Objective Control"
           },
           "points": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Points"
           },
           "invulnerable_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -4964,7 +4988,9 @@
           "unit_name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -4999,7 +5025,9 @@
           "movement": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5010,7 +5038,9 @@
           "toughness": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5021,7 +5051,9 @@
           "armor_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5032,7 +5064,9 @@
           "wounds": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5043,7 +5077,9 @@
           "invulnerable_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5054,7 +5090,9 @@
           "leadership": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5065,7 +5103,9 @@
           "objective_control": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5076,7 +5116,9 @@
           "points": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5288,36 +5330,52 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "category": {
             "type": "string",
+            "maxLength": 8,
+            "minLength": 1,
             "title": "Category"
           },
           "attacks": {
             "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
             "title": "Attacks"
           },
           "weapon_skill": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Weapon Skill"
           },
           "strength": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Strength"
           },
           "armor_piercing": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Armor Piercing"
           },
           "damage": {
             "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
             "title": "Damage"
           },
           "range_inches": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5426,7 +5484,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -5437,7 +5497,9 @@
           "category": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 8,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -5448,7 +5510,9 @@
           "attacks": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 16,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -5459,7 +5523,9 @@
           "weapon_skill": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5470,7 +5536,9 @@
           "strength": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5481,7 +5549,9 @@
           "armor_piercing": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5492,7 +5562,9 @@
           "damage": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 16,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -5503,7 +5575,9 @@
           "range_inches": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"

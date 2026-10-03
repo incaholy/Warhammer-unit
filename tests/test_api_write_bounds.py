@@ -12,9 +12,9 @@ tiers, so these tests mean the same thing in either one.
 
 `test_every_json_write_schema_bounds_its_strings_and_ints` is the load-bearing one. It
 asserts the set of unbounded fields EXACTLY, so it fails in both directions -- a new
-router with a bare `str` fails it, and so does bounding one of the known ones without
-striking it from the list. The list is the remaining work, in code rather than in a
-comment nobody reads.
+router with a bare `str` fails it, and so does bounding a listed field without striking
+it from the list. It earned that second direction immediately: it failed when the 40k
+admin schemas were bounded in the following commit, which is the point.
 """
 
 import pytest
@@ -26,7 +26,8 @@ ARMIES = "/api/v1/me/armies"
 ROSTERS = "/api/v1/me/kill-team/rosters"
 
 # Fields backed by an unbounded `TEXT` column, so there is no column limit to restate.
-# A roster or army description is free-form prose and deliberately has no ceiling.
+# A description is free-form prose and deliberately has no ceiling. This is the whole
+# remainder: every other string and int in every JSON request body is bounded.
 UNBOUNDED_TEXT = {
     "Ability_Create.description",
     "Ability_Update.description",
@@ -34,51 +35,6 @@ UNBOUNDED_TEXT = {
     "Army_Update.description",
     "KTRoster_Create.description",
     "KTRoster_Update.description",
-}
-
-# The 40k catalog's ADMIN write schemas, which have the same gap and are not yet fixed:
-# every one of these is a 500 on Postgres for an over-long string or an out-of-range
-# int. They need `get_current_admin`, so they are not reachable by an ordinary player,
-# which is the only reason they were left for a separate pass. Striking one from this
-# set without bounding it will fail this test.
-UNBOUNDED_ADMIN = {
-    "Ability_Create.name",
-    "Ability_Update.name",
-    "Subfaction_Create.name",
-    "Unit_Create.unit_name",
-    "Unit_Create.movement",
-    "Unit_Create.toughness",
-    "Unit_Create.armor_save",
-    "Unit_Create.wounds",
-    "Unit_Create.leadership",
-    "Unit_Create.objective_control",
-    "Unit_Create.points",
-    "Unit_Create.invulnerable_save",
-    "Unit_Update.unit_name",
-    "Unit_Update.movement",
-    "Unit_Update.toughness",
-    "Unit_Update.armor_save",
-    "Unit_Update.wounds",
-    "Unit_Update.invulnerable_save",
-    "Unit_Update.leadership",
-    "Unit_Update.objective_control",
-    "Unit_Update.points",
-    "Weapon_Create.name",
-    "Weapon_Create.category",
-    "Weapon_Create.attacks",
-    "Weapon_Create.weapon_skill",
-    "Weapon_Create.strength",
-    "Weapon_Create.armor_piercing",
-    "Weapon_Create.damage",
-    "Weapon_Create.range_inches",
-    "Weapon_Update.name",
-    "Weapon_Update.category",
-    "Weapon_Update.attacks",
-    "Weapon_Update.weapon_skill",
-    "Weapon_Update.strength",
-    "Weapon_Update.armor_piercing",
-    "Weapon_Update.damage",
-    "Weapon_Update.range_inches",
 }
 
 
@@ -112,26 +68,7 @@ def _unbounded_write_fields() -> set[str]:
 
 
 def test_every_json_write_schema_bounds_its_strings_and_ints():
-    assert _unbounded_write_fields() == UNBOUNDED_TEXT | UNBOUNDED_ADMIN
-
-
-def test_the_player_facing_write_schemas_have_no_unbounded_field_left():
-    # The half of the above that this pass fixed, named separately so the remaining
-    # admin work cannot quietly re-open it: nothing a logged-in NON-admin can POST.
-    player_facing = {
-        "Army_Create",
-        "Army_Update",
-        "ArmyUnitAdd",
-        "AmountSet",
-        "InventoryAdd",
-        "KTRoster_Create",
-        "KTRoster_Update",
-        "KTRosterOperative_Create",
-        "KTRosterOperative_Update",
-        "Register_Create",
-    }
-    leaks = {f for f in _unbounded_write_fields() if f.split(".")[0] in player_facing}
-    assert leaks == {f for f in UNBOUNDED_TEXT if f.split(".")[0] in player_facing}
+    assert _unbounded_write_fields() == UNBOUNDED_TEXT
 
 
 # --- the values themselves, over the wire -----------------------------------
@@ -242,3 +179,70 @@ def test_a_username_must_be_present_and_fit_the_column(client, username):
     )
 
     assert resp.status_code == 422
+
+
+# --- the admin half of the catalog, bounded the same way --------------------
+
+
+@pytest.mark.parametrize("value", ["x" * 129, "", "   "], ids=["too-long", "empty", "spaces"])
+def test_a_unit_name_must_be_present_and_fit_the_column(admin_client, make_faction, value):
+    faction = make_faction()
+    body = {
+        "faction_id": str(faction.id),
+        "unit_name": value,
+        "movement": 6,
+        "toughness": 4,
+        "armor_save": 3,
+        "wounds": 2,
+        "leadership": 6,
+        "objective_control": 2,
+        "points": 80,
+    }
+
+    assert admin_client.post("/api/v1/units", json=body).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "stat",
+    ["movement", "toughness", "armor_save", "wounds", "leadership", "objective_control", "points"],
+)
+def test_a_unit_stat_is_bounded_at_both_ends(admin_client, make_faction, stat):
+    faction = make_faction()
+    body = {
+        "faction_id": str(faction.id),
+        "unit_name": "Intercessor",
+        "movement": 6,
+        "toughness": 4,
+        "armor_save": 3,
+        "wounds": 2,
+        "leadership": 6,
+        "objective_control": 2,
+        "points": 80,
+    }
+
+    # A negative stat reached `ck_unit_stats_non_negative` and surfaced as a 409.
+    assert admin_client.post("/api/v1/units", json={**body, stat: -1}).status_code == 422
+    assert admin_client.post("/api/v1/units", json={**body, stat: INT32_MAX + 1}).status_code == 422
+
+
+def test_a_weapon_stat_and_its_dice_notation_are_bounded(admin_client):
+    body = {
+        "name": "Bolt rifle",
+        "category": "range",
+        "attacks": "2",
+        "weapon_skill": 3,
+        "strength": 4,
+        "armor_piercing": 1,
+        "damage": "1",
+        "range_inches": 24,
+    }
+
+    assert admin_client.post("/api/v1/weapons", json=body).status_code == 201
+    assert admin_client.post("/api/v1/weapons", json={**body, "strength": -1}).status_code == 422
+    assert admin_client.post("/api/v1/weapons", json={**body, "damage": "D" * 17}).status_code == 422
+    assert admin_client.post("/api/v1/weapons", json={**body, "attacks": "  "}).status_code == 422
+    assert admin_client.post("/api/v1/weapons", json={**body, "category": "x" * 9}).status_code == 422
+    # `category` keeps its SERVICE-raised 400 for a wrong-but-short value: the schema
+    # bounds the length, the service validates the value, and that status is pinned by
+    # `test_create_weapon_invalid_category_returns_400`.
+    assert admin_client.post("/api/v1/weapons", json={**body, "category": "thrown"}).status_code == 400

@@ -20,7 +20,7 @@ reported as a 409, as though it conflicted with another resource — so it gains
 
 from typing import Annotated
 
-from pydantic import AfterValidator, StringConstraints
+from pydantic import AfterValidator, Field, StringConstraints
 
 #: The largest value a Postgres `integer` column holds. Above it, psycopg raises
 #: `NumericValueOutOfRange` mid-flush, which is a `DataError` rather than a `CodedError`
@@ -50,3 +50,21 @@ Name = Annotated[str, StringConstraints(min_length=1, max_length=128), AfterVali
 
 #: A username: `VARCHAR(64)`, with the floor of 3 that `Register_Create` already had.
 Username = Annotated[str, StringConstraints(min_length=3, max_length=64), AfterValidator(_not_blank)]
+
+#: A datasheet stat: an `INTEGER` column under a `>= 0` CHECK, so both ends are the
+#: database's own rule restated. Negative stats reached `ck_unit_stats_non_negative` or
+#: `ck_weapon_stats_non_negative` and surfaced as a 409, the same mis-mapping
+#: `points_limit` had -- bad input reported as a conflict with another resource.
+Stat = Annotated[int, Field(ge=0, le=INT32_MAX)]
+
+#: A 40k value that may be dice notation rather than a number: `attacks` is "3" or "D6",
+#: `damage` is "1" or "2D3". `VARCHAR(16)`. Whether the notation PARSES is the service's
+#: business; this only bounds the length.
+DiceValue = Annotated[str, StringConstraints(min_length=1, max_length=16), AfterValidator(_not_blank)]
+
+#: `weapons.category`: `VARCHAR(8)` under `ck_weapon_category`, which allows exactly
+#: "range" and "melee". Deliberately NOT a `Literal` of those two: the service already
+#: validates the value and answers 400, and
+#: `test_create_weapon_invalid_category_returns_400` pins that status. This bounds the
+#: length so an over-long value cannot reach the column instead.
+WeaponCategory = Annotated[str, StringConstraints(min_length=1, max_length=8), AfterValidator(_not_blank)]
