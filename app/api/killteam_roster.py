@@ -83,7 +83,7 @@ class KTRoster_ListRead(SQLModel):
     decision #46 ("a read names a parent by id, never a copy of its name"). #46 is
     about the catalog, where a client holds the faction listing anyway; a player's own
     roster list should not require fetching the catalog to render "Raveners, Tyranids".
-    Deliberately NOT the operatives: a detail read is 20-36 KB (#52), so a page of
+    Deliberately NOT the operatives: a detail read is 24-42 KB (#52), so a page of
     fifty would be megabytes to answer what the name already answers.
     """
 

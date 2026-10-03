@@ -154,7 +154,7 @@ class KillTeam_Detail(SQLModel):
 
     One request rather than several, because operatives are reachable only nested and
     a game snapshots the team's rules, its ploys and every datacard anyway (#24). Measured
-    over the served responses: 17 KB to 47 KB, median 24 KB, each in nine queries flat.
+    over the served responses: 16 KB to 46 KB, median 24 KB, each in nine queries flat.
     """
 
     id: UUID

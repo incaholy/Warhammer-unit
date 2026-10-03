@@ -576,7 +576,7 @@ Six routes:
 |---|---|
 | `GET /kill-team/factions` | the 22 factions, paged |
 | `GET /kill-team/teams` | the 48 teams, paged, `?faction_id=` |
-| `GET /kill-team/teams/{id}` | one team whole — 17–47 KB, median 24, in nine queries flat |
+| `GET /kill-team/teams/{id}` | one team whole — 16–46 KB, median 24, in nine queries flat |
 | `GET /kill-team/teams/{id}/composition` | its printed rules alone, unpaginated |
 | `GET /kill-team/operatives` | operatives across teams, paged, `?kill_team_id=` and `?keyword=` |
 | `GET /kill-team/universal` | the ploy and equipment list no team owns, unpaginated (#48) |
@@ -601,8 +601,9 @@ whenever the composition is replaced.
 `Army`. Eight routes: CRUD on a roster, then append, move and remove on the operatives
 in it. The catalog half of the API takes no writes at all (#21) and this is the half a
 player writes — one assertion over the published document holds that line now that both
-are mounted. A roster listing is 288 bytes where its detail is 26 KB, because the listing
-carries a name, a kill team and a faction and the detail carries #52's whole bundle.
+are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
+the listing carries a name, a kill team and a faction and the detail carries #52's
+whole bundle.
 Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
 since the rules pick it per battle. A roster offers **every operative of its kill team**
 and nothing narrows that: composition is the page's words shown beside the roster, never

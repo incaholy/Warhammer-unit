@@ -3912,7 +3912,7 @@
           "faction_name"
         ],
         "title": "KTRoster_ListRead",
-        "description": "A row of the roster listing: enough to choose one, and nothing heavier.\n\nCarries the kill team's NAME and its faction's, which is a deliberate exception to\ndecision #46 (\"a read names a parent by id, never a copy of its name\"). #46 is\nabout the catalog, where a client holds the faction listing anyway; a player's own\nroster list should not require fetching the catalog to render \"Raveners, Tyranids\".\nDeliberately NOT the operatives: a detail read is 20-36 KB (#52), so a page of\nfifty would be megabytes to answer what the name already answers."
+        "description": "A row of the roster listing: enough to choose one, and nothing heavier.\n\nCarries the kill team's NAME and its faction's, which is a deliberate exception to\ndecision #46 (\"a read names a parent by id, never a copy of its name\"). #46 is\nabout the catalog, where a client holds the faction listing anyway; a player's own\nroster list should not require fetching the catalog to render \"Raveners, Tyranids\".\nDeliberately NOT the operatives: a detail read is 24-42 KB (#52), so a page of\nfifty would be megabytes to answer what the name already answers."
       },
       "KTRoster_Read": {
         "properties": {
@@ -4249,7 +4249,7 @@
           "faction_id"
         ],
         "title": "KillTeam_Detail",
-        "description": "A team whole: everything a reader of its page would see (decision #47).\n\nOne request rather than several, because operatives are reachable only nested and\na game snapshots the team's rules, its ploys and every datacard anyway (#24). Measured\nover the served responses: 17 KB to 47 KB, median 24 KB, each in nine queries flat."
+        "description": "A team whole: everything a reader of its page would see (decision #47).\n\nOne request rather than several, because operatives are reachable only nested and\na game snapshots the team's rules, its ploys and every datacard anyway (#24). Measured\nover the served responses: 16 KB to 46 KB, median 24 KB, each in nine queries flat."
       },
       "KillTeam_Read": {
         "properties": {

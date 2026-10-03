@@ -100,10 +100,11 @@ class KTRosterService:
         their datacards, and the team's rules, ploys and equipment. It is what a player
         has in front of them while building and then playing.
 
-        Eager-loaded throughout, in a flat number of queries whatever the roster's size.
-        Lazily, each operative's weapons and abilities would be two queries per ROW --
-        and a detail read is the one place that cost would land, since the listing
-        deliberately carries none of this.
+        Eager-loaded throughout, in a flat number of queries whatever the roster's size:
+        measured at 13 for 1, 5, 10 and 20 operatives alike (10 for an empty roster,
+        where the operative loads have nothing to run against). Lazily, each operative's
+        weapons and abilities would be two queries per ROW -- and a detail read is the one
+        place that cost would land, since the listing deliberately carries none of this.
 
         Whether the CALLER may see it is the router's business: `get_owned_roster`
         answers that, and 404s rather than 403s so existence is not disclosed.
@@ -136,7 +137,7 @@ class KTRosterService:
         so paging is stable.
 
         Deliberately NOT the operatives, and so not their datacards either. A listing
-        answers "which rosters do I have?", and a roster's detail read is 20-36 KB
+        answers "which rosters do I have?", and a roster's detail read is 24-42 KB
         (decision #52) -- a page of fifty of those is megabytes to answer a question the
         name and the team already answer. The team's faction comes along because that is
         how a team is named to a reader ("Raveners, Tyranids"), and one more query for

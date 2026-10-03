@@ -344,6 +344,31 @@ One router module per resource; each is backed by one service and defines its
 own request/response schemas (`*_Create`, `*_Read`) so internal model fields
 aren't exposed accidentally. All ids in paths and schemas are UUIDs.
 
+**Every write schema inherits `WriteSchema` from `app/api/fields.py`, and every
+string and int in one is bounded.** Both halves of that exist because the default
+behaviour is wrong in a way nothing catches:
+
+- `WriteSchema` sets `extra="forbid"`, so an unknown key is a **422** naming the
+  field. Pydantic ignores unknown keys by default, so `PATCH {"nmae": "x"}` used to
+  validate clean, reach the service as `{}`, change nothing and answer **200** — a
+  typo indistinguishable from success. Set via `model_config`: the class-keyword form
+  `class X(SQLModel, extra="forbid")` is accepted by SQLModel's metaclass and silently
+  does nothing.
+- A SQLModel `Field(max_length=128)` constrains the generated DDL, **not** the
+  Pydantic schema the router validates against. So an over-long string or an
+  out-of-range int passed validation and came back from Postgres as an unhandled
+  **500** (`StringDataRightTruncation`, `NumericValueOutOfRange` — neither is a
+  `CodedError`, so neither is mapped). SQLite accepts both, so the default test tier
+  is blind to it. `fields.py` restates each column's own limit — `Name`, `Username`,
+  `Stat`, `DiceValue`, `WeaponCategory`, `INT32_MAX` — and the rule is that the schema
+  always bounds the top and bounds the bottom only where nothing else already does, so
+  a tested service-raised 400 is not quietly replaced by a 422.
+
+`tests/test_api_write_bounds.py` asserts both over the published `openapi.json`
+rather than per schema, and asserts the set of deliberately unbounded fields
+*exactly* — six `description` columns, which are genuinely `TEXT` — so a new router
+with a bare `str` fails there rather than in production.
+
 Every resource router mounts under a versioned `/api/v1` parent (ROADMAP R5), so
 the paths below are served at `/api/v1/…`; `GET /health` stays unversioned at the
 root. A future breaking change ships as `/api/v2` without breaking existing clients.
@@ -358,6 +383,8 @@ Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 | `app/api/user.py` | — (current user via JWT) | `GET /me` |
 | `app/api/inventory.py` | `InventoryService` | the current user's inventory (`/me/inventory`) |
 | `app/api/army.py` | `ArmyService` | the current user's armies (`/me/armies`) |
+| `app/api/killteam.py` | `KillTeamService` | the Kill Team catalog (`/kill-team`), read-only — see KILLTEAM.md |
+| `app/api/killteam_roster.py` | `KTRosterService` | the current user's kill team rosters (`/me/kill-team/rosters`) — see KILLTEAM.md |
 
 Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
 → **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,

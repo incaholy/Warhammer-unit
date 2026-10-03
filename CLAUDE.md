@@ -40,6 +40,12 @@ pytest                               # run tests (once tests/ exists)
   `app/main.py` registers **one** handler, against `CodedError`, so a new error
   class is mapped to its status automatically — there is no registry to update.
   Never raise `HTTPException` in a service.
+- Every `*_Create`/`*_Update` schema inherits `WriteSchema` (`app/api/fields.py`),
+  which forbids unknown keys, and bounds every string and int it declares — reusing
+  `Name`, `Username`, `Stat`, `DiceValue` or `INT32_MAX` rather than restating a
+  limit. A SQLModel `max_length` constrains the DDL, not the request schema, so an
+  unbounded field is a 500 on Postgres that SQLite cannot see.
+  `tests/test_api_write_bounds.py` enforces both over `openapi.json`.
 - Schema changes go through `models.py` + an Alembic migration, never raw SQL.
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `armor_save`, `wounds`, `leadership`,
