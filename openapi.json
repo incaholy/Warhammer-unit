@@ -2562,6 +2562,433 @@
           }
         }
       }
+    },
+    "/api/v1/me/kill-team/rosters": {
+      "post": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Create Roster",
+        "description": "A new, empty roster. 409 if the player already has one by that name.",
+        "operationId": "create_roster_api_v1_me_kill_team_rosters_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRoster_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "List Rosters",
+        "description": "The caller's rosters, oldest first. Only ever the caller's.",
+        "operationId": "list_rosters_api_v1_me_kill_team_rosters_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTRoster_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}": {
+      "get": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Get Roster",
+        "operationId": "get_roster_api_v1_me_kill_team_rosters__roster_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Update Roster",
+        "operationId": "update_roster_api_v1_me_kill_team_rosters__roster_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRoster_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Delete Roster",
+        "operationId": "delete_roster_api_v1_me_kill_team_rosters__roster_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}/operatives": {
+      "post": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Add Operative",
+        "description": "Append one operative. A repeat is a second operative, not a 409.\n\nThe armies router's equivalent is create-only, because an incrementing add is not\nretry-safe. There is no quantity here (decision #50), so a retried add appends --\nwhich is a real outcome, and a caller that did not mean it removes the extra row.",
+        "operationId": "add_operative_api_v1_me_kill_team_rosters__roster_id__operatives_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRosterOperative_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRosterOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}/operatives/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Move Operative",
+        "description": "Set a row's position. Addressed by the ROW's id, not the operative's.",
+        "operationId": "move_operative_api_v1_me_kill_team_rosters__roster_id__operatives__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRosterOperative_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRosterOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Remove Operative",
+        "operationId": "remove_operative_api_v1_me_kill_team_rosters__roster_id__operatives__row_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3321,6 +3748,271 @@
         ],
         "title": "KTPloy_Read"
       },
+      "KTRosterOperative_Create": {
+        "properties": {
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operative_id"
+        ],
+        "title": "KTRosterOperative_Create"
+      },
+      "KTRosterOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "operative": {
+            "$ref": "#/components/schemas/KTOperative_Read"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "operative"
+        ],
+        "title": "KTRosterOperative_Read",
+        "description": "One operative on the roster: the row's own id, its place, and the datacard.\n\nThe row id and not the operative's, because two rows may name the same operative\n(decision #50) \u2014 it is what `PATCH`/`DELETE` address."
+      },
+      "KTRosterOperative_Update": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "title": "KTRosterOperative_Update"
+      },
+      "KTRoster_Create": {
+        "properties": {
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kill_team_id",
+          "name"
+        ],
+        "title": "KTRoster_Create"
+      },
+      "KTRoster_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name"
+        ],
+        "title": "KTRoster_ListRead",
+        "description": "A row of the roster listing: enough to choose one, and nothing heavier.\n\nCarries the kill team's NAME and its faction's, which is a deliberate exception to\ndecision #46 (\"a read names a parent by id, never a copy of its name\"). #46 is\nabout the catalog, where a client holds the faction listing anyway; a player's own\nroster list should not require fetching the catalog to render \"Raveners, Tyranids\".\nDeliberately NOT the operatives: a detail read is 20-36 KB (#52), so a page of\nfifty would be megabytes to answer what the name already answers."
+      },
+      "KTRoster_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTRosterOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeamRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "universal_ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Universal Ploys",
+            "default": []
+          },
+          "universal_equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Universal Equipment",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name"
+        ],
+        "title": "KTRoster_Read",
+        "description": "A roster whole, as decision #52 specifies it.\n\nThe player's operatives with their datacards, then everything that applies while\nplaying them: the team's rules, its ploys, its equipment, and the two collections\nthat belong to no team. The equipment lists are the POOL a game chooses from \u2014 the\nchoice itself is per game (#17), so a roster holds no equipment of its own."
+      },
+      "KTRoster_Update": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "title": "KTRoster_Update"
+      },
       "KTSelectionRule_Read": {
         "properties": {
           "id": {
@@ -3704,6 +4396,37 @@
           "offset"
         ],
         "title": "Page[KTOperative_ListRead]"
+      },
+      "Page_KTRoster_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTRoster_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTRoster_ListRead]"
       },
       "Page_KillTeam_Read_": {
         "properties": {

@@ -95,8 +95,16 @@ class KTRosterService:
     def get_roster(self, roster_id: UUID) -> KTRoster:
         """One roster with its operatives and their datacards.
 
-        Eager-loaded two levels down, because a roster read embeds each operative's
-        weapons and abilities (decision #52) and lazily that is two queries per row.
+        Everything decision #52 says a roster read carries, minus the two universal lists,
+        which belong to no team and are read separately: the roster's operatives with
+        their datacards, and the team's rules, ploys and equipment. It is what a player
+        has in front of them while building and then playing.
+
+        Eager-loaded throughout, in a flat number of queries whatever the roster's size.
+        Lazily, each operative's weapons and abilities would be two queries per ROW --
+        and a detail read is the one place that cost would land, since the listing
+        deliberately carries none of this.
+
         Whether the CALLER may see it is the router's business: `get_owned_roster`
         answers that, and 404s rather than 403s so existence is not disclosed.
         """
@@ -104,7 +112,10 @@ class KTRosterService:
             select(KTRoster)
             .where(KTRoster.id == roster_id)
             .options(
-                selectinload(KTRoster.kill_team),  # type: ignore[arg-type]
+                selectinload(KTRoster.kill_team).selectinload(KillTeam.faction),  # type: ignore[arg-type]
+                selectinload(KTRoster.kill_team).selectinload(KillTeam.rules),  # type: ignore[arg-type]
+                selectinload(KTRoster.kill_team).selectinload(KillTeam.ploys),  # type: ignore[arg-type]
+                selectinload(KTRoster.kill_team).selectinload(KillTeam.equipment),  # type: ignore[arg-type]
                 selectinload(KTRoster.operatives)  # type: ignore[arg-type]
                 .selectinload(KTRosterOperative.operative)
                 .selectinload(KTOperative.weapons),

@@ -83,6 +83,52 @@ def test_reading_a_roster_brings_its_operatives_and_their_datacards(
     assert loaded.kill_team.name
 
 
+def test_a_detail_read_carries_the_teams_reference_too(
+    session, make_kt_roster, make_kill_team_rule, make_kt_ploy, make_kt_equipment
+):
+    # Decision #52: the team's rules, ploys and equipment travel with the roster, because
+    # they are what applies while playing it. The two UNIVERSAL lists belong to no team
+    # and are read separately -- the router joins them on.
+    roster = make_kt_roster()
+    make_kill_team_rule(kill_team=roster.kill_team, name="Burrow")
+    make_kt_ploy(kill_team=roster.kill_team, name="TUNNEL")
+    make_kt_equipment(kill_team=roster.kill_team, name="SPORE")
+    roster_id = roster.id
+    session.expunge_all()
+
+    loaded = _service(session).get_roster(roster_id)
+
+    assert [r.name for r in loaded.kill_team.rules] == ["Burrow"]
+    assert [p.name for p in loaded.kill_team.ploys] == ["TUNNEL"]
+    assert [e.name for e in loaded.kill_team.equipment] == ["SPORE"]
+    assert loaded.kill_team.faction.name
+
+
+def test_a_detail_read_is_usable_once_the_session_is_done_with_it(
+    session, make_kt_roster, make_kt_operative, make_kt_weapon, make_kill_team_rule
+):
+    # A query count cannot catch a missing eager load on a direct collection -- lazy and
+    # eager both cost one query there. What matters is that a router can serialise the
+    # object after the request's session has let go of it.
+    roster = make_kt_roster()
+    make_kill_team_rule(kill_team=roster.kill_team, name="Burrow")
+    for name in ("One", "Two"):
+        operative = make_kt_operative(kill_team=roster.kill_team, name=name)
+        make_kt_weapon(operative=operative, name=f"{name}'s blade")
+        _service(session).add_operative(roster.id, operative.id)
+    roster_id = roster.id
+    session.expunge_all()
+
+    loaded = _service(session).get_roster(roster_id)
+    session.expunge(loaded)  # as a closed request-scoped session would leave it
+
+    assert [row.operative.name for row in loaded.operatives] == ["One", "Two"]
+    assert all(row.operative.weapons for row in loaded.operatives)
+    assert all(row.operative.abilities == [] for row in loaded.operatives)
+    assert [r.name for r in loaded.kill_team.rules] == ["Burrow"]
+    assert loaded.kill_team.faction.name
+
+
 def test_reading_a_roster_that_does_not_exist_is_a_not_found(session):
     with pytest.raises(NotFoundError):
         _service(session).get_roster(uuid.uuid4())

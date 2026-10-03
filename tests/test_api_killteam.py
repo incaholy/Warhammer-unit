@@ -20,7 +20,12 @@ def test_the_kill_team_catalog_publishes_no_writes():
     # Asserted over the published document rather than per path, so a route added later
     # cannot slip past it -- and the frontend generates its types from this same file.
     doc = app.openapi()
-    kill_team_paths = {path: spec for path, spec in doc["paths"].items() if "/kill-team" in path}
+    # `startswith`, not a substring: `/api/v1/me/kill-team/rosters` also contains
+    # "/kill-team" and is SUPPOSED to accept writes, so a loose filter would sweep the
+    # roster routes into this assertion and fail the moment they were mounted.
+    kill_team_paths = {
+        path: spec for path, spec in doc["paths"].items() if path.startswith("/api/v1/kill-team")
+    }
 
     assert kill_team_paths, "the router is not mounted"
     for path, spec in kill_team_paths.items():
