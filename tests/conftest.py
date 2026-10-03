@@ -465,8 +465,9 @@ def make_kt_roster_operative(session, make_kt_roster, make_kt_operative):
         row = KTRosterOperative(
             roster_id=roster.id,
             operative_id=operative.id,
-            # Carried so both composite foreign keys can reach their parents through it.
+            # Carried so both composite foreign keys can reach their parents through them.
             kill_team_id=roster.kill_team_id,
+            owner_user_id=roster.owner_user_id,
             **overrides,
         )
         session.add(row)

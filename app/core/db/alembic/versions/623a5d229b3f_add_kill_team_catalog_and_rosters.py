@@ -1,8 +1,8 @@
 """add kill team catalog and rosters
 
-Revision ID: 566aa63606da
+Revision ID: 623a5d229b3f
 Revises: 44441c6a9671
-Create Date: 2026-10-02 18:30:28.293908
+Create Date: 2026-10-03 15:37:11.577044
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '566aa63606da'
+revision: str = '623a5d229b3f'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -128,7 +128,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ),
     sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('kill_team_id', 'id', name='uq_kt_roster_team_id')
+    sa.UniqueConstraint('owner_user_id', 'kill_team_id', 'id', name='uq_kt_roster_owner_team_id')
     )
     op.create_index(op.f('ix_kt_rosters_kill_team_id'), 'kt_rosters', ['kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_rosters_owner_user_id'), 'kt_rosters', ['owner_user_id'], unique=False)
@@ -173,14 +173,16 @@ def upgrade() -> None:
     sa.Column('roster_id', sa.Uuid(), nullable=False),
     sa.Column('operative_id', sa.Uuid(), nullable=False),
     sa.Column('kill_team_id', sa.Uuid(), nullable=False),
+    sa.Column('owner_user_id', sa.Uuid(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
     sa.CheckConstraint('position >= 0', name='ck_kt_roster_operative_position'),
     sa.ForeignKeyConstraint(['kill_team_id', 'operative_id'], ['kt_operatives.kill_team_id', 'kt_operatives.id'], name='fk_kt_roster_operative_operative'),
-    sa.ForeignKeyConstraint(['kill_team_id', 'roster_id'], ['kt_rosters.kill_team_id', 'kt_rosters.id'], name='fk_kt_roster_operative_roster', ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['owner_user_id', 'kill_team_id', 'roster_id'], ['kt_rosters.owner_user_id', 'kt_rosters.kill_team_id', 'kt_rosters.id'], name='fk_kt_roster_operative_roster', ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_kt_roster_operatives_kill_team_id'), 'kt_roster_operatives', ['kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_roster_operatives_operative_id'), 'kt_roster_operatives', ['operative_id'], unique=False)
+    op.create_index(op.f('ix_kt_roster_operatives_owner_user_id'), 'kt_roster_operatives', ['owner_user_id'], unique=False)
     op.create_index(op.f('ix_kt_roster_operatives_roster_id'), 'kt_roster_operatives', ['roster_id'], unique=False)
     op.create_table('kt_weapons',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -214,6 +216,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_kt_weapons_operative_id'), table_name='kt_weapons')
     op.drop_table('kt_weapons')
     op.drop_index(op.f('ix_kt_roster_operatives_roster_id'), table_name='kt_roster_operatives')
+    op.drop_index(op.f('ix_kt_roster_operatives_owner_user_id'), table_name='kt_roster_operatives')
     op.drop_index(op.f('ix_kt_roster_operatives_operative_id'), table_name='kt_roster_operatives')
     op.drop_index(op.f('ix_kt_roster_operatives_kill_team_id'), table_name='kt_roster_operatives')
     op.drop_table('kt_roster_operatives')

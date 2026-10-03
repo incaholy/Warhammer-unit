@@ -531,9 +531,11 @@ class KTRoster(TimestampMixin, table=True):
     __tablename__ = "kt_rosters"
     __table_args__ = (
         # Redundant to the primary key, and there for `KTRosterOperative`'s composite
-        # foreign key: it is what makes "this operative belongs to this roster's kill
-        # team" a thing the database can check rather than a service remembering to.
-        UniqueConstraint("kill_team_id", "id", name="uq_kt_roster_team_id"),
+        # foreign key to point at: a target must be provably unique. It carries the
+        # OWNER as well as the kill team, which is what makes both "this operative
+        # belongs to this roster's kill team" and "this row belongs to the player who
+        # owns the roster" things the database checks rather than a service remembering to.
+        UniqueConstraint("owner_user_id", "kill_team_id", "id", name="uq_kt_roster_owner_team_id"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -573,18 +575,37 @@ class KTRosterOperative(TimestampMixin, table=True):
     So there is **no** `UNIQUE(roster_id, operative_id)`: a repeat is legitimate, add
     appends, and a row is addressed by its own id.
 
-    `kill_team_id` is carried so the two composite foreign keys below can reach both
-    parents through it, which is what makes a roster holding ANOTHER team's operative
+    `kill_team_id` and `owner_user_id` are carried so the two composite foreign keys
+    below can reach their parents through them. That is what makes a roster holding
+    ANOTHER team's operative, or a row sitting in ANOTHER player's roster,
     unrepresentable rather than merely checked.
+
+    What `owner_user_id` buys, precisely: the service writes it from the authenticated
+    user and `roster_id` from the path, independently, so the database refuses the
+    insert unless the caller really owns that roster. The ownership rule stops being
+    "a service remembered to call `get_owned_roster`" and becomes structural -- a new
+    route that forgot the check could not land a row anyway.
+
+    What it does NOT buy: an attacker already running raw SQL can rewrite both columns
+    together and produce a row that is internally consistent in someone else's roster.
+    No foreign key can stop that; the point is that nothing SHORT of that works,
+    including any bug of ours.
     """
 
     __tablename__ = "kt_roster_operatives"
     __table_args__ = (
-        # Both legs go through `kill_team_id`, so a row cannot name a roster of one team
-        # and an operative of another: the pair has to exist on both sides.
+        # Three columns, not two. `kill_team_id` is shared with the operative leg below,
+        # so a row cannot name a roster of one team and an operative of another -- the
+        # pair has to exist on both sides. `owner_user_id` is the same trick applied to
+        # the player: the triple has to exist on `kt_rosters`, so a row can only sit in a
+        # roster that its own owner owns.
+        #
+        # Dropping `kill_team_id` from this leg and giving the owner its own constraint
+        # would be weaker, not simpler: the team tie would be gone and a row could name
+        # roster A of team X alongside an operative of team Y.
         ForeignKeyConstraint(
-            ["kill_team_id", "roster_id"],
-            ["kt_rosters.kill_team_id", "kt_rosters.id"],
+            ["owner_user_id", "kill_team_id", "roster_id"],
+            ["kt_rosters.owner_user_id", "kt_rosters.kill_team_id", "kt_rosters.id"],
             ondelete="CASCADE",
             name="fk_kt_roster_operative_roster",
         ),
@@ -602,6 +623,11 @@ class KTRosterOperative(TimestampMixin, table=True):
     # Reached by both composite foreign keys above, which is why it is stored rather than
     # read through the roster.
     kill_team_id: UUID = Field(index=True)
+    # Reached by the roster leg above. No separate foreign key to `users`: the roster's
+    # own `owner_user_id` has one, and this column can only ever hold a value that leg
+    # has already matched against it. Deleting a user still takes these rows -- users ->
+    # kt_rosters -> here, every hop an ON DELETE CASCADE.
+    owner_user_id: UUID = Field(index=True)
     # The player's own order, which is theirs to set -- unlike every `position` in the
     # catalog, which is the page's (decision #25).
     #

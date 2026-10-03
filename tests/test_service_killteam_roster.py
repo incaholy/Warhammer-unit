@@ -11,6 +11,7 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_killteam_roster import KTRosterService, KTRosterValidationError
@@ -72,7 +73,7 @@ def test_reading_a_roster_brings_its_operatives_and_their_datacards(
     make_kt_weapon(operative=operative, name="Tail blade")
     make_kt_ability(operative=operative, name="Crest")
     service = _service(session)
-    service.add_operative(roster.id, operative.id)
+    service.add_operative(roster.id, operative.id, roster.owner_user_id)
     session.expunge_all()
 
     loaded = _service(session).get_roster(roster.id)
@@ -115,7 +116,7 @@ def test_a_detail_read_is_usable_once_the_session_is_done_with_it(
     for name in ("One", "Two"):
         operative = make_kt_operative(kill_team=roster.kill_team, name=name)
         make_kt_weapon(operative=operative, name=f"{name}'s blade")
-        _service(session).add_operative(roster.id, operative.id)
+        _service(session).add_operative(roster.id, operative.id, roster.owner_user_id)
     roster_id = roster.id
     session.expunge_all()
 
@@ -272,7 +273,7 @@ def test_deleting_a_roster_takes_its_rows_and_leaves_the_catalog(session, make_k
     roster = make_kt_roster()
     operative = make_kt_operative(kill_team=roster.kill_team)
     service = _service(session)
-    service.add_operative(roster.id, operative.id)
+    service.add_operative(roster.id, operative.id, roster.owner_user_id)
 
     service.delete_roster(roster.id)
 
@@ -294,8 +295,8 @@ def test_adding_the_same_operative_twice_appends_rather_than_conflicting(
     operative = make_kt_operative(kill_team=roster.kill_team, name="Warrior")
     service = _service(session)
 
-    first = service.add_operative(roster.id, operative.id)
-    second = service.add_operative(roster.id, operative.id)
+    first = service.add_operative(roster.id, operative.id, roster.owner_user_id)
+    second = service.add_operative(roster.id, operative.id, roster.owner_user_id)
 
     assert first.id != second.id
     assert (first.position, second.position) == (0, 1)
@@ -306,7 +307,9 @@ def test_an_added_operative_goes_last(session, make_kt_roster, make_kt_operative
     roster = make_kt_roster()
     service = _service(session)
     for name in ("A", "B", "C"):
-        service.add_operative(roster.id, make_kt_operative(kill_team=roster.kill_team, name=name).id)
+        service.add_operative(
+            roster.id, make_kt_operative(kill_team=roster.kill_team, name=name).id, roster.owner_user_id
+        )
 
     assert [row.position for row in service.list_roster_operatives(roster.id)] == [0, 1, 2]
 
@@ -321,7 +324,7 @@ def test_an_operative_of_another_team_cannot_be_added(
     stranger = make_kt_operative(kill_team=make_kill_team(name="Someone Else"))
 
     with pytest.raises(NotFoundError, match="not one of kill team"):
-        _service(session).add_operative(roster.id, stranger.id)
+        _service(session).add_operative(roster.id, stranger.id, roster.owner_user_id)
 
 
 def test_an_in_battle_operative_may_be_rostered(session, make_kt_roster, make_kt_operative):
@@ -330,14 +333,16 @@ def test_an_in_battle_operative_may_be_rostered(session, make_kt_roster, make_kt
     roster = make_kt_roster()
     vermin = make_kt_operative(kill_team=roster.kill_team, name="Cursemite", availability="in_battle")
 
-    row = _service(session).add_operative(roster.id, vermin.id)
+    row = _service(session).add_operative(roster.id, vermin.id, roster.owner_user_id)
 
     assert row.operative_id == vermin.id
 
 
 def test_adding_an_operative_that_does_not_exist_is_a_not_found(session, make_kt_roster):
+    roster = make_kt_roster()
+
     with pytest.raises(NotFoundError):
-        _service(session).add_operative(make_kt_roster().id, uuid.uuid4())
+        _service(session).add_operative(roster.id, uuid.uuid4(), roster.owner_user_id)
 
 
 def test_a_row_is_moved_by_its_own_id_not_the_operatives(session, make_kt_roster, make_kt_operative):
@@ -345,8 +350,8 @@ def test_a_row_is_moved_by_its_own_id_not_the_operatives(session, make_kt_roster
     roster = make_kt_roster()
     operative = make_kt_operative(kill_team=roster.kill_team, name="Warrior")
     service = _service(session)
-    first = service.add_operative(roster.id, operative.id)
-    second = service.add_operative(roster.id, operative.id)
+    first = service.add_operative(roster.id, operative.id, roster.owner_user_id)
+    second = service.add_operative(roster.id, operative.id, roster.owner_user_id)
 
     service.move_operative(roster.id, second.id, 0)
     service.move_operative(roster.id, first.id, 1)
@@ -456,3 +461,27 @@ def test_a_move_leaves_a_tie_and_a_gap_rather_than_renumbering(
 
     positions = [row.position for row in _service(session).list_roster_operatives(roster.id)]
     assert positions == [0, 0, 1]
+
+
+def test_a_row_cannot_be_added_to_a_roster_its_owner_does_not_own(
+    session, make_user, make_kt_roster, make_kt_operative
+):
+    """The three-column leg, exercised through the service rather than raw SQL.
+
+    `add_operative` writes `owner_user_id` from the CALLER and `roster_id` from the
+    argument, independently, so handing it someone else's roster produces a row the
+    database has no matching triple for. That is what makes the ownership rule
+    structural: the router's `get_owned_roster` 404s first, and if a future route
+    forgot to, the insert would still be refused.
+
+    Copying the owner off the loaded roster instead would make this unfailable -- the
+    row would be consistent by construction -- which is the reason the column exists at
+    all rather than being derived.
+    """
+    victim_roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=victim_roster.kill_team)
+    stranger = make_user(username="stranger", email="stranger@test.invalid")
+
+    with pytest.raises(IntegrityError):
+        _service(session).add_operative(victim_roster.id, operative.id, stranger.id)
+    session.rollback()

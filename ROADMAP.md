@@ -548,7 +548,8 @@ changeable until `fire-team` merges, since nothing is deployed against it.
 
 The eleven `kt_*` catalog tables from KILLTEAM.md and their migration, with test
 factories and model tests. Still treated as a draft: the migration has been
-regenerated five times as the pages showed a column was wrong, and stays regenerable
+regenerated six times -- five as the pages showed a column was wrong, once for the
+owner column of decision #54 -- and stays regenerable
 until `fire-team` merges.
 
 ## K2. Data pipeline
@@ -604,6 +605,9 @@ player writes — one assertion over the published document holds that line now 
 are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
 the listing carries a name, a kill team and a faction and the detail carries #52's
 whole bundle.
+A row's composite foreign key names its roster through `owner_user_id` as well as
+`kill_team_id` (#54), so neither a stranger's roster nor another team's operative is a
+state the table can hold — the ownership rule is the schema's, not just the router's.
 Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
 since the rules pick it per battle. A roster offers **every operative of its kill team**
 and nothing narrows that: composition is the page's words shown beside the roster, never

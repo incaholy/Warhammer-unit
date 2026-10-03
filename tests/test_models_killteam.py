@@ -6,6 +6,7 @@ they hold however a row is written (service, seed script, or admin route).
 """
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -615,6 +616,7 @@ def test_a_roster_may_field_the_same_operative_twice(session, make_kt_roster, ma
                 roster_id=roster.id,
                 operative_id=operative.id,
                 kill_team_id=roster.kill_team_id,
+                owner_user_id=roster.owner_user_id,
                 position=position,
             )
         )
@@ -637,11 +639,16 @@ def test_a_roster_cannot_field_another_teams_operative(
             roster_id=roster.id,
             operative_id=stranger.id,
             kill_team_id=roster.kill_team_id,  # claims the roster's team
+            owner_user_id=roster.owner_user_id,
             position=0,
         )
     )
 
-    with pytest.raises(IntegrityError):
+    # Matched, not bare: every column is populated, so this can only be the operative
+    # leg refusing. A bare `IntegrityError` would also accept a NOT NULL violation from
+    # a column the test forgot -- which is exactly what adding `owner_user_id` caused
+    # before this line was tightened.
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
         session.commit()
 
 
@@ -658,11 +665,12 @@ def test_a_roster_row_cannot_claim_a_team_that_is_not_its_rosters(
             roster_id=roster.id,
             operative_id=stranger.id,
             kill_team_id=other.id,  # claims the operative's team
+            owner_user_id=roster.owner_user_id,
             position=0,
         )
     )
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
         session.commit()
 
 
@@ -690,6 +698,7 @@ def test_a_negative_roster_position_is_refused(session, make_kt_roster, make_kt_
             roster_id=roster.id,
             operative_id=operative.id,
             kill_team_id=roster.kill_team_id,
+            owner_user_id=roster.owner_user_id,
             position=-1,
         )
     )
@@ -739,3 +748,75 @@ def test_deleting_a_user_takes_their_rosters_and_the_rows_on_them(
     assert session.exec(select(KTRoster)).all() == []
     assert session.exec(select(KTRosterOperative)).all() == []
     assert session.exec(select(KTOperative)).all(), "the catalog operative survives"
+
+
+def test_a_roster_row_cannot_sit_in_a_roster_its_owner_does_not_own(
+    session, make_user, make_kt_roster, make_kt_operative
+):
+    """The owner leg of the composite foreign key, attacked at the table.
+
+    Every other column is valid and consistent: the operative really belongs to the
+    roster's kill team, the position is fine. Only `owner_user_id` names someone other
+    than the roster's owner -- and the triple `(owner, kill_team, roster)` has no match
+    on `kt_rosters`, so the row cannot exist. This is the guarantee a service could
+    forget and the database cannot.
+    """
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    stranger = make_user(username="interloper", email="interloper@test.invalid")
+    session.add(
+        KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=operative.id,
+            kill_team_id=roster.kill_team_id,
+            owner_user_id=stranger.id,  # not the roster's owner
+            position=0,
+        )
+    )
+
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.commit()
+
+
+def test_a_direct_update_cannot_move_a_row_into_another_players_roster(
+    session, make_user, make_kill_team, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    """Finding 15: the one attack the two-column leg allowed.
+
+    Both rosters are for the SAME kill team, so the old `(kill_team_id, roster_id)` leg
+    was satisfied by either of them -- a direct `UPDATE ... SET roster_id` moved a row
+    from one player's roster into another's and the database had nothing to say. Nothing
+    in the API does this; the point is that the schema permitted it.
+
+    With `owner_user_id` in the leg the row must name a roster belonging to its own
+    owner, so the UPDATE has no matching triple. That is as far as a foreign key can go:
+    an attacker who rewrites `owner_user_id` in the same statement produces an
+    internally consistent row, and no constraint can tell that from a legitimate one.
+
+    A Core `update()` rather than `text()`: SQLite stores a UUID as 32 hex characters
+    with no dashes, so `text("... WHERE id = :row")` bound to `str(uuid)` matches
+    NOTHING and the statement cannot violate anything. The first UPDATE here is
+    harmless and asserts `rowcount == 1`, so the attack below is known to address a real
+    row on both test tiers rather than silently addressing none.
+    """
+    team = make_kill_team(name="Raveners")
+    victim = make_kt_roster(owner=make_user(username="victim", email="victim@test.invalid"), kill_team=team)
+    thief = make_kt_roster(owner=make_user(username="thief", email="thief@test.invalid"), kill_team=team)
+    operative = make_kt_operative(kill_team=team)
+    row_id = make_kt_roster_operative(roster=victim, operative=operative).id
+    victim_id, thief_id = victim.id, thief.id
+    session.commit()
+
+    addresses_the_row = session.execute(
+        update(KTRosterOperative).where(KTRosterOperative.id == row_id).values(position=5)
+    )
+    assert addresses_the_row.rowcount == 1, "the WHERE clause must match, or the attack proves nothing"
+
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.execute(
+            update(KTRosterOperative).where(KTRosterOperative.id == row_id).values(roster_id=thief_id)
+        )
+        session.commit()
+    session.rollback()
+
+    assert session.get(KTRosterOperative, row_id).roster_id == victim_id

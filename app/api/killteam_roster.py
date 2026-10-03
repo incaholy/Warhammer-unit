@@ -258,6 +258,7 @@ def delete_roster(
 def add_operative(
     payload: KTRosterOperative_Create,
     roster: KTRoster = Depends(get_owned_roster),
+    current_user: User = Depends(get_current_user),
     service: KTRosterService = Depends(get_roster_service),
 ) -> KTRosterOperative_Read:
     """Append one operative. A repeat is a second operative, not a 409.
@@ -266,7 +267,10 @@ def add_operative(
     retry-safe. There is no quantity here (decision #50), so a retried add appends --
     which is a real outcome, and a caller that did not mean it removes the extra row.
     """
-    row = service.add_operative(roster.id, payload.operative_id)
+    # The caller's id goes to the service rather than the roster's owner, so the row's
+    # composite foreign key is a real cross-check against `kt_rosters` instead of a
+    # tautology. `get_owned_roster` has already 404ed a roster the caller does not own.
+    row = service.add_operative(roster.id, payload.operative_id, current_user.id)
     return KTRosterOperative_Read.model_validate(row, from_attributes=True)
 
 

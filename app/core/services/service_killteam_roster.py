@@ -189,7 +189,7 @@ class KTRosterService:
 
     # ------------------------ operatives on a roster ------------------------
 
-    def add_operative(self, roster_id: UUID, operative_id: UUID) -> KTRosterOperative:
+    def add_operative(self, roster_id: UUID, operative_id: UUID, owner_user_id: UUID) -> KTRosterOperative:
         """Field one more operative -- an APPEND, not a create-or-409.
 
         A roster row is an individual, not a count (decision #50), so fielding the same
@@ -201,6 +201,14 @@ class KTRosterService:
 
         The new row goes last. `position` is the PLAYER's order, so it is theirs to
         rearrange with `move_operative`.
+
+        `owner_user_id` is the CALLER's, taken from the authenticated user rather than
+        copied off the roster this method just loaded. That is the whole point of the
+        column: copying it from the roster would make the composite foreign key vacuous
+        -- consistent by construction, never able to fire -- where writing the caller's
+        makes the database refuse the insert unless the caller really owns that roster.
+        The router's `get_owned_roster` 404s first, so this is a backstop; it is there
+        so a route that forgets the check cannot write the row regardless.
         """
         roster = self._require_roster(roster_id)
         operative = self.session.get(KTOperative, operative_id)
@@ -217,6 +225,8 @@ class KTRosterService:
             operative_id=operative_id,
             # Carried so both composite foreign keys reach their parents through it.
             kill_team_id=roster.kill_team_id,
+            # The caller's, NOT `roster.owner_user_id` -- see the note above.
+            owner_user_id=owner_user_id,
             position=self._next_position(roster.id),
         )
         self.session.add(row)
