@@ -165,8 +165,8 @@ class KTOperative(TimestampMixin, table=True):
         UniqueConstraint("kill_team_id", "name"),
         # Redundant to the primary key, and there for `KTRosterOperative`'s composite
         # foreign key to point at: a target must be provably unique. It was deleted with
-        # the selection-options table (#44) and is back for the roster (#53), which needs
-        # the same guarantee for the same reason.
+        # the selection-options table (#44) and is back for the roster (#50's section),
+        # which needs the same guarantee for the same reason.
         UniqueConstraint("kill_team_id", "id", name="uq_kt_operative_team_id"),
         CheckConstraint("apl >= 1", name="ck_kt_operative_apl"),
         CheckConstraint("move >= 0 AND save >= 0 AND wounds >= 0", name="ck_kt_operative_stats_non_negative"),
@@ -549,7 +549,14 @@ class KTRoster(TimestampMixin, table=True):
     operatives: list["KTRosterOperative"] = Relationship(
         back_populates="roster",
         cascade_delete=True,
-        sa_relationship_kwargs={"order_by": "KTRosterOperative.position"},
+        # `position` then `id`: a player's positions need not be distinct (decision
+        # #53), and `position` alone would leave two tied rows in whatever order the plan
+        # happened to yield -- differing between a `selectinload` and a join, and between
+        # this relationship and `KTRosterService.list_roster_operatives`, which has always
+        # ordered by both. The catalog's relationships need no tie-breaker: their
+        # positions are assigned sequentially by the scraper, so a tie there is a seed
+        # defect rather than something a request can cause.
+        sa_relationship_kwargs={"order_by": "KTRosterOperative.position, KTRosterOperative.id"},
     )
 
 
@@ -597,6 +604,12 @@ class KTRosterOperative(TimestampMixin, table=True):
     kill_team_id: UUID = Field(index=True)
     # The player's own order, which is theirs to set -- unlike every `position` in the
     # catalog, which is the page's (decision #25).
+    #
+    # A SORT HINT, not an index (decision #53). `move_operative` sets it absolutely and
+    # shifts nothing, so the values need be neither contiguous nor distinct: moving the
+    # third row to 0 leaves two rows at 0. That is deliberate -- an absolute set is
+    # retry-safe and one query -- so there is no `UNIQUE(roster_id, position)` and every
+    # reader breaks a tie with `id`.
     position: int = Field(default=0)
 
     # `overlaps` on both: the two composite foreign keys share `kill_team_id`, so each

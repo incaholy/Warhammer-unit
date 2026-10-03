@@ -407,3 +407,52 @@ def test_a_row_on_someone_elses_roster_reads_as_missing(session, make_kt_roster,
 def test_listing_the_rows_of_a_roster_that_does_not_exist_is_a_not_found(session):
     with pytest.raises(NotFoundError):
         _service(session).list_roster_operatives(uuid.uuid4())
+
+
+# --- a tie on `position` ----------------------------------------------------
+
+
+def test_rows_tied_on_position_are_ordered_by_id_by_both_readers(
+    session, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    """`position` is a sort hint, not an index (decision #53), so ties are reachable.
+
+    `move_operative` sets a position absolutely and shifts nothing, which is what makes
+    it one query and retry-safe -- and also what puts two rows at 0 the first time a
+    player moves the third row to the top. The rows must still come back in ONE order,
+    and the same order from both readers: `KTRoster.operatives` and
+    `list_roster_operatives` are two paths to the same rows, and a client that reads a
+    roster detail and then a row listing must not see them disagree.
+
+    The ids are fixed and inserted in DESCENDING order, so insertion order is the
+    reverse of id order. Without the tie-breaker a reader yields insertion order and
+    this fails deterministically, rather than only when random ids happen to disagree.
+    """
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    ids = [uuid.UUID(f"ffffffff-0000-0000-0000-00000000000{n}") for n in (3, 2, 1)]
+    for row_id in ids:
+        make_kt_roster_operative(roster=roster, operative=operative, id=row_id, position=0)
+
+    ascending = sorted(ids)
+    session.expire_all()
+
+    # The relationship, as a roster detail read uses it.
+    assert [row.id for row in _service(session).get_roster(roster.id).operatives] == ascending
+    # The service's own reader, which has always ordered by both.
+    assert [row.id for row in _service(session).list_roster_operatives(roster.id)] == ascending
+
+
+def test_a_move_leaves_a_tie_and_a_gap_rather_than_renumbering(
+    session, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    # The behaviour decision #53 chose, pinned so a later renumbering change is a
+    # deliberate one: moving the last row to 0 gives two rows at 0 and vacates 2.
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    rows = [make_kt_roster_operative(roster=roster, operative=operative, position=n) for n in range(3)]
+
+    _service(session).move_operative(roster.id, rows[2].id, 0)
+
+    positions = [row.position for row in _service(session).list_roster_operatives(roster.id)]
+    assert positions == [0, 0, 1]

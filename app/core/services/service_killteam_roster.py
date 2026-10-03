@@ -228,6 +228,13 @@ class KTRosterService:
 
         Addressed by the ROW's id rather than the operative's, because two rows may name
         the same operative (decision #50).
+
+        **Shifts nothing.** `position` is a sort hint rather than an index (decision
+        #53), so moving the third row to 0 leaves two rows at 0 and the gap it left
+        behind. Renumbering the roster instead would make `position` the player's exact
+        order at the cost of an UPDATE across every row per move; ties are cheaper and
+        every reader breaks them with `id`, which is why both this service's reader and
+        the `KTRoster.operatives` relationship order by `(position, id)`.
         """
         if position < 0:
             raise KTRosterValidationError("position", "cannot be negative")
