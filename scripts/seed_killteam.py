@@ -14,9 +14,16 @@ next scrape. A team's selection RULES are the exception -- they are replaced as 
 What that leaves is a SUPERSET of the payload, not a match: outside the composition,
 rows the source has REMOVED or RENAMED stay behind, and nothing marks them as stale
 (`updated_at` cannot -- it only moves when a row is written). A withdrawn ploy therefore
-keeps being served and a renamed team leaves its old subtree beside the new one. Deleting
-safely is a question about the rosters that will reference these rows, so it belongs with
-K4.
+keeps being served and a renamed team leaves its old subtree beside the new one.
+
+That is **decided and not yet built**: decision #55 marks a withdrawn row with a
+`withdrawn` flag rather than deleting it, so catalog reads hide it while a roster or game
+read still resolves the datacard it was built against. Deleting instead was the 40k
+answer (`UnitService.delete_unit` 409s when an army references the unit) and would leave
+the rows anyone has rostered permanently stuck. The condition for building it is **before
+a client consumes the catalog as a picker** -- until then a superset is merely untidy;
+after, it offers withdrawn rows to a player. Not before `fire-team` merges: the column is
+additive, so it is no cheaper now than later.
 
 Everything happens in one transaction, so a team that fails mid-run leaves nothing
 half-written.

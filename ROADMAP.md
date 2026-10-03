@@ -598,8 +598,9 @@ whenever the composition is replaced.
 
 ## K4. Roster
 
-**Status: ✅ Done.** Kill team rosters under `/api/v1/me/kill-team/rosters`, mirroring
-`Army`. Eight routes: CRUD on a roster, then append, move and remove on the operatives
+**Status: ✅ Done** — except that the seed's withdrawn-row question was deferred here
+and is not answered by it; it is K7 now, with a condition instead of a slice name. Kill
+team rosters under `/api/v1/me/kill-team/rosters`, mirroring `Army`. Eight routes: CRUD on a roster, then append, move and remove on the operatives
 in it. The catalog half of the API takes no writes at all (#21) and this is the half a
 player writes — one assertion over the published document holds that line now that both
 are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
@@ -649,8 +650,38 @@ spacing rather than joining inline elements with a space, which is what split
 changed, none in any way but whitespace, and the distinct rule count fell from 103 to
 101 as the artefacts merged with their correct spellings.
 
-What remains is a judgement call rather than a defect. Two pairs are still spelled two
-ways, and neither is ours: `Torrent 0"` / `Torrent 0"*`, where the asterisk is a footnote
-marker 46 of the 101 rules carry, and `Heavy (Dash Only)` / `Heavy (Dash only)`, where
-the source itself disagrees about the capital. Decide when the frontend renders them as
-chips whether a marker is stripped, kept, or resolved to the footnote it points at.
+Two pairs are still spelled two ways, and neither is ours: `Torrent 0"` / `Torrent 0"*`,
+where the asterisk is a footnote marker 46 of the 101 rules carry, and
+`Heavy (Dash Only)` / `Heavy (Dash only)`, where the source itself disagrees about the
+capital. **Settled by decision #56: both are kept verbatim.** `#30` strips markers from
+composition bullets only because the note BODY is stored there as a row, which makes the
+marker redundant; a weapon rule's note body is not scraped at all, so the marker is the
+only surviving record that a footnote applies. Grouping two chips that differ by a marker
+is the frontend's call. Capturing the note bodies is a K7 item below, and keeping the
+marker is what leaves it possible.
+
+## K7. Withdrawn catalog rows
+
+**Status: Decided (#55), not built.** The seed is an append-and-rewrite superset: outside
+the composition, a row the source REMOVED or RENAMED stays behind and nothing marks it
+stale, so a withdrawn ploy keeps being served and a renamed team leaves its old subtree
+beside the new one. The seed said so from the start and deferred the answer to K4; K4
+shipped without it, which is what this entry exists to stop happening twice.
+
+Decision #55: a `withdrawn` flag on every `kt_*` table the seed upserts, set when the
+source drops a row and cleared when it reappears. Catalog reads filter it out; a roster
+or game read still resolves it, so a datacard built last month still renders. Uniform
+across the tables rather than only the ones a roster points at today, because #25 made
+the same call for `position`; `KTSelectionRule` carries over as its exception, since a
+composition is replaced as a whole and so already loses what the source dropped.
+
+The sweep is scoped to the PARENTS the payload contains, so a partial scrape cannot
+mass-flag a catalog it simply did not mention.
+
+**The condition is: before a client consumes the catalog as a picker.** Until then a
+superset is untidy; after, it offers a player operatives and ploys that no longer exist.
+Deliberately NOT gated on the `fire-team` merge — the column is additive, so it costs the
+same before or after.
+
+Also here, and independent: capturing the footnote bodies a weapon rule's marker points
+at (#56), which is a scraper job across 48 pages rather than a schema one.
