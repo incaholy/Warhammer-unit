@@ -641,6 +641,6 @@ changed, none in any way but whitespace, and the distinct rule count fell from 1
 
 What remains is a judgement call rather than a defect. Two pairs are still spelled two
 ways, and neither is ours: `Torrent 0"` / `Torrent 0"*`, where the asterisk is a footnote
-marker 48 of the 101 rules carry, and `Heavy (Dash Only)` / `Heavy (Dash only)`, where
+marker 46 of the 101 rules carry, and `Heavy (Dash Only)` / `Heavy (Dash only)`, where
 the source itself disagrees about the capital. Decide when the frontend renders them as
 chips whether a marker is stripped, kept, or resolved to the footnote it points at.

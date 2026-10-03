@@ -988,7 +988,8 @@ def _printed_bullets(top: Tag) -> list[tuple[int, str]]:
 
     Depth is how many list items enclose this one, which is exactly the page's indent: a
     composition line is 0, one of its entries 1, and an entry's own weapon options 2.
-    Measured over the 48 composition trees: 740 bullets, 114 / 490 / 136 by depth.
+    Measured over the 49 composition trees the 48 pages print: 744 bullets, 115 / 493 /
+    136 by depth. Forty-NINE trees for 48 teams because Gellerpox Infected print two.
 
     Keeping the depth is the whole point. The alternative shapes both lie about the page.
     Flattening a line's descendants into one list made "Servo-claw; meltagun" a sibling of

@@ -776,6 +776,36 @@ def test_the_notes_printed_around_a_composition_are_their_own_rules():
     ]
 
 
+def test_a_segment_that_cleans_away_to_nothing_is_not_stored_as_a_note():
+    # The loose text is split at footnote markers, and a segment is kept only if it still
+    # has text AFTER cleaning. Filtering before cleaning instead looks equivalent and is
+    # not: a segment whose children are individually non-empty can clean away to nothing,
+    # and it then lands as a `note` with no text.
+    #
+    # No real page does this today, so the payload is identical either way and the 48-page
+    # integration tests cannot see it -- which is exactly why it needs a unit test. The
+    # distinguishing input is a post-marker segment holding only a `<KY>` pseudo-tag,
+    # which `_clean` strips to nothing.
+    html = """
+    <div class="dsOuterFrame"><table><tr class="pHeaderRow">
+      <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Alpha Warden</div></h3></div></td>
+      <td class="pCell">APL<div class="dsStat">2</div></td>
+    </tr></table></div>
+    <h2>Operatives</h2>
+    <div class="BreakInsideAvoid">
+      <ul class="redTriangle"><li>1 ALPHA WARDEN operative</li></ul>
+      Other than WARDEN operatives, your kill team can only include each operative once.
+      <span class="ast">*</span>
+      &lt;KY&gt;
+    </div>
+    """
+
+    rules = parse_selection_rules(html)
+
+    assert [r.kind for r in rules] == ["line", "restriction"]
+    assert all(r.text.strip() for r in rules)
+
+
 def test_a_requisition_group_is_a_heading_followed_by_its_lines():
     # Its lines are text like any other, so whether the ally has a page of its own stops
     # being a question the catalog answers (it was decisions #33 and #34).

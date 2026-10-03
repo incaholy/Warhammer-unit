@@ -4383,7 +4383,7 @@
         },
         "type": "object",
         "title": "Universal_Read",
-        "description": "The rows that belong to no kill team: `kill_team_id IS NULL` (decision #48).\n\nOne route for both, because they are one concept and one thing a client wants --\nfetched once, kept for the session, used with every team. Folding them into each\nteam detail instead would add 7.4 KB to every response and re-send it on every team\nview, to save a call that happens once per GAME."
+        "description": "The rows that belong to no kill team: `kill_team_id IS NULL` (decision #48).\n\nOne route for both, because they are one concept and one thing a client wants --\nfetched once, kept for the session, used with every team. Folding them into each\nteam detail instead would add 8 KB to every response and re-send it on every team\nview, to save a call that happens once per GAME."
       },
       "UserUnit_Read": {
         "properties": {

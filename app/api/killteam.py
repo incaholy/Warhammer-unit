@@ -7,12 +7,14 @@ differs. There are no `*_Create` or `*_Update` schemas here and no
 `get_current_admin` dependency, and `test_the_kill_team_catalog_publishes_no_writes`
 asserts that over the published OpenAPI document rather than per path (#49).
 
-Four routes under one prefix:
+Six routes under one prefix:
 
-    GET /api/v1/kill-team/factions        paged
-    GET /api/v1/kill-team/teams           paged, ?faction_id=
-    GET /api/v1/kill-team/teams/{id}      the team whole
-    GET /api/v1/kill-team/universal       the rows no team owns
+    GET /api/v1/kill-team/factions                 paged
+    GET /api/v1/kill-team/teams                    paged, ?faction_id=
+    GET /api/v1/kill-team/teams/{id}               the team whole
+    GET /api/v1/kill-team/teams/{id}/composition   its printed rules alone
+    GET /api/v1/kill-team/operatives               paged, ?kill_team_id= & ?keyword=
+    GET /api/v1/kill-team/universal                the rows no team owns
 
 Nothing here decides legality. The composition arrives as the page's own words
 (decision #44) and a roster may take any operative of its kill team, so there is
@@ -170,7 +172,7 @@ class Universal_Read(SQLModel):
 
     One route for both, because they are one concept and one thing a client wants --
     fetched once, kept for the session, used with every team. Folding them into each
-    team detail instead would add 7.4 KB to every response and re-send it on every team
+    team detail instead would add 8 KB to every response and re-send it on every team
     view, to save a call that happens once per GAME.
     """
 
