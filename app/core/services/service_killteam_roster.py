@@ -124,6 +124,15 @@ class KTRosterService:
                 .selectinload(KTRosterOperative.operative)
                 .selectinload(KTOperative.abilities),
             )
+            # `populate_existing`, which is load-bearing rather than defensive: without it a
+            # read that follows a WRITE in the same session gets the collection as it was
+            # when first loaded. SQLAlchemy returns the identity-mapped object and leaves
+            # an already-populated collection alone, so an operative added a moment ago is
+            # simply absent -- and inconsistently so, since a flush that happened to expire
+            # the parent hides it. The router's shape makes this the normal case: the
+            # ownership dependency loads the row, the route mutates it, and then reads it
+            # back for the response.
+            .execution_options(populate_existing=True)
         )
         roster = self.session.exec(statement).first()
         if roster is None:

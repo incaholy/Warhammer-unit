@@ -485,3 +485,28 @@ def test_a_row_cannot_be_added_to_a_roster_its_owner_does_not_own(
     with pytest.raises(IntegrityError):
         _service(session).add_operative(victim_roster.id, operative.id, stranger.id)
     session.rollback()
+
+
+def test_a_roster_read_after_a_write_sees_the_write(
+    session, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    """Regression for `populate_existing` on `get_roster`.
+
+    Without it, a read that follows a write in the SAME session gets the collection as
+    it was when first loaded: SQLAlchemy returns the identity-mapped roster and leaves
+    an already-populated collection alone, so an operative added a moment ago is simply
+    absent. Inconsistently so, too -- a flush that happened to expire the parent hides
+    the bug, which is why it survived K4.
+
+    It did not bite through the API because the roster router never reads the detail
+    back after touching a collection. The game router's shape does exactly that, which
+    is what turned this up.
+    """
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    service = _service(session)
+    assert service.get_roster(roster.id).operatives == [], "nothing fielded yet"
+
+    service.add_operative(roster.id, operative.id, roster.owner_user_id)
+
+    assert len(service.get_roster(roster.id).operatives) == 1
