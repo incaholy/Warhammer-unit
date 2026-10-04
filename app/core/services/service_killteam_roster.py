@@ -139,6 +139,21 @@ class KTRosterService:
             raise NotFoundError(f"roster {roster_id} not found")
         return roster
 
+    def get_roster_shallow(self, roster_id: UUID) -> KTRoster:
+        """The roster row alone — for an ownership check, not for a response.
+
+        The router's dependency needs one fact ("does the caller own this?") where
+        `get_roster` is decision #52's whole bundle: the team's faction, rules, ploys and
+        equipment, plus every operative's weapons and abilities. Loading that to answer a
+        yes/no made a 204 DELETE cost as much as a GET -- audit finding 12 -- and is what
+        `KTGameService.get_game_shallow` exists to avoid repeating.
+
+        It also made the `populate_existing` fix on `get_roster` expensive: re-loading a
+        collection costs queries only because the dependency had loaded it in the first
+        place.
+        """
+        return self._require_roster(roster_id)
+
     def list_rosters(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[KTRoster]:
         """A player's rosters, oldest first: a name, a kill team and its faction.
 

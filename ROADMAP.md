@@ -600,7 +600,15 @@ whenever the composition is replaced.
 
 **Status: ✅ Done** — except that the seed's withdrawn-row question was deferred here
 and is not answered by it; it is K7 now, with a condition instead of a slice name. Kill
-team rosters under `/api/v1/me/kill-team/rosters`, mirroring `Army`. Eight routes: CRUD on a roster, then append, move and remove on the operatives
+team rosters under `/api/v1/me/kill-team/rosters`, mirroring `Army`.
+
+Audit finding 12 is fixed here: the five write routes take `get_owned_roster_shallow`,
+which answers "does the caller own this?" without loading the bundle, and only
+`GET /{id}` keeps the full read. Measured on a six-operative roster with a furnished
+team: a 204 DELETE went 13 → 6 queries, a one-row PATCH 14 → 8, an append 18 → 9, and
+the rename 30 → 17 (it had been loading the detail three times). `GET` is unchanged at
+13, which is the point. The shape came from K5's games router, which was built with it
+from the start. Eight routes: CRUD on a roster, then append, move and remove on the operatives
 in it. The catalog half of the API takes no writes at all (#21) and this is the half a
 player writes — one assertion over the published document holds that line now that both
 are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
@@ -627,9 +635,9 @@ turning point rather than a flag so `advance` clears nothing, **#62** `initiativ
 nullable because a turning point before its roll-off holds nobody, and **#63**
 activating and transforming are their own routes rather than fields on a PATCH.
 
-The ownership dependency loads the game **shallow**, which the rosters router does not:
-its `get_owned_roster` eager-loads decision #52's bundle on all six nested routes, so a
-204 DELETE costs as much as a GET. That is audit finding 12, and K5 does not inherit it.
+The ownership dependency loads the game **shallow** rather than eager-loading decision
+#52's bundle to answer a yes/no. That was audit finding 12, which K5 did not inherit and
+which the rosters router has since been fixed to match — see K4.
 
 A latent bug shipped in K4 turned up here: `get_roster` returned a stale collection
 after a write in the same session. It never bit through the roster API, which does not

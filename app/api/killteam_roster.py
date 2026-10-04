@@ -62,8 +62,38 @@ def get_owned_roster(
     current_user: User = Depends(get_current_user),
     service: KTRosterService = Depends(get_roster_service),
 ) -> KTRoster:
-    """Load a roster the current user owns, else 404 (hides existence)."""
+    """Load a roster the current user owns WITH its bundle, else 404 (hides existence).
+
+    Only `GET /{roster_id}` uses this, because only it serves the bundle. Every write
+    route takes `get_owned_roster_shallow` instead -- see below.
+    """
     roster = service.get_roster(roster_id)  # NotFoundError -> 404 if missing
+    if roster.owner_user_id != current_user.id:
+        raise NotFoundError(f"roster {roster_id} not found")
+    return roster
+
+
+def get_owned_roster_shallow(
+    roster_id: UUID,
+    current_user: User = Depends(get_current_user),
+    service: KTRosterService = Depends(get_roster_service),
+) -> KTRoster:
+    """The same ownership rule, without loading decision #52's bundle to check it.
+
+    This is audit finding 12. Every write route used `get_owned_roster`, which eager-loads
+    the team's faction, rules, ploys and equipment plus every operative's weapons and
+    abilities -- and then threw all of it away. A 204 DELETE cost 13 queries on a
+    six-operative roster; a `POST` returning ONE row cost 18.
+
+    The 404-not-403 rule is identical and deliberately duplicated rather than
+    parameterised: a flag like `bundle=True` would put the two readings of "owned" one
+    typo apart, and the one that matters here is a security rule.
+
+    A route that needs the bundle for its RESPONSE asks for it once, at the end.
+    `KTGameService.get_game_shallow` and the games router do the same, which is where
+    this shape came from.
+    """
+    roster = service.get_roster_shallow(roster_id)  # NotFoundError -> 404 if missing
     if roster.owner_user_id != current_user.id:
         raise NotFoundError(f"roster {roster_id} not found")
     return roster
@@ -230,7 +260,7 @@ def get_roster(
 @router.patch("/{roster_id}", response_model=KTRoster_Read)
 def update_roster(
     payload: KTRoster_Update,
-    roster: KTRoster = Depends(get_owned_roster),
+    roster: KTRoster = Depends(get_owned_roster_shallow),
     service: KTRosterService = Depends(get_roster_service),
     catalog: KillTeamService = Depends(get_catalog_service),
 ) -> KTRoster_Read:
@@ -240,7 +270,7 @@ def update_roster(
 
 @router.delete("/{roster_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_roster(
-    roster: KTRoster = Depends(get_owned_roster),
+    roster: KTRoster = Depends(get_owned_roster_shallow),
     service: KTRosterService = Depends(get_roster_service),
 ) -> Response:
     service.delete_roster(roster.id)
@@ -257,7 +287,7 @@ def delete_roster(
 )
 def add_operative(
     payload: KTRosterOperative_Create,
-    roster: KTRoster = Depends(get_owned_roster),
+    roster: KTRoster = Depends(get_owned_roster_shallow),
     current_user: User = Depends(get_current_user),
     service: KTRosterService = Depends(get_roster_service),
 ) -> KTRosterOperative_Read:
@@ -281,7 +311,7 @@ def add_operative(
 def move_operative(
     row_id: UUID,
     payload: KTRosterOperative_Update,
-    roster: KTRoster = Depends(get_owned_roster),
+    roster: KTRoster = Depends(get_owned_roster_shallow),
     service: KTRosterService = Depends(get_roster_service),
 ) -> KTRosterOperative_Read:
     """Set a row's position. Addressed by the ROW's id, not the operative's."""
@@ -295,7 +325,7 @@ def move_operative(
 )
 def remove_operative(
     row_id: UUID,
-    roster: KTRoster = Depends(get_owned_roster),
+    roster: KTRoster = Depends(get_owned_roster_shallow),
     service: KTRosterService = Depends(get_roster_service),
 ) -> Response:
     service.remove_operative(roster.id, row_id)
