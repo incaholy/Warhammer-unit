@@ -677,6 +677,9 @@ class KTGame(TimestampMixin, table=True):
     rather than served, so each game holds roughly that much JSON permanently. Which is
     why the listing read must stay lean the way the roster listing is.
 
+    `initiative` is NULL until the turning point's roll-off (#62), which is a state and
+    not a gap -- a game in setup holds nobody.
+
     `version` is decision #9: a stale write answers 409 rather than silently overwriting
     the other tab. `choices` is the per-game picks the rules leave to the players (#1) --
     the Accursed Gift, the Tac Ops taken (#59) -- so a new one of those needs no column.
@@ -707,7 +710,14 @@ class KTGame(TimestampMixin, table=True):
         ),
         CheckConstraint("status IN ('setup', 'in_progress', 'finished')", name="ck_kt_game_status"),
         CheckConstraint("phase IN ('strategy', 'firefight')", name="ck_kt_game_phase"),
-        CheckConstraint("initiative IN ('player', 'opponent')", name="ck_kt_game_initiative"),
+        # Nullable, and NULL is a MEANING rather than a gap: initiative is rolled off
+        # per turning point, so a game in setup -- or one advanced to a turning point
+        # whose roll-off has not happened -- holds nobody. The same shape
+        # `invulnerable_save` and `range_inches` use for a stat that is genuinely absent.
+        CheckConstraint(
+            "initiative IS NULL OR initiative IN ('player', 'opponent')",
+            name="ck_kt_game_initiative",
+        ),
         # A game of Kill Team is four turning points. Enforced here and not only in the
         # service, because "no turning point past 4" is bookkeeping the schema can hold.
         CheckConstraint("turning_point BETWEEN 1 AND 4", name="ck_kt_game_turning_point"),
@@ -740,7 +750,9 @@ class KTGame(TimestampMixin, table=True):
     status: str = Field(default="setup", max_length=16)
     turning_point: int = Field(default=1)
     phase: str = Field(default="strategy", max_length=16)
-    initiative: str = Field(default="player", max_length=16)
+    #: NULL until the turning point's roll-off (#62). NOT "the opponent has it" --
+    #: a client must render the three states, not two.
+    initiative: str | None = Field(default=None, max_length=16)
 
     command_points: int = Field(default=0)
     # VP BY SOURCE, as a document rather than a column each: the sources are a rules

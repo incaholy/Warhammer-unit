@@ -837,6 +837,9 @@ def test_a_game_is_created_from_a_roster_with_its_owner_and_team(session, make_k
     assert game.phase == "strategy"
     assert game.command_points == 0
     assert game.version == 1
+    # NULL, not "player": nobody has rolled for initiative in a game still in setup
+    # (#62), and a client must tell that from the opponent holding it.
+    assert game.initiative is None
     # The documents default to empty rather than NULL, so a read never has to ask which.
     assert (game.markers, game.ploys_used, game.rules, game.ploys) == ([], [], [], [])
     assert (game.victory_points, game.choices) == ({}, {})
@@ -1059,3 +1062,27 @@ def test_deleting_a_user_takes_their_games_and_everything_on_them(
     assert session.exec(select(KTGameEvent)).all() == []
     assert session.exec(select(KTRoster)).all() == []
     assert session.exec(select(KTOperative)).all(), "the catalog operative survives"
+
+
+def test_initiative_holds_nobody_until_it_is_rolled(session, make_kt_game):
+    """Three states, not two (#62): the player, the opponent, or nobody yet.
+
+    Initiative is rolled off per turning point, so NULL is what a game in setup holds
+    and what `advance` leaves behind for the next roll-off. A bool could not say it --
+    `False` would mean both "the opponent has it" and "nobody rolled".
+    """
+    game = make_kt_game()
+    assert game.initiative is None
+
+    for holder in ("player", "opponent"):
+        game.initiative = holder
+        session.add(game)
+        session.commit()
+        session.refresh(game)
+        assert game.initiative == holder
+
+    game.initiative = None
+    session.add(game)
+    session.commit()
+    session.refresh(game)
+    assert game.initiative is None, "advancing a turning point puts it back to nobody"

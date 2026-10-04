@@ -1,8 +1,8 @@
 """add kill team catalog, rosters and games
 
-Revision ID: 3a3fbec33e97
+Revision ID: b8ba89c436bc
 Revises: 44441c6a9671
-Create Date: 2026-10-03 16:58:45.884622
+Create Date: 2026-10-03 17:10:52.113475
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '3a3fbec33e97'
+revision: str = 'b8ba89c436bc'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -177,7 +177,7 @@ def upgrade() -> None:
     sa.Column('status', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
     sa.Column('turning_point', sa.Integer(), nullable=False),
     sa.Column('phase', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
-    sa.Column('initiative', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('initiative', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=True),
     sa.Column('command_points', sa.Integer(), nullable=False),
     sa.Column('victory_points', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('opponent_victory_points', sa.Integer(), nullable=False),
@@ -187,7 +187,7 @@ def upgrade() -> None:
     sa.Column('ploys', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('choices', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
-    sa.CheckConstraint("initiative IN ('player', 'opponent')", name='ck_kt_game_initiative'),
+    sa.CheckConstraint("initiative IS NULL OR initiative IN ('player', 'opponent')", name='ck_kt_game_initiative'),
     sa.CheckConstraint("phase IN ('strategy', 'firefight')", name='ck_kt_game_phase'),
     sa.CheckConstraint("status IN ('setup', 'in_progress', 'finished')", name='ck_kt_game_status'),
     sa.CheckConstraint('command_points >= 0', name='ck_kt_game_command_points'),

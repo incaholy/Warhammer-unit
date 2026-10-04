@@ -621,10 +621,11 @@ catalog.
 
 **Status: Models + migration done; service and routes next.** The four tables are
 built — `KTGame`, `KTGameOperative`, `KTGameEquipment`, `KTGameEvent` — with the
-migration regenerated (`623a5d229b3f` → `3a3fbec33e97`, the draft's seventh
-regeneration). Two more decisions were settled at the models: **#60** deleting a roster
-a game was played from is refused (409), and **#61** activation is stored as the turning
-point rather than a flag, so `advance` clears nothing.
+migration regenerated (`623a5d229b3f` → `b8ba89c436bc`, the draft's eighth
+regeneration). Three more decisions were settled at the models: **#60** deleting a
+roster a game was played from is refused (409), **#61** activation is stored as the
+turning point rather than a flag so `advance` clears nothing, and **#62** `initiative`
+is nullable because a turning point before its roll-off holds nobody.
 
 Games created from a roster: turning points, CP, VP, and each
 operative's wounds, order and activation, with undo. Each game copies the whole
