@@ -431,3 +431,36 @@ def test_a_write_route_costs_far_less_than_the_detail_read(
 
     assert removal < detail, f"a 204 cost {removal} queries against the detail's {detail}"
     assert move < detail, f"a one-row PATCH cost {move} against the detail's {detail}"
+
+
+def test_what_a_delete_publishes_is_what_it_returns(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """The DECLARED status matches the one the server sends.
+
+    These routes return an explicit `Response(status_code=204)`, so changing the
+    decorator's `status_code` changes `openapi.json` and nothing else -- a mutant that
+    every test survived. The `openapi.json` drift gate in CI does catch it, but only
+    because the committed file differs: regenerate the file in the same commit and the
+    document would claim 200 while the server returned 204, with nothing to say so.
+
+    The frontend generates its types from that document, so a wrong status there is a
+    client written against a response that never arrives.
+    """
+    doc = app.openapi()
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    card = make_kt_operative(kill_team=team)
+    roster = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Mine"}).json()
+    row = auth_client.post(f"{BASE}/{roster['id']}/operatives", json={"operative_id": str(card.id)}).json()
+
+    live = {
+        f"{BASE}/{{roster_id}}/operatives/{{row_id}}": auth_client.delete(
+            f"{BASE}/{roster['id']}/operatives/{row['id']}"
+        ).status_code,
+        f"{BASE}/{{roster_id}}": auth_client.delete(f"{BASE}/{roster['id']}").status_code,
+    }
+
+    for path, code in live.items():
+        published = set(doc["paths"][path]["delete"]["responses"]) - {"422"}
+        assert code == 204, f"{path} returned {code}"
+        assert str(code) in published, f"{path} returns {code} but publishes {sorted(published)}"

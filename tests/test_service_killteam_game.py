@@ -9,12 +9,13 @@ REFUSED is bookkeeping, what is merely recorded is a rule the players apply (#1)
 import itertools
 import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import event
 from sqlmodel import select
 
-from app.core.db.models_killteam import KTGameEvent, KTGameOperative
+from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_killteam_game import (
     EQUIPMENT_LIMIT,
@@ -216,17 +217,78 @@ def test_a_read_after_a_write_sees_the_write(session, battle):
 # --- the listing is lean ---------------------------------------------------
 
 
-def test_games_are_listed_newest_first_and_without_the_bundle(session, battle):
+def test_games_are_listed_newest_first(session, battle):
+    """Newest first, unlike rosters — and this really asserts the order.
+
+    An earlier version of this test compared a SET of ids, so it was named for an
+    ordering property it never checked: mutating the query to oldest-first passed it.
+    A game list answers "what did I play recently", where a roster list is a library
+    you scroll, which is why the two sort opposite ways.
+    """
     b = battle()
     svc = _service(session)
-    older = svc.create_game(b["user"].id, b["roster"].id, opponent_name="First")
-    newer = svc.create_game(b["user"].id, b["roster"].id, opponent_name="Second")
-    older.created_at, newer.created_at = older.created_at, newer.created_at
+    first = svc.create_game(b["user"].id, b["roster"].id, opponent_name="First")
+    second = svc.create_game(b["user"].id, b["roster"].id, opponent_name="Second")
+    first.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    second.created_at = datetime(2026, 1, 2, tzinfo=UTC)
+    session.add_all([first, second])
+    session.commit()
 
-    listed = svc.list_games(b["user"].id)
-
-    assert {g.id for g in listed} == {older.id, newer.id}
+    assert [g.opponent_name for g in svc.list_games(b["user"].id)] == ["Second", "First"]
     assert svc.count_games(b["user"].id) == 2
+
+
+def test_the_game_listing_pages_rather_than_returning_everything(session, battle):
+    """`limit` and `offset` reach the query.
+
+    Four mutants survived on this listing: ignoring `offset`, ignoring `limit`, dropping
+    the `id` tie-break, and reversing the sort. Every test called `list_games(user.id)`
+    with the defaults, so a listing that returned everything in any order passed them
+    all. The roster listing had the same three, which is audit finding 13.
+    """
+    b = battle()
+    svc = _service(session)
+    for n in range(5):
+        game = svc.create_game(b["user"].id, b["roster"].id, opponent_name=f"G{n}")
+        game.created_at = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=n)
+        session.add(game)
+    session.commit()
+
+    # Newest first, so G4 leads.
+    assert [g.opponent_name for g in svc.list_games(b["user"].id, limit=2)] == ["G4", "G3"]
+    assert [g.opponent_name for g in svc.list_games(b["user"].id, limit=2, offset=2)] == ["G2", "G1"]
+    assert [g.opponent_name for g in svc.list_games(b["user"].id, limit=2, offset=4)] == ["G0"]
+    # Paging the rows must not page the TOTAL.
+    assert svc.count_games(b["user"].id) == 5
+
+
+def test_games_sharing_a_timestamp_are_ordered_by_id(session, battle):
+    """`created_at` then `id`, so a page boundary cannot show a row twice or skip one.
+
+    Games created in one request share a timestamp, and the sort column alone would
+    leave them in whatever order the plan yielded -- which can differ between two
+    requests, so a client paging through would see one game twice and miss another.
+
+    Ids fixed and inserted so insertion order is the reverse of id order, which makes
+    dropping the tie-break fail deterministically.
+    """
+    b = battle()
+    stamp = datetime(2026, 1, 1, tzinfo=UTC)
+    ids = [uuid.UUID(f"ffffffff-0000-0000-0000-00000000000{n}") for n in (3, 2, 1)]
+    for n, game_id in enumerate(ids):
+        session.add(
+            KTGame(
+                id=game_id,
+                owner_user_id=b["user"].id,
+                kill_team_id=b["roster"].kill_team_id,
+                roster_id=b["roster"].id,
+                opponent_name=f"G{n}",
+                created_at=stamp,
+            )
+        )
+    session.commit()
+
+    assert [g.id for g in _service(session).list_games(b["user"].id)] == sorted(ids)
 
 
 def test_a_listing_only_ever_shows_the_callers_games(session, battle):

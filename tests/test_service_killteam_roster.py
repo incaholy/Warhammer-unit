@@ -8,11 +8,13 @@ of legality -- only of reference.
 
 import uuid
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
+from app.core.db.models_killteam import KTRoster
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_killteam_roster import KTRosterService, KTRosterValidationError
 
@@ -510,3 +512,59 @@ def test_a_roster_read_after_a_write_sees_the_write(
     service.add_operative(roster.id, operative.id, roster.owner_user_id)
 
     assert len(service.get_roster(roster.id).operatives) == 1
+
+
+# --- the listing pages, and orders stably (audit finding 13) ----------------
+
+
+def test_the_roster_listing_pages_rather_than_returning_everything(session, make_user, make_kill_team):
+    """`limit` and `offset` reach the query — which nothing checked until now.
+
+    Three mutants survived here: ignoring `offset`, ignoring `limit`, and dropping the
+    `id` from the ordering. Every existing test called `list_rosters(user.id)` with the
+    defaults, so a listing that returned everything in any order passed all of them.
+
+    The timestamps are set explicitly because the rows are created in one transaction
+    and would otherwise share one, which is the same tie this test's sibling is about.
+    """
+    user, team = make_user(), make_kill_team()
+    service = _service(session)
+    for n in range(5):
+        roster = service.create_roster(user.id, team.id, f"R{n}")
+        roster.created_at = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=n)
+        session.add(roster)
+    session.commit()
+
+    assert [r.name for r in service.list_rosters(user.id, limit=2)] == ["R0", "R1"]
+    assert [r.name for r in service.list_rosters(user.id, limit=2, offset=2)] == ["R2", "R3"]
+    assert [r.name for r in service.list_rosters(user.id, limit=2, offset=4)] == ["R4"]
+    # Paging the rows must not page the TOTAL, or a client cannot know there is a page 3.
+    assert service.count_rosters(user.id) == 5
+
+
+def test_rosters_sharing_a_timestamp_are_ordered_by_id(session, make_user, make_kill_team):
+    """`created_at` then `id`, so a page boundary cannot show a row twice or skip one.
+
+    Rows created in one request share a timestamp, and `created_at` alone would leave
+    them in whatever order the plan yielded -- which can differ between two requests,
+    so a client paging through would see a row twice and miss another.
+
+    The ids are fixed and inserted in DESCENDING order, so insertion order is the
+    reverse of id order and dropping the tie-break fails this deterministically rather
+    than only when random ids happen to disagree.
+    """
+    user, team = make_user(), make_kill_team()
+    stamp = datetime(2026, 1, 1, tzinfo=UTC)
+    ids = [uuid.UUID(f"ffffffff-0000-0000-0000-00000000000{n}") for n in (3, 2, 1)]
+    for n, roster_id in enumerate(ids):
+        roster = KTRoster(
+            id=roster_id,
+            owner_user_id=user.id,
+            kill_team_id=team.id,
+            name=f"R{n}",
+            created_at=stamp,
+        )
+        session.add(roster)
+    session.commit()
+
+    assert [r.id for r in _service(session).list_rosters(user.id)] == sorted(ids)
