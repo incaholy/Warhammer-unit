@@ -317,8 +317,22 @@ class KTGameService:
 
         # Bookkeeping, not a rule: an operative on zero wounds is out of the battle, and
         # a caller that has to remember to say so would eventually not.
+        #
+        # Both directions, which matters more than it looks. Setting the status on the way
+        # down and not on the way UP is asymmetric automation, and asymmetric is worse
+        # than none: because something maintains the field, a player trusts it, and it
+        # would be right only half the time. The way up is the CORRECTION path -- someone
+        # typed 0 and meant 5 -- which is exactly when they are already flustered, and
+        # since `activate_operative` now refuses an incapacitated model, a stale label
+        # there would leave a live operative unable to act for the rest of the game.
+        #
+        # `setdefault`, so a caller that names a status explicitly keeps it, and only
+        # `incapacitated` is cleared: an operative in `reserve` that gains wounds is
+        # still off the board.
         if fields.get("current_wounds") == 0:
             fields.setdefault("status", "incapacitated")
+        elif fields.get("current_wounds") and row.status == "incapacitated":
+            fields.setdefault("status", "on_board")
 
         touched = self._apply(row, fields)
         self._write(game, "operative_updated", touched, target_id=row.id)
@@ -330,9 +344,18 @@ class KTGameService:
         Not a field a caller sets (#61): the service reads the turning point off the
         game, so an activation cannot be recorded in one that is not happening, and
         "has it activated?" stays a comparison rather than a flag anyone must clear.
+
+        Refused for an operative on zero wounds, and only for that -- see the note in
+        `update_operative` about why the incapacitation it reads has to be symmetric.
         """
         game = self._require_game(game_id)
         row = self._require_operative(game_id, row_id)
+        # Bookkeeping, not a rule: a model that is gone cannot act, and an activation
+        # recorded against it is a wrong row in the log rather than a play anyone made.
+        # Deliberately NOT extended to `reserve`: whether an operative can arrive and act
+        # in one turning point is a RULE, and #1 says the players apply those.
+        if row.status == "incapacitated":
+            raise KTGameValidationError("status", f"{row.name} is incapacitated and cannot activate")
         if row.activated_in_turning_point == game.turning_point:
             raise KTGameValidationError(
                 "activated_in_turning_point",

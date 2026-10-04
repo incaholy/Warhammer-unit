@@ -799,3 +799,81 @@ def test_deleting_a_game_takes_its_rows_and_leaves_the_roster(session, battle):
     assert session.exec(select(KTGameOperative)).all() == []
     assert session.exec(select(KTGameEvent)).all() == []
     assert session.get(type(b["roster"]), b["roster"].id) is not None
+
+
+# --- the incapacitation reads both ways ------------------------------------
+
+
+def test_raising_wounds_above_zero_puts_an_operative_back_on_the_board(session, battle):
+    """The correction path, and the reason it has to exist.
+
+    Dropping to zero sets `incapacitated`; raising back above zero clears it. Setting
+    the field on the way down and not on the way up is asymmetric automation, which is
+    worse than none -- because something maintains the field, a player trusts it, and it
+    would be right only half the time.
+
+    It matters more now that `activate_operative` refuses an incapacitated model: a
+    stale label would leave a live operative unable to act for the rest of the game,
+    with nothing but an explicit `status` write to rescue it.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    row = game.operatives[0]
+
+    svc.update_operative(game.id, row.id, current_wounds=0)
+    assert row.status == "incapacitated"
+
+    svc.update_operative(game.id, row.id, current_wounds=5)
+
+    assert row.status == "on_board"
+    # And it can act again, which is the point.
+    assert svc.activate_operative(game.id, row.id).activated_in_turning_point == 1
+
+
+def test_an_explicit_status_wins_over_the_automatic_one(session, battle):
+    # `setdefault`, not an assignment: a caller that names a status means it. Wounding a
+    # model down to zero while declaring it `reserve` is odd but it is the caller's call.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    row = game.operatives[0]
+
+    svc.update_operative(game.id, row.id, current_wounds=0, status="reserve")
+
+    assert row.status == "reserve"
+
+
+def test_an_operative_in_reserve_that_gains_wounds_stays_off_the_board(session, battle):
+    # Only `incapacitated` is cleared. A model in reserve has not arrived, and healing it
+    # does not put it on the table.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    row = game.operatives[0]
+    svc.update_operative(game.id, row.id, status="reserve", current_wounds=4)
+
+    svc.update_operative(game.id, row.id, current_wounds=9)
+
+    assert row.status == "reserve"
+
+
+def test_an_incapacitated_operative_cannot_activate(session, battle):
+    """Bookkeeping, not a rule: a model that is gone cannot act.
+
+    Deliberately NOT extended to `reserve`. Whether an operative can arrive from reserve
+    and act in the same turning point is a RULE, and #1 leaves rules to the players --
+    refusing it would be the tracker guessing.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    dead, reserved = game.operatives[0], game.operatives[1]
+    svc.update_operative(game.id, dead.id, current_wounds=0)
+    svc.update_operative(game.id, reserved.id, status="reserve")
+
+    with pytest.raises(KTGameValidationError, match="incapacitated"):
+        svc.activate_operative(game.id, dead.id)
+
+    # The reserve one is allowed, because that is the players' call.
+    assert svc.activate_operative(game.id, reserved.id).activated_in_turning_point == 1
