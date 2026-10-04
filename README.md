@@ -94,4 +94,6 @@ conventions in full.
 - [`DEPLOY.md`](DEPLOY.md) — the fast, free path to putting the app online.
 - [`DEPLOY-GCP.md`](DEPLOY-GCP.md) — the production-shaped deploy on Google Cloud.
 - [`CODE-REVIEW.md`](CODE-REVIEW.md) — a full review of both repos (reasoning, not a live bug list).
+- [`KILLTEAM.md`](KILLTEAM.md) — the Kill Team 2024 tracker: catalog → roster → game,
+  and the numbered decisions behind it.
 - [`CLAUDE.md`](CLAUDE.md) — repo conventions and commands.

@@ -546,10 +546,11 @@ changeable until `fire-team` merges, since nothing is deployed against it.
 
 **Status: ✅ Done.**
 
-The eleven `kt_*` catalog tables from KILLTEAM.md and their migration, with test
-factories and model tests. Still treated as a draft: the migration has been
-regenerated six times -- five as the pages showed a column was wrong, once for the
-owner column of decision #54 -- and stays regenerable
+The nine `kt_*` catalog tables from KILLTEAM.md and their migration, with test
+factories and model tests. Fifteen `kt_*` tables exist now: those nine, K4's two roster
+tables and K5's four game tables. Still treated as a draft: the migration has been
+regenerated eight times -- six as the pages showed a column was wrong, then for
+decision #54's owner column and again for K5's game tables -- and stays regenerable
 until `fire-team` merges.
 
 ## K2. Data pipeline
@@ -558,7 +559,7 @@ until `fire-team` merges.
 
 Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
 tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. all 48 of the site's
-teams parse and seed. Composition is stored as the page's own words — 893
+teams parse and seed. Composition is stored as the page's own words — 897
 `KTSelectionRule` rows, nothing derived (KILLTEAM.md decision #44) — which is why there
 is no longer a warning channel for it: the checks all read a structure that is gone.
 Tested against **synthetic** fixtures, so no scraped content is committed.

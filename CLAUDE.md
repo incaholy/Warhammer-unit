@@ -12,10 +12,10 @@ build order and status are the K entries in ROADMAP.md.
 ## Commands
 
 ```bash
-uvicorn app.main:app --reload        # run the API (once app/main.py exists)
+uvicorn app.main:app --reload        # run the API
 alembic revision --autogenerate -m "msg"   # generate a migration after editing models
 alembic upgrade head                 # apply migrations
-pytest                               # run tests (once tests/ exists)
+pytest                               # run tests
 ```
 
 `DATABASE_URL` must be set (it lives in `.env`, which is gitignored).
@@ -24,7 +24,9 @@ pytest                               # run tests (once tests/ exists)
 
 - `app/api/` — FastAPI routers, one module per resource, with `*_Create`/`*_Read` schemas
 - `app/core/services/` — business logic, one `<Thing>Service` class per file
-- `app/core/db/` — `models.py` (SQLModel tables), `connection.py` (engine/session), `alembic/` (migrations)
+- `app/core/db/` — `models.py` and `models_killteam.py` (SQLModel tables), `columns.py`
+  (shared column types and helpers), `connection.py` (engine/session), `alembic/`
+  (migrations)
 
 ## Conventions
 
@@ -42,7 +44,7 @@ pytest                               # run tests (once tests/ exists)
   Never raise `HTTPException` in a service.
 - Every `*_Create`/`*_Update` schema inherits `WriteSchema` (`app/api/fields.py`),
   which forbids unknown keys, and bounds every string and int it declares — reusing
-  `Name`, `Username`, `Stat`, `DiceValue` or `INT32_MAX` rather than restating a
+  `Name`, `Username`, `Stat`, `DiceValue`, `WeaponCategory` or `INT32_MAX` rather than restating a
   limit. A SQLModel `max_length` constrains the DDL, not the request schema, so an
   unbounded field is a 500 on Postgres that SQLite cannot see.
   `tests/test_api_write_bounds.py` enforces both over `openapi.json`.
