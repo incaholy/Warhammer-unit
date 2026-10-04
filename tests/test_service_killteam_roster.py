@@ -568,3 +568,49 @@ def test_rosters_sharing_a_timestamp_are_ordered_by_id(session, make_user, make_
     session.commit()
 
     assert [r.id for r in _service(session).list_rosters(user.id)] == sorted(ids)
+
+
+def test_a_roster_a_game_was_played_from_cannot_be_deleted(
+    session, make_user, make_kill_team, make_kt_roster, make_kt_game
+):
+    """Decision #60, and the half of it the service was missing.
+
+    `fk_kt_game_roster` refuses this at the database anyway, so the check is here for the
+    MESSAGE: without it the generic `IntegrityError` backstop answers "conflict with an
+    existing resource", which a client cannot tell from any other 409. #60 claimed the
+    service named the games and it did not -- the claim came from the decision mirroring
+    `UnitService.delete_unit`, which really does check.
+    """
+    roster = make_kt_roster()
+    make_kt_game(roster=roster)
+
+    # "by 1 game and" and not "by 1 game": the latter is a substring of "1 games",
+    # so it would be satisfied by the very bug the plural exists to avoid.
+    with pytest.raises(ConflictError, match="by 1 game and"):
+        _service(session).delete_roster(roster.id)
+
+    # And nothing was half-done: the roster is still there.
+    assert session.get(KTRoster, roster.id) is not None
+
+
+def test_the_refusal_counts_the_games_rather_than_guessing(session, make_kt_roster, make_kt_game):
+    # Plural, because "is played by 1 games" is the kind of detail that makes a message
+    # look machine-written and stops people reading them.
+    roster = make_kt_roster()
+    make_kt_game(roster=roster)
+    make_kt_game(roster=roster)
+
+    with pytest.raises(ConflictError, match="is played by 2 games"):
+        _service(session).delete_roster(roster.id)
+
+
+def test_a_roster_with_no_games_still_deletes(session, make_kt_roster, make_kt_roster_operative):
+    # The check must not refuse the ordinary case, which is the way a guard like this
+    # usually goes wrong.
+    roster = make_kt_roster()
+    make_kt_roster_operative(roster=roster)
+
+    _service(session).delete_roster(roster.id)
+    session.commit()
+
+    assert session.get(KTRoster, roster.id) is None

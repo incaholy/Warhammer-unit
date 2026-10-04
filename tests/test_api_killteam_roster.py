@@ -464,3 +464,29 @@ def test_what_a_delete_publishes_is_what_it_returns(
         published = set(doc["paths"][path]["delete"]["responses"]) - {"422"}
         assert code == 204, f"{path} returned {code}"
         assert str(code) in published, f"{path} returns {code} but publishes {sorted(published)}"
+
+
+def test_deleting_a_roster_a_game_was_played_from_is_an_explained_409(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Decision #60 end to end — the status AND the message.
+
+    The audit found no API-level test for this at all: the only coverage asserted the raw
+    `IntegrityError` at the model layer, so a generic "conflict with an existing resource"
+    would have passed. What a client reads is the thing worth pinning.
+    """
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    card = make_kt_operative(kill_team=team)
+    roster = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Mine"}).json()
+    auth_client.post(f"{BASE}/{roster['id']}/operatives", json={"operative_id": str(card.id)})
+    game = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]})
+    assert game.status_code == 201, game.text
+
+    resp = auth_client.delete(f"{BASE}/{roster['id']}")
+
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "is played by 1 game and" in body["detail"], body
+    assert body["code"] == "CONFLICT"
+    # Still there, and still readable.
+    assert auth_client.get(f"{BASE}/{roster['id']}").status_code == 200

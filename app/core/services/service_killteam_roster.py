@@ -26,6 +26,7 @@ from app.core.db.columns import not_nullable_fields
 from app.core.db.models import User
 from app.core.db.models_killteam import (
     KillTeam,
+    KTGame,
     KTOperative,
     KTRoster,
     KTRosterOperative,
@@ -206,8 +207,25 @@ class KTRosterService:
         return roster
 
     def delete_roster(self, roster_id: UUID) -> None:
-        """Delete a roster and the rows on it. Catalog operatives are untouched."""
+        """Delete a roster and the rows on it. Catalog operatives are untouched.
+
+        Refused while a GAME was played from it (decision #60), because a battle keeps
+        its roster link so a screen can always say which list it was played from.
+        `fk_kt_game_roster` carries no `ondelete`, so the database refuses this anyway --
+        the check is here so the caller learns WHY. Without it the generic
+        `IntegrityError` backstop answers "conflict with an existing resource", which a
+        client cannot tell from any other 409.
+
+        The same shape as `UnitService.delete_unit`, which refuses a catalog unit an army
+        or an inventory references, and which #60 cited as the house pattern.
+        """
         roster = self._require_roster(roster_id)
+        played = self.session.exec(select(func.count(KTGame.id)).where(KTGame.roster_id == roster_id)).one()
+        if played:
+            raise ConflictError(
+                f"roster {roster.name!r} is played by "
+                f"{played} game{'s' if played != 1 else ''} and cannot be deleted"
+            )
         self.session.delete(roster)  # `cascade_delete` takes its operatives
         self.session.flush()
 
