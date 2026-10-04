@@ -16,6 +16,10 @@ from app.core.db.models_killteam import (
     KTAbility,
     KTEquipment,
     KTFaction,
+    KTGame,
+    KTGameEquipment,
+    KTGameEvent,
+    KTGameOperative,
     KTOperative,
     KTPloy,
     KTRoster,
@@ -820,3 +824,238 @@ def test_a_direct_update_cannot_move_a_row_into_another_players_roster(
     session.rollback()
 
     assert session.get(KTRosterOperative, row_id).roster_id == victim_id
+
+
+# --- the game tables (K5) --------------------------------------------------
+
+
+def test_a_game_is_created_from_a_roster_with_its_owner_and_team(session, make_kt_game):
+    game = make_kt_game()
+
+    assert game.status == "setup"
+    assert game.turning_point == 1
+    assert game.phase == "strategy"
+    assert game.command_points == 0
+    assert game.version == 1
+    # The documents default to empty rather than NULL, so a read never has to ask which.
+    assert (game.markers, game.ploys_used, game.rules, game.ploys) == ([], [], [], [])
+    assert (game.victory_points, game.choices) == ({}, {})
+
+
+def test_a_game_operative_cannot_sit_in_another_players_game(
+    session, make_user, make_kt_game, make_kt_operative
+):
+    """The owner leg of `fk_kt_game_operative_game` — #54's pattern, applied to a game.
+
+    Every other column is valid: the datacard really belongs to the game's kill team.
+    Only `owner_user_id` names someone else, so the triple has no match on `kt_games`.
+    """
+    game = make_kt_game()
+    operative = make_kt_operative(kill_team=game.kill_team)
+    stranger = make_user(username="gatecrasher", email="gatecrasher@test.invalid")
+    session.add(
+        KTGameOperative(
+            game_id=game.id,
+            operative_id=operative.id,
+            kill_team_id=game.kill_team_id,
+            owner_user_id=stranger.id,
+            name=operative.name,
+            apl=operative.apl,
+            move=operative.move,
+            save=operative.save,
+            wounds=operative.wounds,
+            current_wounds=operative.wounds,
+        )
+    )
+
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.commit()
+
+
+def test_a_game_operative_cannot_name_another_teams_datacard(
+    session, make_kill_team, make_kt_game, make_kt_operative
+):
+    # The shared `kill_team_id` again: it has to satisfy the game leg AND the operative
+    # leg, so a card from another team has nowhere to sit.
+    game = make_kt_game()
+    stranger = make_kt_operative(kill_team=make_kill_team(name="Someone Else"))
+    session.add(
+        KTGameOperative(
+            game_id=game.id,
+            operative_id=stranger.id,
+            kill_team_id=game.kill_team_id,  # claims the game's team
+            owner_user_id=game.owner_user_id,
+            name=stranger.name,
+            apl=stranger.apl,
+            move=stranger.move,
+            save=stranger.save,
+            wounds=stranger.wounds,
+            current_wounds=stranger.wounds,
+        )
+    )
+
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.commit()
+
+
+def test_an_operative_cannot_hold_more_wounds_than_its_snapshot_allows(session, make_kt_game_operative):
+    # The bookkeeping rule held in the schema, so no path can store it: a transform that
+    # lowers the card's maximum has to resolve the current value, not leave it over.
+    row = make_kt_game_operative()
+    row.current_wounds = row.wounds + 1
+    session.add(row)
+
+    with pytest.raises(IntegrityError, match="ck_kt_game_operative_current_wounds"):
+        session.commit()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "constraint"),
+    [
+        ("order", "sprinting", "ck_kt_game_operative_order"),
+        ("status", "airborne", "ck_kt_game_operative_status"),
+        ("source", "wishful_thinking", "ck_kt_game_operative_source"),
+        ("activated_in_turning_point", 5, "ck_kt_game_operative_activated_tp"),
+        ("added_in_turning_point", 0, "ck_kt_game_operative_added_tp"),
+    ],
+)
+def test_a_game_operatives_vocabulary_is_closed(session, make_kt_game_operative, field, value, constraint):
+    row = make_kt_game_operative()
+    setattr(row, field, value)
+    session.add(row)
+
+    with pytest.raises(IntegrityError, match=constraint):
+        session.commit()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "constraint"),
+    [
+        ("status", "abandoned", "ck_kt_game_status"),
+        ("phase", "shooting", "ck_kt_game_phase"),
+        ("initiative", "nobody", "ck_kt_game_initiative"),
+        ("turning_point", 5, "ck_kt_game_turning_point"),
+        ("turning_point", 0, "ck_kt_game_turning_point"),
+        ("command_points", -1, "ck_kt_game_command_points"),
+        ("version", 0, "ck_kt_game_version"),
+        ("opponent_name", "   ", "ck_kt_game_opponent_name"),
+    ],
+)
+def test_a_games_vocabulary_is_closed(session, make_kt_game, field, value, constraint):
+    game = make_kt_game()
+    setattr(game, field, value)
+    session.add(game)
+
+    with pytest.raises(IntegrityError, match=constraint):
+        session.commit()
+
+
+def test_the_same_equipment_cannot_be_taken_twice_in_one_game(
+    session, make_kt_game, make_kt_equipment, make_kt_game_equipment
+):
+    # Decision #17's one schema-enforced equipment rule. The ALLOWANCE is not enforced
+    # at all (#57) -- a game may take a fifth piece.
+    game = make_kt_game()
+    item = make_kt_equipment()
+    make_kt_game_equipment(game=game, equipment=item)
+
+    make_kt_game_equipment(game=game, equipment=make_kt_equipment(name="Something Else"))
+    session.add(KTGameEquipment(game_id=game.id, equipment_id=item.id, name=item.name, text="x"))
+
+    # `(?i)unique`, not the constraint name: SQLite names the COLUMNS in a unique
+    # violation where Postgres names the constraint, so matching the name would
+    # pass on one tier and fail on the other. Still specific enough to tell a
+    # unique violation from a CHECK, a NOT NULL or a foreign key.
+    with pytest.raises(IntegrityError, match="(?i)unique"):
+        session.commit()
+
+
+def test_a_games_event_sequence_is_unique_so_the_last_event_is_a_fact(
+    session, make_kt_game, make_kt_game_event
+):
+    """`sequence` is what `undo` reads to find the last event (#58).
+
+    `created_at` could not: two events written in one transaction share a timestamp, and
+    an undo that picked the wrong one of a tied pair would revert the wrong field.
+    """
+    game = make_kt_game()
+    make_kt_game_event(game=game)
+    make_kt_game_event(game=game)
+    session.add(KTGameEvent(game_id=game.id, sequence=1, type="cp_spent", turning_point=1))
+
+    # `(?i)unique`, not the constraint name: SQLite names the COLUMNS in a unique
+    # violation where Postgres names the constraint, so matching the name would
+    # pass on one tier and fail on the other. Still specific enough to tell a
+    # unique violation from a CHECK, a NOT NULL or a foreign key.
+    with pytest.raises(IntegrityError, match="(?i)unique"):
+        session.commit()
+
+
+def test_two_games_number_their_events_independently(session, make_kt_game, make_kt_game_event):
+    # `UNIQUE(game_id, sequence)` and not `UNIQUE(sequence)`: one game's log is no
+    # constraint on another's.
+    first, second = make_kt_game(), make_kt_game()
+    make_kt_game_event(game=first, sequence=1)
+    make_kt_game_event(game=second, sequence=1)
+
+    assert len(session.exec(select(KTGameEvent)).all()) == 2
+
+
+def test_an_event_cannot_undo_itself(session, make_kt_game_event):
+    event = make_kt_game_event()
+    event.undone_by = event.id
+    session.add(event)
+
+    with pytest.raises(IntegrityError, match="ck_kt_game_event_undone_by"):
+        session.commit()
+
+
+def test_deleting_a_roster_is_refused_while_a_game_was_played_from_it(session, make_kt_roster, make_kt_game):
+    """`fk_kt_game_roster` has no `ondelete`, so NO ACTION refuses it.
+
+    A game is self-contained once it starts (#22, #24), but `roster_id` stays NOT NULL
+    so a battle can always say which roster it was played from. The service turns this
+    into a 409 naming the games, the shape `UnitService.delete_unit` already uses.
+    """
+    roster = make_kt_roster()
+    make_kt_game(roster=roster)
+
+    session.delete(roster)
+
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.commit()
+
+
+def test_deleting_a_user_takes_their_games_and_everything_on_them(
+    session,
+    make_user,
+    make_kt_roster,
+    make_kt_game,
+    make_kt_game_operative,
+    make_kt_game_equipment,
+    make_kt_game_event,
+):
+    """Two cascade paths from one DELETE, and both have to fire.
+
+    `kt_games.owner_user_id` cascades from `users`, and so does `kt_rosters.owner_user_id`
+    -- while `fk_kt_game_roster` points at the roster with NO ACTION. The order those
+    fire in is not guaranteed, so this is the test that says the pair does not deadlock:
+    NO ACTION is checked at the end of the statement, by which time both rows are gone.
+    Verified on both tiers, since SQLite and Postgres disagree about plenty else.
+    """
+    user = make_user()
+    game = make_kt_game(roster=make_kt_roster(owner=user))
+    make_kt_game_operative(game=game)
+    make_kt_game_equipment(game=game)
+    make_kt_game_event(game=game)
+    assert session.exec(select(KTGameOperative)).all(), "the rows exist before the delete"
+
+    session.delete(user)
+    session.commit()
+
+    assert session.exec(select(KTGame)).all() == []
+    assert session.exec(select(KTGameOperative)).all() == []
+    assert session.exec(select(KTGameEquipment)).all() == []
+    assert session.exec(select(KTGameEvent)).all() == []
+    assert session.exec(select(KTRoster)).all() == []
+    assert session.exec(select(KTOperative)).all(), "the catalog operative survives"

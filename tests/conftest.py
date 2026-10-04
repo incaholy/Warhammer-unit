@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, text
+from sqlalchemy import event, func, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 # Importing the models registers every table on SQLModel.metadata.
 from app.core.db.connection import get_session
@@ -26,6 +26,10 @@ from app.core.db.models_killteam import (
     KTAbility,
     KTEquipment,
     KTFaction,
+    KTGame,
+    KTGameEquipment,
+    KTGameEvent,
+    KTGameOperative,
     KTOperative,
     KTPloy,
     KTRoster,
@@ -451,6 +455,113 @@ def make_kt_roster(session, make_user, make_kill_team):
         session.commit()
         session.refresh(roster)
         return roster
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game(session, make_kt_roster):
+    """One game played from a roster. Pass `roster=` to play an existing one.
+
+    The game's owner and kill team come FROM the roster, because its composite foreign
+    key ties all three (`fk_kt_game_roster`) -- passing them separately would only ever
+    produce a row the database refuses.
+    """
+
+    def _make(roster=None, **overrides):
+        roster = roster or make_kt_roster()
+        data = dict(opponent_name=f"Opponent {next(_counter)}")
+        data.update(overrides)
+        game = KTGame(
+            owner_user_id=roster.owner_user_id,
+            kill_team_id=roster.kill_team_id,
+            roster_id=roster.id,
+            **data,
+        )
+        session.add(game)
+        session.commit()
+        session.refresh(game)
+        return game
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_operative(session, make_kt_game, make_kt_operative):
+    """One operative in a game, snapshotted off a catalog datacard.
+
+    The snapshot columns are filled FROM the catalog row, which is what the service's
+    `create_game` does -- a factory that invented its own stats would let a test pass
+    against a snapshot the catalog never produced.
+    """
+
+    def _make(game=None, operative=None, **overrides):
+        game = game or make_kt_game()
+        # Must be a datacard of the GAME's kill team, or `fk_kt_game_operative_operative`
+        # refuses the row -- the same tie a roster row has.
+        operative = operative or make_kt_operative(kill_team=game.kill_team)
+        data = dict(
+            name=operative.name,
+            apl=operative.apl,
+            move=operative.move,
+            save=operative.save,
+            wounds=operative.wounds,
+            keywords=list(operative.keywords),
+            current_wounds=operative.wounds,
+        )
+        data.update(overrides)
+        row = KTGameOperative(
+            game_id=game.id,
+            operative_id=operative.id,
+            # Both reached by the composite legs, so they must match the game's.
+            kill_team_id=game.kill_team_id,
+            owner_user_id=game.owner_user_id,
+            **data,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_equipment(session, make_kt_game, make_kt_equipment):
+    """A piece of equipment picked for a game, with its text snapshotted."""
+
+    def _make(game=None, equipment=None, **overrides):
+        game = game or make_kt_game()
+        equipment = equipment or make_kt_equipment()
+        data = dict(name=equipment.name, text=equipment.description)
+        data.update(overrides)
+        row = KTGameEquipment(game_id=game.id, equipment_id=equipment.id, **data)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_event(session, make_kt_game):
+    """One event in a game's log. `sequence` defaults to one past the game's last."""
+
+    def _make(game=None, **overrides):
+        game = game or make_kt_game()
+        if "sequence" not in overrides:
+            highest = session.exec(
+                select(func.max(KTGameEvent.sequence)).where(KTGameEvent.game_id == game.id)
+            ).one()
+            overrides["sequence"] = 1 if highest is None else highest + 1
+        data = dict(type="operative_wounded", turning_point=game.turning_point, payload={})
+        data.update(overrides)
+        event = KTGameEvent(game_id=game.id, **data)
+        session.add(event)
+        session.commit()
+        session.refresh(event)
+        return event
 
     return _make
 

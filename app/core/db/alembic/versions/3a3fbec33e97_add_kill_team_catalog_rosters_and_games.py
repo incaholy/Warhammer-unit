@@ -1,8 +1,8 @@
-"""add kill team catalog and rosters
+"""add kill team catalog, rosters and games
 
-Revision ID: 623a5d229b3f
+Revision ID: 3a3fbec33e97
 Revises: 44441c6a9671
-Create Date: 2026-10-03 15:37:11.577044
+Create Date: 2026-10-03 16:58:45.884622
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '623a5d229b3f'
+revision: str = '3a3fbec33e97'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -166,6 +166,44 @@ def upgrade() -> None:
     sa.UniqueConstraint('operative_id', 'name')
     )
     op.create_index(op.f('ix_kt_abilities_operative_id'), 'kt_abilities', ['operative_id'], unique=False)
+    op.create_table('kt_games',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('owner_user_id', sa.Uuid(), nullable=False),
+    sa.Column('roster_id', sa.Uuid(), nullable=False),
+    sa.Column('kill_team_id', sa.Uuid(), nullable=False),
+    sa.Column('opponent_name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=True),
+    sa.Column('status', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('turning_point', sa.Integer(), nullable=False),
+    sa.Column('phase', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('initiative', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('command_points', sa.Integer(), nullable=False),
+    sa.Column('victory_points', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('opponent_victory_points', sa.Integer(), nullable=False),
+    sa.Column('markers', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('ploys_used', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('rules', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('ploys', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('choices', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('version', sa.Integer(), nullable=False),
+    sa.CheckConstraint("initiative IN ('player', 'opponent')", name='ck_kt_game_initiative'),
+    sa.CheckConstraint("phase IN ('strategy', 'firefight')", name='ck_kt_game_phase'),
+    sa.CheckConstraint("status IN ('setup', 'in_progress', 'finished')", name='ck_kt_game_status'),
+    sa.CheckConstraint('command_points >= 0', name='ck_kt_game_command_points'),
+    sa.CheckConstraint('opponent_name IS NULL OR length(trim(opponent_name)) > 0', name='ck_kt_game_opponent_name'),
+    sa.CheckConstraint('opponent_victory_points >= 0', name='ck_kt_game_opponent_vp'),
+    sa.CheckConstraint('turning_point BETWEEN 1 AND 4', name='ck_kt_game_turning_point'),
+    sa.CheckConstraint('version >= 1', name='ck_kt_game_version'),
+    sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ),
+    sa.ForeignKeyConstraint(['owner_user_id', 'kill_team_id', 'roster_id'], ['kt_rosters.owner_user_id', 'kt_rosters.kill_team_id', 'kt_rosters.id'], name='fk_kt_game_roster'),
+    sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('owner_user_id', 'kill_team_id', 'id', name='uq_kt_game_owner_team_id')
+    )
+    op.create_index(op.f('ix_kt_games_kill_team_id'), 'kt_games', ['kill_team_id'], unique=False)
+    op.create_index(op.f('ix_kt_games_owner_user_id'), 'kt_games', ['owner_user_id'], unique=False)
+    op.create_index(op.f('ix_kt_games_roster_id'), 'kt_games', ['roster_id'], unique=False)
     op.create_table('kt_roster_operatives',
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
@@ -207,12 +245,107 @@ def upgrade() -> None:
     sa.UniqueConstraint('operative_id', 'name', 'category')
     )
     op.create_index(op.f('ix_kt_weapons_operative_id'), 'kt_weapons', ['operative_id'], unique=False)
+    op.create_table('kt_game_equipment',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('game_id', sa.Uuid(), nullable=False),
+    sa.Column('equipment_id', sa.Uuid(), nullable=False),
+    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('text', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+    sa.Column('revealed', sa.Boolean(), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
+    sa.CheckConstraint('position >= 0', name='ck_kt_game_equipment_position'),
+    sa.ForeignKeyConstraint(['equipment_id'], ['kt_equipment.id'], ),
+    sa.ForeignKeyConstraint(['game_id'], ['kt_games.id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('game_id', 'equipment_id', name='uq_kt_game_equipment')
+    )
+    op.create_index(op.f('ix_kt_game_equipment_equipment_id'), 'kt_game_equipment', ['equipment_id'], unique=False)
+    op.create_index(op.f('ix_kt_game_equipment_game_id'), 'kt_game_equipment', ['game_id'], unique=False)
+    op.create_table('kt_game_events',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('game_id', sa.Uuid(), nullable=False),
+    sa.Column('sequence', sa.Integer(), nullable=False),
+    sa.Column('type', sqlmodel.sql.sqltypes.AutoString(length=64), nullable=False),
+    sa.Column('turning_point', sa.Integer(), nullable=False),
+    sa.Column('payload', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('undone_by', sa.Uuid(), nullable=True),
+    sa.CheckConstraint('length(trim(type)) > 0', name='ck_kt_game_event_type'),
+    sa.CheckConstraint('sequence >= 1', name='ck_kt_game_event_sequence'),
+    sa.CheckConstraint('turning_point BETWEEN 1 AND 4', name='ck_kt_game_event_turning_point'),
+    sa.CheckConstraint('undone_by IS NULL OR undone_by <> id', name='ck_kt_game_event_undone_by'),
+    sa.ForeignKeyConstraint(['game_id'], ['kt_games.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['undone_by'], ['kt_game_events.id'], ),
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('game_id', 'sequence', name='uq_kt_game_event_sequence')
+    )
+    op.create_index(op.f('ix_kt_game_events_game_id'), 'kt_game_events', ['game_id'], unique=False)
+    op.create_index(op.f('ix_kt_game_events_type'), 'kt_game_events', ['type'], unique=False)
+    op.create_index(op.f('ix_kt_game_events_undone_by'), 'kt_game_events', ['undone_by'], unique=False)
+    op.create_table('kt_game_operatives',
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('game_id', sa.Uuid(), nullable=False),
+    sa.Column('operative_id', sa.Uuid(), nullable=False),
+    sa.Column('kill_team_id', sa.Uuid(), nullable=False),
+    sa.Column('owner_user_id', sa.Uuid(), nullable=False),
+    sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('apl', sa.Integer(), nullable=False),
+    sa.Column('move', sa.Integer(), nullable=False),
+    sa.Column('save', sa.Integer(), nullable=False),
+    sa.Column('wounds', sa.Integer(), nullable=False),
+    sa.Column('keywords', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('weapons', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('abilities', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('current_wounds', sa.Integer(), nullable=False),
+    sa.Column('order', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('status', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('activated_in_turning_point', sa.Integer(), nullable=True),
+    sa.Column('tokens', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('actions_used', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('source', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('added_in_turning_point', sa.Integer(), nullable=True),
+    sa.CheckConstraint("source IN ('roster', 'equipment', 'rule')", name='ck_kt_game_operative_source'),
+    sa.CheckConstraint("status IN ('reserve', 'on_board', 'incapacitated')", name='ck_kt_game_operative_status'),
+    sa.CheckConstraint('"order" IN (\'engage\', \'conceal\')', name='ck_kt_game_operative_order'),
+    sa.CheckConstraint('activated_in_turning_point IS NULL OR activated_in_turning_point BETWEEN 1 AND 4', name='ck_kt_game_operative_activated_tp'),
+    sa.CheckConstraint('added_in_turning_point IS NULL OR added_in_turning_point BETWEEN 1 AND 4', name='ck_kt_game_operative_added_tp'),
+    sa.CheckConstraint('apl >= 1', name='ck_kt_game_operative_apl'),
+    sa.CheckConstraint('current_wounds >= 0 AND current_wounds <= wounds', name='ck_kt_game_operative_current_wounds'),
+    sa.CheckConstraint('move >= 0 AND save >= 0', name='ck_kt_game_operative_stats_non_negative'),
+    sa.CheckConstraint('position >= 0', name='ck_kt_game_operative_position'),
+    sa.CheckConstraint('wounds >= 0', name='ck_kt_game_operative_wounds'),
+    sa.ForeignKeyConstraint(['kill_team_id', 'operative_id'], ['kt_operatives.kill_team_id', 'kt_operatives.id'], name='fk_kt_game_operative_operative'),
+    sa.ForeignKeyConstraint(['owner_user_id', 'kill_team_id', 'game_id'], ['kt_games.owner_user_id', 'kt_games.kill_team_id', 'kt_games.id'], name='fk_kt_game_operative_game', ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_kt_game_operatives_game_id'), 'kt_game_operatives', ['game_id'], unique=False)
+    op.create_index(op.f('ix_kt_game_operatives_kill_team_id'), 'kt_game_operatives', ['kill_team_id'], unique=False)
+    op.create_index(op.f('ix_kt_game_operatives_operative_id'), 'kt_game_operatives', ['operative_id'], unique=False)
+    op.create_index(op.f('ix_kt_game_operatives_owner_user_id'), 'kt_game_operatives', ['owner_user_id'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_kt_game_operatives_owner_user_id'), table_name='kt_game_operatives')
+    op.drop_index(op.f('ix_kt_game_operatives_operative_id'), table_name='kt_game_operatives')
+    op.drop_index(op.f('ix_kt_game_operatives_kill_team_id'), table_name='kt_game_operatives')
+    op.drop_index(op.f('ix_kt_game_operatives_game_id'), table_name='kt_game_operatives')
+    op.drop_table('kt_game_operatives')
+    op.drop_index(op.f('ix_kt_game_events_undone_by'), table_name='kt_game_events')
+    op.drop_index(op.f('ix_kt_game_events_type'), table_name='kt_game_events')
+    op.drop_index(op.f('ix_kt_game_events_game_id'), table_name='kt_game_events')
+    op.drop_table('kt_game_events')
+    op.drop_index(op.f('ix_kt_game_equipment_game_id'), table_name='kt_game_equipment')
+    op.drop_index(op.f('ix_kt_game_equipment_equipment_id'), table_name='kt_game_equipment')
+    op.drop_table('kt_game_equipment')
     op.drop_index(op.f('ix_kt_weapons_operative_id'), table_name='kt_weapons')
     op.drop_table('kt_weapons')
     op.drop_index(op.f('ix_kt_roster_operatives_roster_id'), table_name='kt_roster_operatives')
@@ -220,6 +353,10 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_kt_roster_operatives_operative_id'), table_name='kt_roster_operatives')
     op.drop_index(op.f('ix_kt_roster_operatives_kill_team_id'), table_name='kt_roster_operatives')
     op.drop_table('kt_roster_operatives')
+    op.drop_index(op.f('ix_kt_games_roster_id'), table_name='kt_games')
+    op.drop_index(op.f('ix_kt_games_owner_user_id'), table_name='kt_games')
+    op.drop_index(op.f('ix_kt_games_kill_team_id'), table_name='kt_games')
+    op.drop_table('kt_games')
     op.drop_index(op.f('ix_kt_abilities_operative_id'), table_name='kt_abilities')
     op.drop_table('kt_abilities')
     op.drop_index(op.f('ix_kt_selection_rules_kind'), table_name='kt_selection_rules')

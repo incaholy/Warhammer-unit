@@ -16,6 +16,10 @@ Built in slices (ROADMAP K1). This module currently holds:
 
     User → KTRoster → KTRosterOperative → KTOperative   (K4)
 
+    User → KTGame → KTGameOperative   (snapshot of KTOperative)   (K5)
+                 ├→ KTGameEquipment   (snapshot of KTEquipment)
+                 └→ KTGameEvent       (append-only, for undo)
+
 The columns are provisional until `fire-team` merges; the scraped pages (K2) can
 still change them.
 
@@ -38,6 +42,13 @@ from app.core.db.models import TimestampMixin
 # no way to be indexed, and a keyword is exactly the sort of thing a catalog gets filtered
 # by. Declared once and shared: the three columns hold the same shape for the same reason.
 STRING_LIST = JSON().with_variant(JSONB(), "postgresql")
+
+# The same column type under a name that says what it holds. A game's snapshots and its
+# event payloads are JSON DOCUMENTS -- objects, and lists of objects -- not lists of
+# strings, and reading `STRING_LIST` on `KTGameOperative.weapons` would misdescribe it.
+# One definition, two names, because the reason for the variant is identical: JSONB on
+# Postgres so a payload can be queried and indexed, plain JSON on SQLite's test tier.
+JSON_DOC = JSON().with_variant(JSONB(), "postgresql")
 
 
 class KTFaction(TimestampMixin, table=True):
@@ -649,3 +660,352 @@ class KTRosterOperative(TimestampMixin, table=True):
     operative: KTOperative = Relationship(
         sa_relationship_kwargs={"overlaps": "operatives,roster"},
     )
+
+
+class KTGame(TimestampMixin, table=True):
+    """One battle, played from a roster — and self-contained once it starts.
+
+    **The catalog is read-only; a game owns everything that changes** (decision #21).
+    A game COPIES the reference it needs -- every datacard it plays with (#22), the
+    team's rules and both ploy lists (#24), the text of each piece of equipment taken --
+    and from then on writes only its own rows. So a balance update cannot change a
+    battle in progress, a finished game still shows the datacard as it was played, and
+    the whole screen needs no catalog request once the game exists.
+
+    That copy is not free, and the cost is stated rather than discovered: a roster
+    detail measures 24-42 KB (#52) and a game's snapshots are the same bundle stored
+    rather than served, so each game holds roughly that much JSON permanently. Which is
+    why the listing read must stay lean the way the roster listing is.
+
+    `version` is decision #9: a stale write answers 409 rather than silently overwriting
+    the other tab. `choices` is the per-game picks the rules leave to the players (#1) --
+    the Accursed Gift, the Tac Ops taken (#59) -- so a new one of those needs no column.
+
+    There is **no `equipment_limit` column** (decision #57). The allowance is a constant
+    the read reports, never a refusal, and no team's page states a different number.
+    """
+
+    __tablename__ = "kt_games"
+    __table_args__ = (
+        # The FK target for `KTGameOperative`'s composite leg, carrying the owner and the
+        # kill team for the same reasons `uq_kt_roster_owner_team_id` does (#54): a game
+        # operative can then only sit in a game its own owner owns, and can only name a
+        # datacard of that game's team.
+        UniqueConstraint("owner_user_id", "kill_team_id", "id", name="uq_kt_game_owner_team_id"),
+        # Three columns into the roster, so a game cannot name a roster of another player
+        # or claim a kill team its roster does not play. **No `ondelete`**, deliberately:
+        # NO ACTION means deleting a roster a game was played from is REFUSED, and the
+        # service turns that into a 409 naming the games -- the shape
+        # `UnitService.delete_unit` already uses for a referenced catalog unit. A game is
+        # self-contained enough to survive it, but `roster_id` stays NOT NULL so the
+        # screen can always say which roster a battle was played from, and a NULL in a
+        # composite leg would stop the whole constraint being checked under MATCH SIMPLE.
+        ForeignKeyConstraint(
+            ["owner_user_id", "kill_team_id", "roster_id"],
+            ["kt_rosters.owner_user_id", "kt_rosters.kill_team_id", "kt_rosters.id"],
+            name="fk_kt_game_roster",
+        ),
+        CheckConstraint("status IN ('setup', 'in_progress', 'finished')", name="ck_kt_game_status"),
+        CheckConstraint("phase IN ('strategy', 'firefight')", name="ck_kt_game_phase"),
+        CheckConstraint("initiative IN ('player', 'opponent')", name="ck_kt_game_initiative"),
+        # A game of Kill Team is four turning points. Enforced here and not only in the
+        # service, because "no turning point past 4" is bookkeeping the schema can hold.
+        CheckConstraint("turning_point BETWEEN 1 AND 4", name="ck_kt_game_turning_point"),
+        CheckConstraint("command_points >= 0", name="ck_kt_game_command_points"),
+        CheckConstraint("opponent_victory_points >= 0", name="ck_kt_game_opponent_vp"),
+        CheckConstraint("version >= 1", name="ck_kt_game_version"),
+        CheckConstraint(
+            "opponent_name IS NULL OR length(trim(opponent_name)) > 0",
+            name="ck_kt_game_opponent_name",
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    # delete a user -> their games go with them, as their rosters and armies do
+    owner_user_id: UUID = Field(foreign_key="users.id", ondelete="CASCADE", index=True)
+    # Reached by the composite leg above rather than carrying their own single-column
+    # foreign keys, which is what ties the three together instead of merely each to its
+    # parent.
+    roster_id: UUID = Field(index=True)
+    # Also carries a single-column foreign key of its own, the way `KTRoster.kill_team_id`
+    # does: the composite leg ties it to the ROSTER's team, and this one lets the
+    # `kill_team` relationship below infer its join, which a read needs for the team's
+    # name the way a roster listing does.
+    kill_team_id: UUID = Field(foreign_key="kt_kill_teams.id", index=True)
+
+    # Who you played. Optional -- a solo practice game has no opponent to name -- but
+    # not blank, so a listing never shows an empty string where a name should be.
+    opponent_name: str | None = Field(default=None, max_length=128)
+
+    status: str = Field(default="setup", max_length=16)
+    turning_point: int = Field(default=1)
+    phase: str = Field(default="strategy", max_length=16)
+    initiative: str = Field(default="player", max_length=16)
+
+    command_points: int = Field(default=0)
+    # VP BY SOURCE, as a document rather than a column each: the sources are a rules
+    # concept the players apply (#1), and with Tac Ops out of v1 (#59) there is no fixed
+    # set to make columns from. `{"<source>": <points>}`.
+    victory_points: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
+    opponent_victory_points: int = Field(default=0)
+
+    # Team-level markers on the killzone, e.g. Raveners' Tunnel markers. Generic on
+    # purpose: the tracker records that a marker exists, the players apply what it does,
+    # so a new team needs no migration.
+    markers: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+    # `{"name": ..., "turning_point": ...}` entries, the team-level twin of an
+    # operative's `actions_used` (#23), so the CP column has a readable history beside it.
+    ploys_used: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+
+    # The team's reference, snapshotted (#24): its rules, and its ploys together with the
+    # universal ones. Display-only, like a datacard's weapons -- nothing reads a field
+    # out of these to decide anything.
+    rules: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+    ploys: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+
+    # Per-game picks the rules leave to the players (#1, #59): the Accursed Gift, the Tac
+    # Ops taken. A document so a new one of those is not a migration.
+    choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
+
+    version: int = Field(default=1)
+
+    kill_team: KillTeam = Relationship(
+        # `kill_team_id` is written by the composite roster leg too, so the relationship
+        # is told it shares the column rather than owning it.
+        sa_relationship_kwargs={"overlaps": "roster,operatives"},
+    )
+    operatives: list["KTGameOperative"] = Relationship(
+        back_populates="game",
+        cascade_delete=True,
+        # `position` then `id`, the lesson of #53: positions are copied from the roster
+        # and an added operative appends, so two rows can tie and `position` alone would
+        # leave them in whatever order the plan yielded.
+        sa_relationship_kwargs={"order_by": "KTGameOperative.position, KTGameOperative.id"},
+    )
+    equipment: list["KTGameEquipment"] = Relationship(
+        back_populates="game",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTGameEquipment.position, KTGameEquipment.id"},
+    )
+    events: list["KTGameEvent"] = Relationship(
+        back_populates="game",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTGameEvent.sequence"},
+    )
+
+
+class KTGameOperative(TimestampMixin, table=True):
+    """One operative in a battle: a SNAPSHOT of its datacard, plus what is true of it now.
+
+    The snapshot is the whole card (decision #22) -- stats, every weapon profile, every
+    ability -- because at the table a player reads the card itself (#24). `weapons` and
+    `abilities` are display-only JSON: nothing reads a field out of them to decide
+    anything, which is what lets them be the page's shape rather than a schema.
+
+    The state beside it is what a game writes: wounds now, order, whether it has
+    activated, whether it is on the board, its tokens and the actions it has used.
+
+    A row is not fixed at creation (#18). It can be ADDED mid-battle -- Gellerpox's
+    MUTOID VERMIN equipment grants four, `source = 'equipment'` -- or TRANSFORMED in
+    place (#19), where Chaos Cult's Mutation moves `operative_id` and re-snapshots the
+    card while the row keeps its id, tokens, actions used and board position. In place,
+    because it is the same miniature on the table.
+    """
+
+    __tablename__ = "kt_game_operatives"
+    __table_args__ = (
+        # Three columns into the game, exactly the roster's shape (#54): a row can only
+        # sit in a game its own owner owns, and `kill_team_id` is shared with the leg
+        # below, so it can only name a datacard of that game's kill team. Together they
+        # make "an operative from someone else's game, or another team's card"
+        # unrepresentable rather than merely checked.
+        ForeignKeyConstraint(
+            ["owner_user_id", "kill_team_id", "game_id"],
+            ["kt_games.owner_user_id", "kt_games.kill_team_id", "kt_games.id"],
+            ondelete="CASCADE",
+            name="fk_kt_game_operative_game",
+        ),
+        ForeignKeyConstraint(
+            ["kill_team_id", "operative_id"],
+            ["kt_operatives.kill_team_id", "kt_operatives.id"],
+            name="fk_kt_game_operative_operative",
+        ),
+        CheckConstraint("position >= 0", name="ck_kt_game_operative_position"),
+        CheckConstraint("apl >= 1", name="ck_kt_game_operative_apl"),
+        CheckConstraint("move >= 0 AND save >= 0", name="ck_kt_game_operative_stats_non_negative"),
+        CheckConstraint("wounds >= 0", name="ck_kt_game_operative_wounds"),
+        # The bookkeeping rule "wounds within 0..max" (service → 400) held in the schema
+        # too, so no path can leave an operative on more wounds than its card allows.
+        # It bites on a TRANSFORM as well, which is correct: a card with fewer wounds
+        # than the model currently has is a state the service must resolve rather than
+        # store.
+        CheckConstraint(
+            "current_wounds >= 0 AND current_wounds <= wounds",
+            name="ck_kt_game_operative_current_wounds",
+        ),
+        # `order` is a reserved SQL word, so it is quoted here. The column keeps the
+        # datasheet's own term rather than an invented synonym.
+        CheckConstraint("\"order\" IN ('engage', 'conceal')", name="ck_kt_game_operative_order"),
+        CheckConstraint(
+            "status IN ('reserve', 'on_board', 'incapacitated')",
+            name="ck_kt_game_operative_status",
+        ),
+        CheckConstraint("source IN ('roster', 'equipment', 'rule')", name="ck_kt_game_operative_source"),
+        CheckConstraint(
+            "activated_in_turning_point IS NULL OR activated_in_turning_point BETWEEN 1 AND 4",
+            name="ck_kt_game_operative_activated_tp",
+        ),
+        CheckConstraint(
+            "added_in_turning_point IS NULL OR added_in_turning_point BETWEEN 1 AND 4",
+            name="ck_kt_game_operative_added_tp",
+        ),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    game_id: UUID = Field(index=True)
+    # The catalog card this is a snapshot OF. It moves on a transform (#19), which is why
+    # the snapshot columns below are the authority on what the card says and this is only
+    # a pointer back to where it came from.
+    operative_id: UUID = Field(index=True)
+    # Both reached by the composite legs above; see `KTRosterOperative` for why they are
+    # stored rather than read through the parent.
+    kill_team_id: UUID = Field(index=True)
+    owner_user_id: UUID = Field(index=True)
+
+    # The player's order, copied from the roster row it came from. An operative ADDED
+    # mid-battle appends, so ties are possible and every reader breaks one with `id`
+    # (#53) -- the same shape as a roster, for the same reason.
+    position: int = Field(default=0)
+
+    # --- the snapshot (decision #22). Display-only; nothing derives from it ---
+    name: str = Field(max_length=128)
+    apl: int
+    move: int
+    save: int
+    #: The card's maximum, not the state. `current_wounds` below is the state.
+    wounds: int
+    keywords: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+    weapons: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+    abilities: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+
+    # --- the state a game writes ---
+    current_wounds: int = Field(default=0)
+    order: str = Field(default="conceal", max_length=16)
+    status: str = Field(default="on_board", max_length=16)
+    # WHICH turning point it activated in, not a flag that `advance` has to clear. So
+    # "has it activated?" is a comparison against the game's own `turning_point`,
+    # `POST /advance` writes one row instead of every operative, and undoing an advance
+    # restores nothing per operative -- which under #58 is the difference between an
+    # event carrying one field and one carrying as many as the team has models.
+    activated_in_turning_point: int | None = Field(default=None)
+    # Token names on this operative, e.g. Raveners' Poison. Generic like `KTGame.markers`
+    # and for the same reason: recorded, never applied.
+    tokens: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
+    # `{"name": ..., "turning_point": ...}` entries (#23). WHICH actions exist is the
+    # snapshot's business; how often each may be used is a rule, so it is shown and not
+    # enforced.
+    actions_used: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+
+    # --- where the row came from (decision #18) ---
+    source: str = Field(default="roster", max_length=16)
+    #: NULL for the roster's own operatives, set for one added mid-battle.
+    added_in_turning_point: int | None = Field(default=None)
+
+    # `overlaps` on both, as on `KTRosterOperative`: the two composite foreign keys share
+    # `kill_team_id`, so each relationship writes a column the other also writes, and
+    # that sharing is the point rather than a mistake.
+    game: KTGame = Relationship(
+        back_populates="operatives",
+        sa_relationship_kwargs={"overlaps": "operative"},
+    )
+    operative: KTOperative = Relationship(
+        sa_relationship_kwargs={"overlaps": "operatives,game,roster"},
+    )
+
+
+class KTGameEquipment(TimestampMixin, table=True):
+    """A piece of equipment picked for THIS battle (decision #17), with its text copied.
+
+    Equipment is chosen per game and revealed during it, which is why it sits here and
+    not on the roster -- a roster holding it would mean "a roster for one battle".
+
+    `UNIQUE(game_id, equipment_id)` is the one equipment rule the schema enforces: the
+    same piece cannot be taken twice in a game. That is integrity rather than a rule.
+    The ALLOWANCE is not enforced at all (decision #57): a game read reports
+    `equipment_limit` and accepts the fifth piece, so a custom game can be built.
+
+    Unlike a game's operatives, this cannot be team-tied by the schema. The universal
+    equipment list belongs to no kill team (`kill_team_id IS NULL`, decision #48), so
+    there is no composite pair to point at -- "is this piece available to this team?"
+    is necessarily a service check, not a constraint.
+    """
+
+    __tablename__ = "kt_game_equipment"
+    __table_args__ = (
+        UniqueConstraint("game_id", "equipment_id", name="uq_kt_game_equipment"),
+        CheckConstraint("position >= 0", name="ck_kt_game_equipment_position"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    game_id: UUID = Field(foreign_key="kt_games.id", ondelete="CASCADE", index=True)
+    equipment_id: UUID = Field(foreign_key="kt_equipment.id", index=True)
+
+    # Snapshotted like a datacard, and for the same reason (#22, #24): a re-scrape must
+    # not reword a piece of kit mid-battle, and a finished game shows what was played.
+    name: str = Field(max_length=128)
+    text: str
+    #: Equipment is revealed DURING a battle, and revealing can change what is on the
+    #: table -- Gellerpox's MUTOID VERMIN adds four operatives (#18).
+    revealed: bool = Field(default=False)
+    position: int = Field(default=0)
+
+    game: KTGame = Relationship(back_populates="equipment")
+    equipment: KTEquipment = Relationship()
+
+
+class KTGameEvent(TimestampMixin, table=True):
+    """One thing that happened, append-only — and what `undo` reads (decisions #8, #58).
+
+    Current state lives in columns and this log sits beside it; it is deliberately **not**
+    event sourcing, so no read ever replays it.
+
+    `payload` names the fields the event touched with their `before` and `after` values,
+    which is the whole reason undo is possible: reverting `wounds 12 -> 7` needs the 7,
+    and recomputing it would be the event sourcing #8 ruled out. Field-scoped rather than
+    a copy of the whole row because the sizes are not close -- a wound tick is 40 bytes
+    this way against 1,129 median for a datacard copy -- and it stays uniform anyway,
+    since a transform's touched field IS the snapshot.
+
+    `undo` writes the `before` values back, APPENDS a compensating event and sets
+    `undone_by` on the original, so the log keeps its append-only property: a finished
+    game's history has no holes, and the undo is itself part of the record. Each further
+    undo walks back to the newest event with `undone_by IS NULL`. There is no redo.
+
+    `sequence` is what makes "the last event" a fact rather than a guess. `created_at`
+    cannot: two events written in one transaction share a timestamp, and #53's lesson was
+    about display order where this is about correctness -- an undo that picked the wrong
+    one of two tied events would revert the wrong field.
+    """
+
+    __tablename__ = "kt_game_events"
+    __table_args__ = (
+        UniqueConstraint("game_id", "sequence", name="uq_kt_game_event_sequence"),
+        CheckConstraint("sequence >= 1", name="ck_kt_game_event_sequence"),
+        CheckConstraint("turning_point BETWEEN 1 AND 4", name="ck_kt_game_event_turning_point"),
+        CheckConstraint("length(trim(type)) > 0", name="ck_kt_game_event_type"),
+        # An event cannot undo itself, which a bug in the undo path could otherwise write.
+        CheckConstraint("undone_by IS NULL OR undone_by <> id", name="ck_kt_game_event_undone_by"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    game_id: UUID = Field(foreign_key="kt_games.id", ondelete="CASCADE", index=True)
+    #: Monotonic within a game, so "the last event" is total rather than timestamp-tied.
+    sequence: int
+    type: str = Field(max_length=64, index=True)
+    turning_point: int
+    payload: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
+    #: The compensating event that reverted this one, NULL while it still stands. Self
+    #: referential, so the log records its own corrections rather than losing them.
+    undone_by: UUID | None = Field(default=None, foreign_key="kt_game_events.id", index=True)
+
+    game: KTGame = Relationship(back_populates="events")
