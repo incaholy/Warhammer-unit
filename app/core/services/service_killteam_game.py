@@ -174,6 +174,17 @@ class KTGameService:
             raise NotFoundError(f"game {game_id} not found")
         return game
 
+    def get_game_shallow(self, game_id: UUID) -> KTGame:
+        """The game row alone — for an ownership check, not for a response.
+
+        The router's dependency needs one fact ("does the caller own this?") and the
+        detail read is the bundle: operatives with their snapshots, equipment and the
+        whole event log. Loading that to answer a yes/no is what makes a 204 DELETE cost
+        as much as a full read, which is a defect the roster router has and this one
+        does not inherit.
+        """
+        return self._require_game(game_id)
+
     def list_games(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[KTGame]:
         """A player's games, newest first — and deliberately without the bundle.
 

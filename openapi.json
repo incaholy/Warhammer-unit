@@ -2989,6 +2989,778 @@
           }
         }
       }
+    },
+    "/api/v1/me/kill-team/games": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Create Game",
+        "description": "Start a battle from one of the caller's rosters, copying everything it needs.\n\n404 if the roster is not theirs: `create_game` writes the CALLER's id and the\ncomposite foreign key refuses a roster they do not own, so this cannot start a\nbattle from a stranger's list even if the route forgot to look (#54).",
+        "operationId": "create_game_api_v1_me_kill_team_games_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGame_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "List Games",
+        "description": "The caller's games, newest first. Only ever the caller's.",
+        "operationId": "list_games_api_v1_me_kill_team_games_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTGame_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}": {
+      "get": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Get Game",
+        "operationId": "get_game_api_v1_me_kill_team_games__game_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Update Game",
+        "description": "CP, VP, markers, the ploys spent. 409 if `version` is behind (#9).",
+        "operationId": "update_game_api_v1_me_kill_team_games__game_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGame_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Delete Game",
+        "operationId": "delete_game_api_v1_me_kill_team_games__game_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Add Operative",
+        "description": "Field a datacard the battle produced \u2014 Gellerpox's vermin, a rule's grant (#18).",
+        "operationId": "add_operative_api_v1_me_kill_team_games__game_id__operatives_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Add"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Update Operative",
+        "description": "Wounds, order, tokens, the actions used. Zero wounds takes it out of the battle.",
+        "operationId": "update_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}/activate": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Activate Operative",
+        "description": "Mark it activated in the game's CURRENT turning point (#61).\n\nIts own route rather than a field on the PATCH, because the server reads the turning\npoint off the game \u2014 so an activation cannot be recorded in one that is not\nhappening. 400 on a second activation in the same turning point.",
+        "operationId": "activate_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__activate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}/transform": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Transform Operative",
+        "description": "One card becomes another, in place (#19) \u2014 the same model on the table.\n\nThe row keeps its id, tokens, actions used and position; only the catalog pointer\nmoves and the snapshot is rewritten. How many transforms a turning point allows is\nthe players' (#1), so nothing here counts them.",
+        "operationId": "transform_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__transform_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Transform"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/equipment": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Add Equipment",
+        "description": "Take a piece into this battle (#17), with its text copied.\n\n409 for the same piece twice, which is integrity. The ALLOWANCE is not checked\n(#57): the detail read reports `equipment_limit` and a fifth piece is accepted, so\na custom game can be built.",
+        "operationId": "add_equipment_api_v1_me_kill_team_games__game_id__equipment_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameEquipment_Add"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameEquipment_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/equipment/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Reveal Equipment",
+        "description": "Reveal it \u2014 which can change what is on the table (Gellerpox's vermin, #18).",
+        "operationId": "reveal_equipment_api_v1_me_kill_team_games__game_id__equipment__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameEquipment_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Remove Equipment",
+        "operationId": "remove_equipment_api_v1_me_kill_team_games__game_id__equipment__row_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/advance": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Advance",
+        "description": "Next phase, next turning point, or finish the game.\n\nThe server applies what goes with the move: initiative back to nobody for the new\nturning point's roll-off (#62), and nothing at all for activations, which are\nstamped with the turning point they happened in (#61). Advancing out of the fourth\nfirefight phase FINISHES the game, and because that is an event like any other,\n`undo` reopens one closed by accident.",
+        "operationId": "advance_api_v1_me_kill_team_games__game_id__advance_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/undo": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Undo",
+        "description": "Revert the newest change that still stands, and record having done so (#58).\n\nReturns the game whole rather than the compensating event, because an undo can move\nanything -- a wound, a turning point, a row that existed -- and a client that got\nonly the event would have to re-read to know what changed. 400 when there is\nnothing left.",
+        "operationId": "undo_api_v1_me_kill_team_games__game_id__undo_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3580,6 +4352,921 @@
           "name"
         ],
         "title": "KTFaction_Read"
+      },
+      "KTGameAbility_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "KTGameAbility_Read"
+      },
+      "KTGameEquipment_Add": {
+        "properties": {
+          "equipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Equipment Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "equipment_id"
+        ],
+        "title": "KTGameEquipment_Add"
+      },
+      "KTGameEquipment_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "equipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Equipment Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "revealed": {
+            "type": "boolean",
+            "title": "Revealed"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "equipment_id",
+          "name",
+          "text",
+          "revealed",
+          "position"
+        ],
+        "title": "KTGameEquipment_Read"
+      },
+      "KTGameEvent_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload",
+            "default": {}
+          },
+          "undone_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "type",
+          "turning_point",
+          "undone_by",
+          "created_at"
+        ],
+        "title": "KTGameEvent_Read",
+        "description": "One entry in the log (#8, #58), which is also what `undo` walks back over."
+      },
+      "KTGameOperative_Add": {
+        "properties": {
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operative_id",
+          "source"
+        ],
+        "title": "KTGameOperative_Add"
+      },
+      "KTGameOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "apl": {
+            "type": "integer",
+            "title": "Apl"
+          },
+          "move": {
+            "type": "integer",
+            "title": "Move"
+          },
+          "save": {
+            "type": "integer",
+            "title": "Save"
+          },
+          "wounds": {
+            "type": "integer",
+            "title": "Wounds"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords",
+            "default": []
+          },
+          "weapons": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameWeapon_Read"
+            },
+            "type": "array",
+            "title": "Weapons",
+            "default": []
+          },
+          "abilities": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameAbility_Read"
+            },
+            "type": "array",
+            "title": "Abilities",
+            "default": []
+          },
+          "current_wounds": {
+            "type": "integer",
+            "title": "Current Wounds"
+          },
+          "order": {
+            "type": "string",
+            "title": "Order"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "activated_in_turning_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated In Turning Point"
+          },
+          "tokens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tokens",
+            "default": []
+          },
+          "actions_used": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Actions Used",
+            "default": []
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "added_in_turning_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added In Turning Point"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "operative_id",
+          "name",
+          "apl",
+          "move",
+          "save",
+          "wounds",
+          "current_wounds",
+          "order",
+          "status",
+          "activated_in_turning_point",
+          "source",
+          "added_in_turning_point"
+        ],
+        "title": "KTGameOperative_Read",
+        "description": "One model in the battle: its card as it was snapshotted, then its state."
+      },
+      "KTGameOperative_Transform": {
+        "properties": {
+          "becomes_operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Becomes Operative Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "becomes_operative_id"
+        ],
+        "title": "KTGameOperative_Transform"
+      },
+      "KTGameOperative_Update": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "current_wounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Wounds"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          },
+          "actions_used": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actions Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTGameOperative_Update"
+      },
+      "KTGamePloy_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cp_cost": {
+            "type": "integer",
+            "title": "Cp Cost"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "universal": {
+            "type": "boolean",
+            "title": "Universal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "cp_cost",
+          "description",
+          "universal"
+        ],
+        "title": "KTGamePloy_Read"
+      },
+      "KTGameRule_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "KTGameRule_Read"
+      },
+      "KTGameWeapon_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "range": {
+            "type": "integer",
+            "title": "Range"
+          },
+          "attacks": {
+            "type": "integer",
+            "title": "Attacks"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "normal_damage": {
+            "type": "integer",
+            "title": "Normal Damage"
+          },
+          "crit_damage": {
+            "type": "integer",
+            "title": "Crit Damage"
+          },
+          "weapon_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Weapon Rules",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "range",
+          "attacks",
+          "hit",
+          "normal_damage",
+          "crit_damage"
+        ],
+        "title": "KTGameWeapon_Read"
+      },
+      "KTGame_Create": {
+        "properties": {
+          "roster_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Roster Id"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "roster_id"
+        ],
+        "title": "KTGame_Create"
+      },
+      "KTGame_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "victory_points": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Victory Points",
+            "default": {}
+          },
+          "opponent_victory_points": {
+            "type": "integer",
+            "title": "Opponent Victory Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "opponent_name",
+          "status",
+          "turning_point",
+          "phase",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name",
+          "opponent_victory_points"
+        ],
+        "title": "KTGame_ListRead",
+        "description": "A row of the game listing: enough to choose one, and none of the bundle.\n\nCarries the score, because \"which game was that?\" is answered by who and how it\nwent. Deliberately NOT the operatives: a game stores the roster detail's 24-42 KB\nas JSON (#52), so a page of fifty would be megabytes.\n\nNames the kill team and its faction for the same reason `KTRoster_ListRead` does --\na deliberate exception to #46, since a player's own game list should not require\nfetching the catalog to render \"Raveners, Tyranids\"."
+      },
+      "KTGame_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "roster_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Roster Id"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "initiative": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initiative"
+          },
+          "command_points": {
+            "type": "integer",
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Victory Points",
+            "default": {}
+          },
+          "opponent_victory_points": {
+            "type": "integer",
+            "title": "Opponent Victory Points"
+          },
+          "markers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Markers",
+            "default": []
+          },
+          "ploys_used": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ploys Used",
+            "default": []
+          },
+          "choices": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Choices",
+            "default": {}
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "equipment_limit": {
+            "type": "integer",
+            "title": "Equipment Limit",
+            "default": 4
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTGamePloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameEvent_Read"
+            },
+            "type": "array",
+            "title": "Events",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "roster_id",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name",
+          "opponent_name",
+          "status",
+          "turning_point",
+          "phase",
+          "initiative",
+          "command_points",
+          "opponent_victory_points",
+          "version"
+        ],
+        "title": "KTGame_Read",
+        "description": "A battle whole \u2014 everything the screen needs, and no catalog call (#24)."
+      },
+      "KTGame_Update": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "initiative": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initiative"
+          },
+          "command_points": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Victory Points"
+          },
+          "opponent_victory_points": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Victory Points"
+          },
+          "markers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markers"
+          },
+          "ploys_used": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ploys Used"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTGame_Update"
       },
       "KTOperative_ListRead": {
         "properties": {
@@ -4399,6 +6086,37 @@
           "offset"
         ],
         "title": "Page[KTFaction_Read]"
+      },
+      "Page_KTGame_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTGame_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTGame_ListRead]"
       },
       "Page_KTOperative_ListRead_": {
         "properties": {

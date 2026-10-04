@@ -619,13 +619,22 @@ catalog.
 
 ## K5. Game tracker
 
-**Status: Models + migration done; service and routes next.** The four tables are
-built — `KTGame`, `KTGameOperative`, `KTGameEquipment`, `KTGameEvent` — with the
-migration regenerated (`623a5d229b3f` → `b8ba89c436bc`, the draft's eighth
-regeneration). Three more decisions were settled at the models: **#60** deleting a
+**Status: ✅ Done.** Four tables, a service and fourteen routes under
+`/api/v1/me/kill-team/games`. The migration was regenerated to `b8ba89c436bc` (the
+draft's eighth). Four decisions were settled while building it: **#60** deleting a
 roster a game was played from is refused (409), **#61** activation is stored as the
-turning point rather than a flag so `advance` clears nothing, and **#62** `initiative`
-is nullable because a turning point before its roll-off holds nobody.
+turning point rather than a flag so `advance` clears nothing, **#62** `initiative` is
+nullable because a turning point before its roll-off holds nobody, and **#63**
+activating and transforming are their own routes rather than fields on a PATCH.
+
+The ownership dependency loads the game **shallow**, which the rosters router does not:
+its `get_owned_roster` eager-loads decision #52's bundle on all six nested routes, so a
+204 DELETE costs as much as a GET. That is audit finding 12, and K5 does not inherit it.
+
+A latent bug shipped in K4 turned up here: `get_roster` returned a stale collection
+after a write in the same session. It never bit through the roster API, which does not
+read a detail back after touching a collection — the game router's shape does, on six
+routes. Both services now pass `populate_existing=True`.
 
 Games created from a roster: turning points, CP, VP, and each
 operative's wounds, order and activation, with undo. Each game copies the whole
