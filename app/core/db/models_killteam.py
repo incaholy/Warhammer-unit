@@ -547,6 +547,20 @@ class KTRoster(TimestampMixin, table=True):
         # belongs to this roster's kill team" and "this row belongs to the player who
         # owns the roster" things the database checks rather than a service remembering to.
         UniqueConstraint("owner_user_id", "kill_team_id", "id", name="uq_kt_roster_owner_team_id"),
+        # One name per player, and here rather than only in the service. `_require_name_free`
+        # checks first so the caller gets a 409 naming the field -- but a check-then-act with
+        # nothing behind it is a suggestion, not a rule: under Postgres' default READ
+        # COMMITTED two concurrent creates both SELECT, both find nothing, and both insert.
+        # Demonstrated with two connections before this was added.
+        #
+        # Scoped to the OWNER, not global. Two players may both call a roster "Raveners" and
+        # the schema has nothing to say about it -- which is what the service's docstring
+        # argued, correctly, before concluding there should be no constraint at all. The
+        # alternative to a global UNIQUE is a scoped one.
+        #
+        # Same split as `add_equipment`: the check is for the message, the constraint is what
+        # makes it true.
+        UniqueConstraint("owner_user_id", "name", name="uq_kt_roster_owner_name"),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)

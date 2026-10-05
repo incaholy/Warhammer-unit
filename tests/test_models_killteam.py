@@ -1086,3 +1086,63 @@ def test_initiative_holds_nobody_until_it_is_rolled(session, make_kt_game):
     session.commit()
     session.refresh(game)
     assert game.initiative is None, "advancing a turning point puts it back to nobody"
+
+
+def test_a_player_cannot_hold_two_rosters_of_the_same_name(session, make_user, make_kill_team):
+    """`uq_kt_roster_owner_name` — the guarantee behind `_require_name_free`.
+
+    The service check alone was not enforcement. Under Postgres' default READ COMMITTED
+    two concurrent creates both run its SELECT, both find nothing and both insert; that
+    was demonstrated with two connections producing two rosters called "Mine" before this
+    constraint existed. With it, the second insert blocks on the first transaction's index
+    entry and is refused when that transaction commits.
+
+    The check stays, and is still what a sequential caller hits -- it answers 409 naming
+    `name`, where the bare constraint reaches the generic `IntegrityError` backstop and
+    says "conflict with an existing resource". Check for the message, constrain for the
+    truth, the same split as `add_equipment`.
+    """
+    user, team = make_user(), make_kill_team()
+    session.add(KTRoster(owner_user_id=user.id, kill_team_id=team.id, name="Mine"))
+    session.commit()
+    session.add(KTRoster(owner_user_id=user.id, kill_team_id=team.id, name="Mine"))
+
+    with pytest.raises(IntegrityError, match="(?i)unique"):
+        session.commit()
+
+
+def test_two_players_may_both_call_a_roster_the_same_thing(session, make_user, make_kill_team):
+    """Scoped to the owner, not global — which is what the old docstring argued for.
+
+    Its reasoning was right about a GLOBAL unique and wrong to conclude there should be
+    no constraint: the alternative to global is scoped. This is the half that would break
+    if someone "simplified" it to `UNIQUE(name)`.
+    """
+    team = make_kill_team()
+    mine = make_user(username="mine", email="mine@test.invalid")
+    theirs = make_user(username="theirs", email="theirs@test.invalid")
+
+    session.add_all(
+        [
+            KTRoster(owner_user_id=mine.id, kill_team_id=team.id, name="Raveners"),
+            KTRoster(owner_user_id=theirs.id, kill_team_id=team.id, name="Raveners"),
+        ]
+    )
+    session.commit()
+
+    assert len(session.exec(select(KTRoster)).all()) == 2
+
+
+def test_one_player_may_hold_the_same_name_for_different_teams_no_longer(session, make_user, make_kill_team):
+    # Worth pinning because it is the one behaviour this constraint CHANGES rather than
+    # enforces: the name is unique per owner, not per owner and team, so a player cannot
+    # have a "Mine" for Raveners and another "Mine" for Gellerpox. That matches the
+    # service check, which never looked at the kill team either.
+    user = make_user()
+    first, second = make_kill_team(name="Raveners"), make_kill_team(name="Gellerpox")
+    session.add(KTRoster(owner_user_id=user.id, kill_team_id=first.id, name="Mine"))
+    session.commit()
+    session.add(KTRoster(owner_user_id=user.id, kill_team_id=second.id, name="Mine"))
+
+    with pytest.raises(IntegrityError, match="(?i)unique"):
+        session.commit()

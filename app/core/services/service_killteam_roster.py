@@ -347,9 +347,17 @@ class KTRosterService:
     def _require_name_free(self, user_id: UUID, name: str, except_id: UUID | None = None) -> None:
         """One name per player, so a list of rosters is readable.
 
-        Enforced here rather than by a UNIQUE constraint because it is a usability rule
-        rather than an integrity one -- two players may both call a roster "Raveners",
-        and the schema has nothing to say about it.
+        Checked here for the MESSAGE and constrained by `uq_kt_roster_owner_name` for the
+        guarantee. This used to be a check alone, on the reasoning that two players may
+        both call a roster "Raveners" so the schema has nothing to say about it -- which
+        is right about a GLOBAL unique and wrong about a scoped one. Without the
+        constraint, two concurrent creates both run this SELECT, both find nothing and
+        both insert, because Postgres reads committed rows only.
+
+        So the check is not load-bearing for correctness; it is load-bearing for the
+        error. It answers 409 naming `name`, where the bare constraint would reach the
+        generic `IntegrityError` backstop and say "conflict with an existing resource".
+        The same split as `add_equipment` and `KTGameEvent.sequence`.
         """
         statement = select(KTRoster.id).where(KTRoster.owner_user_id == user_id, KTRoster.name == name)
         if except_id is not None:

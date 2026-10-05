@@ -549,8 +549,9 @@ changeable until `fire-team` merges, since nothing is deployed against it.
 The nine `kt_*` catalog tables from KILLTEAM.md and their migration, with test
 factories and model tests. Fifteen `kt_*` tables exist now: those nine, K4's two roster
 tables and K5's four game tables. Still treated as a draft: the migration has been
-regenerated eight times -- six as the pages showed a column was wrong, then for
-decision #54's owner column and again for K5's game tables -- and stays regenerable
+regenerated nine times -- six as the pages showed a column was wrong, then for
+decision #54's owner column, K5's game tables and #64's roster-name unique -- and stays
+regenerable
 until `fire-team` merges.
 
 ## K2. Data pipeline

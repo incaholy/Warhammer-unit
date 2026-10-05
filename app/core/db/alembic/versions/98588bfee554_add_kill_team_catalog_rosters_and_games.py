@@ -1,8 +1,8 @@
 """add kill team catalog, rosters and games
 
-Revision ID: b8ba89c436bc
+Revision ID: 98588bfee554
 Revises: 44441c6a9671
-Create Date: 2026-10-03 17:10:52.113475
+Create Date: 2026-10-05 14:08:03.100929
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'b8ba89c436bc'
+revision: str = '98588bfee554'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -128,7 +128,8 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ),
     sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('owner_user_id', 'kill_team_id', 'id', name='uq_kt_roster_owner_team_id')
+    sa.UniqueConstraint('owner_user_id', 'kill_team_id', 'id', name='uq_kt_roster_owner_team_id'),
+    sa.UniqueConstraint('owner_user_id', 'name', name='uq_kt_roster_owner_name')
     )
     op.create_index(op.f('ix_kt_rosters_kill_team_id'), 'kt_rosters', ['kill_team_id'], unique=False)
     op.create_index(op.f('ix_kt_rosters_owner_user_id'), 'kt_rosters', ['owner_user_id'], unique=False)
