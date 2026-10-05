@@ -1,8 +1,8 @@
 """add kill team catalog, rosters and games
 
-Revision ID: 98588bfee554
+Revision ID: e6d56ea7d09e
 Revises: 44441c6a9671
-Create Date: 2026-10-05 14:08:03.100929
+Create Date: 2026-10-05 14:47:38.825342
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '98588bfee554'
+revision: str = 'e6d56ea7d09e'
 down_revision: Union[str, Sequence[str], None] = '44441c6a9671'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -27,6 +27,7 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_kt_factions_name'), 'kt_factions', ['name'], unique=True)
@@ -36,6 +37,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('faction_id', sa.Uuid(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['faction_id'], ['kt_factions.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -49,6 +51,7 @@ def upgrade() -> None:
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint('position >= 0', name='ck_kt_equipment_position'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -65,6 +68,7 @@ def upgrade() -> None:
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('group', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=True),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint('position >= 0', name='ck_kt_kill_team_rule_position'),
     sa.ForeignKeyConstraint(['kill_team_id'], ['kt_kill_teams.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -85,6 +89,7 @@ def upgrade() -> None:
     sa.Column('keywords', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
     sa.Column('availability', sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint("availability IN ('roster', 'in_battle')", name='ck_kt_operative_availability'),
     sa.CheckConstraint('apl >= 1', name='ck_kt_operative_apl'),
     sa.CheckConstraint('move >= 0 AND save >= 0 AND wounds >= 0', name='ck_kt_operative_stats_non_negative'),
@@ -108,6 +113,7 @@ def upgrade() -> None:
     sa.Column('cp_cost', sa.Integer(), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint("kind IN ('strategy', 'firefight')", name='ck_kt_ploy_kind'),
     sa.CheckConstraint('cp_cost >= 0', name='ck_kt_ploy_cp_cost'),
     sa.CheckConstraint('position >= 0', name='ck_kt_ploy_position'),
@@ -161,6 +167,7 @@ def upgrade() -> None:
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint('position >= 0', name='ck_kt_ability_position'),
     sa.ForeignKeyConstraint(['operative_id'], ['kt_operatives.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
@@ -237,6 +244,7 @@ def upgrade() -> None:
     sa.Column('crit_damage', sa.Integer(), nullable=False),
     sa.Column('weapon_rules', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('withdrawn', sa.Boolean(), nullable=False),
     sa.CheckConstraint("category IN ('range', 'melee')", name='ck_kt_weapon_category'),
     sa.CheckConstraint('attacks >= 0 AND hit >= 0 AND normal_damage >= 0 AND crit_damage >= 0', name='ck_kt_weapon_stats_non_negative'),
     sa.CheckConstraint('position >= 0', name='ck_kt_weapon_position'),

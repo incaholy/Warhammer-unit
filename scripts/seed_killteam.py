@@ -104,6 +104,7 @@ COUNT_KEYS = (
     "universal_equipment",
     "updated",  # rows that already existed and had at least one column rewritten
     "compositions_replaced",  # teams whose composition was rewritten wholesale
+    "withdrawn",  # rows the source no longer names, flagged rather than deleted (#55)
 )
 
 
@@ -202,6 +203,13 @@ def _upsert(
     Counts the row under `count_key` when it was created, and under `"updated"` when an
     existing row actually changed.
     """
+    # A row the source has brought BACK must stop being withdrawn (#55). Set here rather
+    # than in each caller's `values` so no caller can forget it -- the same reason the game
+    # service bumps `version` in one place. `KTSelectionRule` has no such column and never
+    # comes through here anyway.
+    if "withdrawn" in model.__table__.columns:
+        values = {**(values or {}), "withdrawn": False}
+
     row = session.exec(select(model).where(*_match(model, keys))).first()
     if row is None:
         row = model(**keys, **(values or {}))
@@ -219,6 +227,35 @@ def _upsert(
         setattr(row, field, values[field])
     counts["updated"] += bool(changed)
     return row
+
+
+def _withdraw_missing(
+    session: Session,
+    model,
+    counts: dict,
+    *,
+    parent: dict[str, Any],
+    key_fields: tuple[str, ...],
+    seen: set,
+) -> None:
+    """Flag the parent's children the payload no longer names (decision #55).
+
+    Scoped to the PARENT, which is what makes a partial run safe: a team absent from the
+    payload is never swept, so a scrape that read three teams cannot flag the other
+    forty-five. `_upsert` has already cleared the flag on every row the payload DID name,
+    so this only ever sets it -- the two halves never fight over a row.
+
+    `key_fields` is the same natural key `_upsert` matched on, which is the whole trick
+    again: sweeping by a different key than the upsert used would flag rows the payload
+    had just written.
+    """
+    for row in session.exec(select(model).where(*_match(model, parent))).all():
+        if tuple(getattr(row, field) for field in key_fields) in seen:
+            continue
+        if not row.withdrawn:
+            row.withdrawn = True
+            session.add(row)
+            counts["withdrawn"] += 1
 
 
 def _match(model, keys: dict[str, Any]):
@@ -297,6 +334,25 @@ def _seed_operative(
             operative_id=operative.id,
             name=ability["name"],
         )
+
+    # A weapon's natural key is (name, category) -- the same pair `_upsert` matched on,
+    # because a Sanctifiers brazier appears as both a ranged and a melee profile.
+    _withdraw_missing(
+        session,
+        KTWeapon,
+        counts,
+        parent={"operative_id": operative.id},
+        key_fields=("name", "category"),
+        seen={(w["name"], w["category"]) for w in data.get("weapons", [])},
+    )
+    _withdraw_missing(
+        session,
+        KTAbility,
+        counts,
+        parent={"operative_id": operative.id},
+        key_fields=("name",),
+        seen={(a["name"],) for a in data.get("abilities", [])},
+    )
     return operative
 
 
@@ -390,6 +446,14 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             kill_team_id=team.id,
             name=rule["name"],
         )
+    _withdraw_missing(
+        session,
+        KillTeamRule,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(rule["name"],) for rule in data.get("rules", [])},
+    )
 
     for index, ploy in enumerate(data.get("ploys", [])):
         _upsert(
@@ -401,6 +465,14 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             kill_team_id=team.id,
             name=ploy["name"],
         )
+    _withdraw_missing(
+        session,
+        KTPloy,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(ploy["name"],) for ploy in data.get("ploys", [])},
+    )
 
     for index, item in enumerate(data.get("equipment", [])):
         _upsert(
@@ -412,9 +484,25 @@ def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
             kill_team_id=team.id,
             name=item["name"],
         )
+    _withdraw_missing(
+        session,
+        KTEquipment,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(item["name"],) for item in data.get("equipment", [])},
+    )
 
     for index, operative in enumerate(data.get("operatives", [])):
         _seed_operative(session, team, operative, counts, index)
+    _withdraw_missing(
+        session,
+        KTOperative,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(operative["name"],) for operative in data.get("operatives", [])},
+    )
 
     _seed_rules(session, team, data, counts)
 
@@ -454,6 +542,41 @@ def seed(session: Session, data: dict) -> dict[str, int]:
                 {"description": item["description"], "position": index},
                 kill_team_id=None,
                 name=item["name"],
+            )
+
+        # The TOP level has no parent to scope a sweep by, so the per-parent guard above
+        # cannot protect it: sweeping `kt_kill_teams` against a payload that read three
+        # teams would flag the other forty-five. The payload says whether it is complete --
+        # `skipped` names the teams the scraper could not read -- so the sweep runs only
+        # when nothing was skipped. That is a fact the payload carries rather than a
+        # guess about it.
+        #
+        # Without this, a RENAMED team keeps its old row and its whole subtree, which is
+        # one of the two problems #55 exists to fix. The other, a withdrawn ploy, is
+        # handled by the per-parent sweeps.
+        skipped = data.get("skipped") or []
+        if skipped:
+            print(
+                f"  not sweeping withdrawn teams or factions: {len(skipped)} team(s) were "
+                "skipped, so the payload is not a complete picture of the source",
+                flush=True,
+            )
+        else:
+            _withdraw_missing(
+                session,
+                KillTeam,
+                counts,
+                parent={},
+                key_fields=("name",),
+                seen={(team["name"],) for team in data["kill_teams"]},
+            )
+            _withdraw_missing(
+                session,
+                KTFaction,
+                counts,
+                parent={},
+                key_fields=("name",),
+                seen={(team["faction"],) for team in data["kill_teams"]},
             )
 
         session.commit()

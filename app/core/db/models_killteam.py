@@ -50,6 +50,24 @@ STRING_LIST = JSON().with_variant(JSONB(), "postgresql")
 # Postgres so a payload can be queried and indexed, plain JSON on SQLite's test tier.
 JSON_DOC = JSON().with_variant(JSONB(), "postgresql")
 
+# Every table the seed UPSERTS carries `withdrawn` (decision #55). The seed is an
+# append-and-rewrite superset: a row the source has removed or renamed stays behind, so a
+# withdrawn ploy kept being served and a renamed team left its old subtree beside the new
+# one. Flagging rather than deleting is what lets a roster that already names a row keep
+# resolving it -- a datacard built last month still renders.
+#
+# Catalog reads filter it out; a roster read does not (#55, and the K7 decisions). The flag
+# is cleared by `_upsert` whenever the source brings a row back, in one place so no caller
+# can forget.
+#
+# `KTSelectionRule` is the exception and has no flag: a composition is replaced as a WHOLE
+# (#44, #25), so it already loses whatever the source dropped. The same exception #25 makes
+# for `position`, for the same reason.
+#
+# Not indexed. The column is overwhelmingly false and the tables are small -- 48 teams, 454
+# operatives -- so an index on it would be read past rather than used; the selective
+# predicates are the `kill_team_id` and `operative_id` indexes that already exist.
+
 
 class KTFaction(TimestampMixin, table=True):
     """A Kill Team faction, e.g. "Tyranids" (KILLTEAM.md decision #12).
@@ -64,6 +82,8 @@ class KTFaction(TimestampMixin, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(unique=True, index=True, max_length=128)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     # No cascade: a faction is a grouping, and deleting one by accident must not take
     # every kill team in it along. `passive_deletes="all"` stops the ORM from trying
@@ -85,6 +105,8 @@ class KillTeam(TimestampMixin, table=True):
     # weighted costs a headcount stops being a fact -- Brood Brother spends 4
     # selections and can field more models than that. "Is this roster legal?" is
     # answered per list (decision #16), not by counting rows.
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     faction: KTFaction = Relationship(back_populates="kill_teams")
     # A rule only exists as part of its kill team, so it goes with it: the FK
@@ -158,6 +180,8 @@ class KillTeamRule(TimestampMixin, table=True):
     # which operatives may take which -- the name alone is not usable.
     group: str | None = Field(default=None, max_length=128, index=True)
     position: int = Field(default=0)  # print order (decision #25)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     kill_team: KillTeam = Relationship(back_populates="rules")
 
@@ -223,6 +247,8 @@ class KTOperative(TimestampMixin, table=True):
     # test for rosterability: "is this operative offered by some selection list" is, and it
     # is a join, not a column.
     availability: str = Field(default="roster", max_length=16, index=True)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     kill_team: KillTeam = Relationship(back_populates="operatives")
     # In the order the card prints them (decision #25), which is the whole point of the
@@ -329,6 +355,8 @@ class KTWeapon(TimestampMixin, table=True):
     # rewrites positions in place when a page reorders its profiles, and a unique
     # constraint would collide with whichever row has not moved yet.
     position: int = Field(default=0)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     operative: KTOperative = Relationship(back_populates="weapons")
 
@@ -351,6 +379,8 @@ class KTAbility(TimestampMixin, table=True):
     name: str = Field(max_length=128)
     description: str
     position: int = Field(default=0)  # print order, as on the card (decision #25)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     operative: KTOperative = Relationship(back_populates="abilities")
 
@@ -409,6 +439,8 @@ class KTPloy(TimestampMixin, table=True):
     # Print order (decision #25). The pages print Strategy Ploys before Firefight Ploys,
     # which ordering by `kind` reverses -- "firefight" sorts before "strategy".
     position: int = Field(default=0)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     kill_team: KillTeam | None = Relationship(back_populates="ploys")
 
@@ -451,6 +483,8 @@ class KTEquipment(TimestampMixin, table=True):
     name: str = Field(max_length=128)
     description: str
     position: int = Field(default=0)  # print order (decision #25)
+    #: Flagged when the source drops this row (#55); see the note above.
+    withdrawn: bool = Field(default=False)
 
     kill_team: KillTeam | None = Relationship(back_populates="equipment")
 

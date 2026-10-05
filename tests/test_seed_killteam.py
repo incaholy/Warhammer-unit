@@ -310,8 +310,13 @@ def test_every_table_takes_a_source_side_change(session, edit, check):
     counts = seed(session, payload)
 
     assert check(session)
-    # the row was rewritten, not duplicated
-    assert not any(count for name, count in counts.items() if name not in {"updated", "factions"})
+    # The row was rewritten, not duplicated. `withdrawn` is allowed because the faction
+    # case legitimately produces one: renaming a team's faction leaves the OLD faction
+    # unnamed by the payload, so the sweep flags it (#55). That is the behaviour, not
+    # noise -- before the flag existed the orphaned faction simply lingered.
+    assert not any(
+        count for name, count in counts.items() if name not in {"updated", "factions", "withdrawn"}
+    )
 
 
 def test_a_team_ploy_named_like_the_universal_one_stays_separate(session):
@@ -568,3 +573,101 @@ def test_an_explicitly_empty_composition_does_replace_it_with_nothing(session):
     seed(session, payload)
 
     assert session.exec(select(KTSelectionRule)).all() == []
+
+
+# --- withdrawn rows (decision #55, K7) --------------------------------------
+
+
+def test_a_row_the_source_drops_is_flagged_not_deleted(session):
+    """The seed was an append-and-rewrite superset: a removed row simply stayed.
+
+    It still stays -- that is the point of a flag over a delete (#55), so a roster that
+    already names the row keeps resolving it. What changes is that the catalog can now
+    tell the difference.
+    """
+    payload = copy.deepcopy(SAMPLE)
+    seed(session, payload)
+    kept = payload["kill_teams"][0]["operatives"][0]["name"]
+    dropped = payload["kill_teams"][0]["operatives"][-1]["name"]
+    assert kept != dropped, "the sample needs at least two operatives for this to mean anything"
+
+    shrunk = copy.deepcopy(payload)
+    shrunk["kill_teams"][0]["operatives"] = shrunk["kill_teams"][0]["operatives"][:-1]
+    counts = seed(session, shrunk)
+
+    rows = {o.name: o for o in session.exec(select(KTOperative)).all()}
+    assert dropped in rows, "flagged, never deleted"
+    assert rows[dropped].withdrawn is True
+    assert rows[kept].withdrawn is False
+    assert counts["withdrawn"] == 1
+
+
+def test_a_row_the_source_brings_back_stops_being_withdrawn(session):
+    # Cleared in `_upsert`, in one place, so no caller can forget it. Without this a
+    # transient scrape would hide a row permanently.
+    payload = copy.deepcopy(SAMPLE)
+    seed(session, payload)
+    dropped = payload["kill_teams"][0]["operatives"][-1]["name"]
+    shrunk = copy.deepcopy(payload)
+    shrunk["kill_teams"][0]["operatives"] = shrunk["kill_teams"][0]["operatives"][:-1]
+    seed(session, shrunk)
+    assert session.exec(select(KTOperative).where(KTOperative.name == dropped)).one().withdrawn
+
+    counts = seed(session, payload)
+
+    assert session.exec(select(KTOperative).where(KTOperative.name == dropped)).one().withdrawn is False
+    assert counts["withdrawn"] == 0
+
+
+def test_a_partial_payload_cannot_flag_teams_it_simply_did_not_mention(session):
+    """The guard that makes the top-level sweep safe.
+
+    Team-level children are swept per PARENT, so a team absent from the payload is never
+    reached. The teams themselves have no parent to scope by, so the sweep runs only when
+    `skipped` is empty -- a fact the payload carries rather than a guess about it. Without
+    it, a scrape that read three teams would flag the other forty-five.
+    """
+    # The payload must BOTH omit a team and report the skip -- that is what a partial
+    # scrape looks like. An earlier version of this test only added the `skipped` entry
+    # and still listed every team, so the sweep found nothing missing and the test passed
+    # whether the gate was there or not. Removing the gate survived it.
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"].append(copy.deepcopy(payload["kill_teams"][0]))
+    payload["kill_teams"][1]["name"] = "Second Team"
+    seed(session, payload)
+    before = {t.name: t.withdrawn for t in session.exec(select(KillTeam)).all()}
+    assert before == {payload["kill_teams"][0]["name"]: False, "Second Team": False}
+
+    partial = copy.deepcopy(payload)
+    partial["kill_teams"] = partial["kill_teams"][:1]  # the second team is absent
+    partial["skipped"] = [{"team": "Second Team", "reason": "ambiguous page"}]
+    counts = seed(session, partial)
+
+    assert {t.name: t.withdrawn for t in session.exec(select(KillTeam)).all()} == before
+    assert counts["withdrawn"] == 0
+
+
+def test_a_complete_payload_does_flag_a_team_the_source_dropped(session):
+    # The other half: with nothing skipped, the payload IS a complete picture, so a team
+    # it no longer names is withdrawn. A renamed team leaving its old subtree behind was
+    # one of the two problems #55 exists to fix.
+    payload = copy.deepcopy(SAMPLE)
+    payload["kill_teams"].append(copy.deepcopy(payload["kill_teams"][0]))
+    payload["kill_teams"][1]["name"] = "Second Team"
+    seed(session, payload)
+
+    shrunk = copy.deepcopy(payload)
+    shrunk["kill_teams"] = shrunk["kill_teams"][:1]
+    seed(session, shrunk)
+
+    rows = {t.name: t.withdrawn for t in session.exec(select(KillTeam)).all()}
+    assert rows["Second Team"] is True
+    assert rows[payload["kill_teams"][0]["name"]] is False
+
+
+def test_the_composition_has_no_flag_because_it_is_replaced_whole(session):
+    # #44/#25's exception, carried over: a composition is replaced as a whole, so it
+    # already loses whatever the source dropped and a flag would never be set.
+    from app.core.db.models_killteam import KTSelectionRule
+
+    assert "withdrawn" not in KTSelectionRule.__table__.columns
