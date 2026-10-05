@@ -746,3 +746,57 @@ since dropped is the case the flag exists to survive.
 
 Also here, and independent: capturing the footnote bodies a weapon rule's marker points
 at (#56), which is a scraper job across 48 pages rather than a schema one.
+
+## Condition-gated: a deep readiness probe
+
+**Status: Not needed yet. Build it when a load balancer or an orchestrator is put in
+front of this service.**
+
+`/health` today is a LIVENESS check and says so: it returns `{"status": "ok"}` without
+touching anything, so it answers "is this process serving HTTP?" and nothing more. That
+is the right answer to the right question, and it is the only question a platform can
+currently ask.
+
+The gap is readiness, which is a different question with the opposite remedy. Liveness
+failing means *restart the container*; readiness failing means *stop routing traffic
+here, do not restart* — because if the database is unreachable a fresh instance will be
+just as unable to serve. Nothing reads a readiness answer until something is deciding
+where to route, which is why this is gated rather than scheduled.
+
+What it would miss in the meantime, and the reason this is written down rather than
+dropped: the database is **Neon**, which suspends an idle compute instance. So a wrong
+DSN, a rotated password the environment did not learn about, or a suspended compute all
+produce the same shape —
+
+    GET /health                      -> 200 {"status": "ok"}     the platform is happy
+    GET /api/v1/kill-team/factions   -> 500                      every real request fails
+
+— and the platform keeps the instance in rotation, because the check it was given never
+looks at the database.
+
+**The condition:** before pointing Render's "Health Check Path" (DEPLOY.md) or a Cloud
+Run / Kubernetes probe (DEPLOY-GCP.md) at this service. Both are configured with a path
+today, and whichever path they get is the one that decides whether a broken instance
+keeps taking traffic.
+
+**What to build** (SPEC.md item L3, sized S): `GET /health/ready` running `SELECT 1`,
+200 when it succeeds and **503** when it does not — `Service Unavailable` is the status
+that means "try again elsewhere", where a 500 reads as a bug in the handler. `/health`
+stays exactly as it is, for liveness. Three details that matter more than the fifteen
+lines:
+
+- **Do not leak the reason.** `{"status": "unavailable"}`, never the driver's message —
+  a probe endpoint is usually unauthenticated, and the `IntegrityError` handler in
+  `app/main.py` already holds that line ("never the raw driver message, which can
+  expose column/constraint internals").
+- **Fail fast rather than hang.** A hung connection is the failure mode that matters; a
+  probe that blocks for thirty seconds is worse than one that answers 503 immediately.
+  `pool_pre_ping=True` is already set on the engine, which helps.
+- **Do not point liveness at it.** A readiness probe wired as a liveness probe turns a
+  database blip into a restart loop, which is the one outcome worse than no probe.
+
+Note what already deep-checks the database and why that is not a substitute:
+`docker-compose.yml` probes Postgres with `pg_isready` and the API waits on
+`condition: service_healthy`, and CI does the same with `--health-cmd pg_isready`. Both
+are startup checks against the SERVER. Only a probe inside the application can say that
+*this app's* credentials and connection pool still work.
