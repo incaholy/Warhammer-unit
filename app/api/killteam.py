@@ -284,6 +284,10 @@ def list_operatives(
     The cross-team question a nested operative cannot answer: "every operative with
     LEADER", "compare these two teams' Warriors". Ordered by team then printed position.
 
+    Rows the source has withdrawn are absent, and so are withdrawn weapon or ability
+    PROFILES on the rows that remain (#55) -- the profiles are filtered by the query that
+    fetches them, because the relationships are shared with the roster read.
+
     `keyword` is matched EXACTLY against what the datacard prints, upper-cased: `GUN`
     finds Battleclade's Gun Servitor, which prints `GUN` and `SERVITOR` as two keywords,
     and not Inquisitorial Agent's, which prints `GUN SERVITOR` as one. A substring match
@@ -291,9 +295,19 @@ def list_operatives(
     (decision #26); on SQLite it scans with `json_each`, so the default test tier
     exercises the same filter.
     """
-    items = service.list_operatives(
+    cards = service.list_operatives(
         kill_team_id=kill_team_id, keyword=keyword, limit=page.limit, offset=page.offset
     )
+    items = [
+        KTOperative_ListRead.model_validate(
+            {
+                **card.operative.model_dump(),
+                "weapons": [w.model_dump() for w in card.weapons],
+                "abilities": [a.model_dump() for a in card.abilities],
+            }
+        )
+        for card in cards
+    ]
     return paginate(items, service.count_operatives(kill_team_id, keyword), page)
 
 

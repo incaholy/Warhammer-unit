@@ -124,6 +124,43 @@ class KillTeamService:
 
     # --- one team, whole ---------------------------------------------------
 
+    def _live_profiles(
+        self, operative_ids: list[UUID]
+    ) -> tuple[dict[UUID, list[KTWeapon]], dict[UUID, list[KTAbility]]]:
+        """Every live weapon and ability for these operatives, grouped by operative.
+
+        Two queries whatever the number of operatives, and ONE place that decides a
+        withdrawn profile is hidden -- `get_kill_team` and `list_operatives` both read it,
+        so the datacard a client gets cannot depend on which route asked for it. They used
+        to differ: the detail filtered and the listing did not.
+        """
+        weapons: dict[UUID, list[KTWeapon]] = defaultdict(list)
+        abilities: dict[UUID, list[KTAbility]] = defaultdict(list)
+        if not operative_ids:
+            return weapons, abilities
+        for weapon in self.session.exec(
+            select(KTWeapon)
+            .where(KTWeapon.operative_id.in_(operative_ids), KTWeapon.withdrawn.is_(False))  # type: ignore[attr-defined]
+            .order_by(KTWeapon.position)
+        ).all():
+            weapons[weapon.operative_id].append(weapon)
+        for ability in self.session.exec(
+            select(KTAbility)
+            .where(KTAbility.operative_id.in_(operative_ids), KTAbility.withdrawn.is_(False))  # type: ignore[attr-defined]
+            .order_by(KTAbility.position)
+        ).all():
+            abilities[ability.operative_id].append(ability)
+        return weapons, abilities
+
+    def _live_team(self, kill_team_id: UUID) -> KillTeam | None:
+        """The team, unless the source has withdrawn it (#55). One place, two callers."""
+        return self.session.exec(
+            select(KillTeam).where(
+                KillTeam.id == kill_team_id,
+                KillTeam.withdrawn.is_(False),  # type: ignore[attr-defined]
+            )
+        ).first()
+
     def get_kill_team(self, kill_team_id: UUID) -> KillTeamDetail:
         """One kill team with everything a reader of its page would see, minus the
         rows the source has withdrawn (decision #55).
@@ -145,8 +182,13 @@ class KillTeamService:
         `selection_rules` has no flag to filter: a composition is replaced as a whole
         (#44), so it already loses whatever the source dropped.
         """
+        # The TEAM is filtered too, not just its collections. An audit caught this: the
+        # listing hid a withdrawn team while this route still served it whole, so "the
+        # catalog hides a withdrawn row" was true of five reads out of six.
         team = self.session.exec(
-            select(KillTeam).where(KillTeam.id == kill_team_id).options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
+            select(KillTeam)
+            .where(KillTeam.id == kill_team_id, KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
+            .options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
         ).first()
         if team is None:
             raise NotFoundError(f"kill team {kill_team_id} not found")
@@ -161,22 +203,7 @@ class KillTeamService:
             )
 
         operatives = live(KTOperative, KTOperative.position)
-        ids = [row.id for row in operatives]
-        weapons: dict[UUID, list[KTWeapon]] = defaultdict(list)
-        abilities: dict[UUID, list[KTAbility]] = defaultdict(list)
-        if ids:
-            for weapon in self.session.exec(
-                select(KTWeapon)
-                .where(KTWeapon.operative_id.in_(ids), KTWeapon.withdrawn.is_(False))  # type: ignore[attr-defined]
-                .order_by(KTWeapon.position)
-            ).all():
-                weapons[weapon.operative_id].append(weapon)
-            for ability in self.session.exec(
-                select(KTAbility)
-                .where(KTAbility.operative_id.in_(ids), KTAbility.withdrawn.is_(False))  # type: ignore[attr-defined]
-                .order_by(KTAbility.position)
-            ).all():
-                abilities[ability.operative_id].append(ability)
+        weapons, abilities = self._live_profiles([row.id for row in operatives])
 
         return KillTeamDetail(
             team=team,
@@ -214,7 +241,9 @@ class KillTeamService:
         because "this team has no composition" and "there is no such team" are different
         answers and only one of them is a 404.
         """
-        if self.session.get(KillTeam, kill_team_id) is None:
+        # Gated on a LIVE team, for the same reason as the detail above: a withdrawn team
+        # is not in the catalog, so neither is its composition.
+        if self._live_team(kill_team_id) is None:
             raise NotFoundError(f"kill team {kill_team_id} not found")
         statement = (
             select(KTSelectionRule)
@@ -231,25 +260,33 @@ class KillTeamService:
         keyword: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[KTOperative]:
+    ) -> list[OperativeCard]:
         """Operatives, optionally narrowed to one team or one keyword.
 
         The cross-team view the nested form cannot give: "every operative with LEADER",
         "compare these two teams' Warriors". Ordered by team then printed position, so a
         page of them still arrives in an order a reader recognises.
 
-        Weapons and abilities are eager-loaded, because an operative without its datacard
-        is not much of an answer and lazily it would be two queries per row.
+        Weapons and abilities come with it, because an operative without its datacard is
+        not much of an answer. Fetched as two grouped queries rather than `selectinload`,
+        for the reason `get_kill_team` does the same: a withdrawn PROFILE has to be
+        filtered, and the relationships are shared with the roster read, which must not
+        filter. An audit caught this route still serving withdrawn weapons after the rest
+        of the catalog had been filtered.
+
+        Three queries whatever the page size -- the operatives, their weapons, their
+        abilities -- where lazily it would be two per row.
         """
-        statement = select(KTOperative).options(
-            selectinload(KTOperative.weapons),  # type: ignore[arg-type]
-            selectinload(KTOperative.abilities),  # type: ignore[arg-type]
-        )
-        statement = self._narrow_operatives(statement, kill_team_id, keyword)
+        statement = self._narrow_operatives(select(KTOperative), kill_team_id, keyword)
         statement = statement.order_by(KTOperative.kill_team_id, KTOperative.position, KTOperative.id).offset(
             offset
         )
-        return list(self.session.exec(statement.limit(limit)).all())
+        operatives = list(self.session.exec(statement.limit(limit)).all())
+        weapons, abilities = self._live_profiles([row.id for row in operatives])
+        return [
+            OperativeCard(operative=row, weapons=weapons[row.id], abilities=abilities[row.id])
+            for row in operatives
+        ]
 
     def count_operatives(self, kill_team_id: UUID | None = None, keyword: str | None = None) -> int:
         statement = self._narrow_operatives(select(func.count(KTOperative.id)), kill_team_id, keyword)

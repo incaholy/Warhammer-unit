@@ -309,7 +309,7 @@ def test_operatives_can_be_narrowed_to_one_team(session, make_kill_team, make_kt
     make_kt_operative(kill_team=b, name="Beta One", position=0)
     service = _service(session)
 
-    assert [o.name for o in service.list_operatives(kill_team_id=a.id)] == ["Alpha One"]
+    assert [c.operative.name for c in service.list_operatives(kill_team_id=a.id)] == ["Alpha One"]
     assert service.count_operatives(kill_team_id=a.id) == 1
     assert service.count_operatives() == 2
 
@@ -325,8 +325,10 @@ def test_a_keyword_filter_matches_the_whole_keyword_and_not_a_prefix(
     make_kt_operative(kill_team=team, name="Requisitioned Servitor", keywords=["GUN SERVITOR"])
     service = _service(session)
 
-    assert [o.name for o in service.list_operatives(keyword="GUN")] == ["Battleclade Gunner"]
-    assert [o.name for o in service.list_operatives(keyword="GUN SERVITOR")] == ["Requisitioned Servitor"]
+    assert [c.operative.name for c in service.list_operatives(keyword="GUN")] == ["Battleclade Gunner"]
+    assert [c.operative.name for c in service.list_operatives(keyword="GUN SERVITOR")] == [
+        "Requisitioned Servitor"
+    ]
     assert service.count_operatives(keyword="GUN") == 1
 
 
@@ -335,7 +337,7 @@ def test_a_keyword_filter_is_upper_cased_the_way_a_datacard_prints_it(
 ):
     make_kt_operative(kill_team=make_kill_team(), name="Leader", keywords=["LEADER"])
 
-    assert [o.name for o in _service(session).list_operatives(keyword="leader")] == ["Leader"]
+    assert [c.operative.name for c in _service(session).list_operatives(keyword="leader")] == ["Leader"]
 
 
 def test_a_keyword_matching_nothing_is_an_empty_result(session, make_kill_team, make_kt_operative):
@@ -363,11 +365,14 @@ def test_a_listed_operative_brings_its_datacard_with_it(
     session.expunge_all()
 
     with counting_queries(session) as statements:
-        rows = _service(session).list_operatives()
-        _ = [(w.name, a.name) for o in rows for w in o.weapons for a in o.abilities]
+        cards = _service(session).list_operatives()
+        _ = [(w.name, a.name) for c in cards for w in c.weapons for a in c.abilities]
 
-    assert sorted(o.name for o in rows) == ["Sentinel", "Warden"]
-    # operatives, then ONE query for all their weapons and one for all their abilities
+    assert sorted(c.operative.name for c in cards) == ["Sentinel", "Warden"]
+    # Operatives, then ONE query for all their weapons and one for all their abilities.
+    # The count survived the move from `selectinload` to grouped queries -- which #55
+    # forced, because a withdrawn PROFILE has to be filtered and the relationships are
+    # shared with the roster read.
     assert len(statements) == 3
 
 
@@ -409,7 +414,7 @@ def test_the_catalog_hides_a_withdrawn_operative_and_its_count_agrees(
 
     _withdraw(session, gone)
 
-    assert [o.name for o in service.list_operatives()] == ["Warrior"]
+    assert [c.operative.name for c in service.list_operatives()] == ["Warrior"]
     assert service.count_operatives() == 1
 
 
@@ -497,3 +502,83 @@ def test_the_composition_is_never_filtered_because_it_has_no_flag(
     detail = _service(session).get_kill_team(team_id)
 
     assert [r.position for r in detail.selection_rules] == [0, 1, 2]
+
+
+def test_a_withdrawn_team_is_not_readable_by_id_either(session, make_kill_team, make_kt_faction):
+    """An audit caught this: the LISTING hid a withdrawn team and this read served it.
+
+    "The catalog hides a withdrawn row" was true of five reads out of six, which is the
+    kind of claim that is worse than an obvious gap -- it reads as settled.
+    """
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    team_id = team.id
+    service = _service(session)
+    assert service.get_kill_team(team_id).team.name == "Raveners"
+
+    _withdraw(session, team)
+    session.expunge_all()
+
+    with pytest.raises(NotFoundError):
+        _service(session).get_kill_team(team_id)
+
+
+def test_a_withdrawn_teams_composition_is_not_readable_either(
+    session, make_kill_team, make_kt_selection_rule
+):
+    # The composition route is gated on a LIVE team, through the same `_live_team` the
+    # detail uses, so the two cannot drift apart.
+    team = make_kill_team(name="Raveners")
+    make_kt_selection_rule(kill_team=team, position=0)
+    team_id = team.id
+    assert _service(session).list_selection_rules(team_id)
+
+    _withdraw(session, team)
+    session.expunge_all()
+
+    with pytest.raises(NotFoundError):
+        _service(session).list_selection_rules(team_id)
+
+
+def test_the_operative_listing_hides_a_withdrawn_profile_too(
+    session, make_kill_team, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    """The second half the audit found: the listing served withdrawn WEAPONS.
+
+    The row was filtered and its profiles were not, because the listing eager-loaded them
+    through the relationships -- which the roster read shares and must not filter. Both
+    reads now go through `_live_profiles`, so a datacard cannot depend on which route
+    asked for it.
+    """
+    team = make_kill_team(name="Raveners")
+    card = make_kt_operative(kill_team=team, name="Warrior", position=0)
+    make_kt_weapon(operative=card, name="Claws", position=0)
+    gone_weapon = make_kt_weapon(operative=card, name="Withdrawn Claws", position=1)
+    make_kt_ability(operative=card, name="Pounce", position=0)
+    gone_ability = make_kt_ability(operative=card, name="Withdrawn Ability", position=1)
+    _withdraw(session, gone_weapon)
+    _withdraw(session, gone_ability)
+    session.expunge_all()
+
+    listed = _service(session).list_operatives()
+
+    assert [c.operative.name for c in listed] == ["Warrior"]
+    assert [w.name for w in listed[0].weapons] == ["Claws"]
+    assert [a.name for a in listed[0].abilities] == ["Pounce"]
+
+
+def test_both_catalog_reads_agree_on_one_datacard(session, make_kill_team, make_kt_operative, make_kt_weapon):
+    # The property the shared `_live_profiles` exists for: a client must not get a
+    # different datacard depending on whether it asked for the team or the listing.
+    team = make_kill_team(name="Raveners")
+    card = make_kt_operative(kill_team=team, name="Warrior", position=0)
+    make_kt_weapon(operative=card, name="Claws", position=0)
+    gone = make_kt_weapon(operative=card, name="Withdrawn Claws", position=1)
+    _withdraw(session, gone)
+    team_id = team.id
+    session.expunge_all()
+    service = _service(session)
+
+    from_detail = service.get_kill_team(team_id).operatives[0]
+    from_listing = service.list_operatives(kill_team_id=team_id)[0]
+
+    assert [w.name for w in from_detail.weapons] == [w.name for w in from_listing.weapons]
