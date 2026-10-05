@@ -51,7 +51,7 @@ def test_adding_games_did_not_give_the_catalog_a_write_route():
 def test_every_game_route_needs_a_token(client):
     paths = [p for p in app.openapi()["paths"] if "/me/kill-team/games" in p]
     operations = sum(len(app.openapi()["paths"][p]) for p in paths)
-    assert (len(paths), operations) == (10, 14), f"{len(paths)} paths, {operations} operations"
+    assert (len(paths), operations) == (11, 15), f"{len(paths)} paths, {operations} operations"
 
     assert client.get(BASE).status_code == 401
     assert client.post(BASE, json={"roster_id": str(uuid.uuid4())}).status_code == 401
@@ -374,3 +374,50 @@ def test_undo_with_nothing_left_is_a_400(auth_client, make_kill_team, make_kt_fa
 
     assert resp.status_code == 400
     assert "undo" in resp.json()["detail"]
+
+
+def test_spending_a_ploy_end_to_end(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative, make_kt_ploy
+):
+    """One call, two fields moved, and one undo puts both back."""
+    team, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    make_kt_ploy(kill_team=team, name="Predatory Instincts", cp_cost=1, position=0)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+
+    resp = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": "Predatory Instincts"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["command_points"] == 2, "the CP came out of the snapshot's cost"
+    assert body["ploys_used"] == [{"name": "Predatory Instincts", "turning_point": 1}]
+
+    undone = auth_client.post(f"{BASE}/{gid}/undo").json()
+    assert (undone["command_points"], undone["ploys_used"]) == (3, [])
+
+
+def test_a_ploy_the_team_does_not_have_is_a_400(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    _, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+
+    resp = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": "Teleportarium"})
+
+    assert resp.status_code == 400
+    assert resp.json()["field"] == "name"
+
+
+def test_spending_a_ploy_needs_a_token_and_the_caller_s_own_game(
+    client, auth_client, session, make_user, make_kill_team, make_kt_faction, make_kt_roster
+):
+    # The new route goes through the same dependency as the other thirteen, so it is
+    # covered by the 401/404 contract rather than needing its own rule.
+    team = make_kill_team(faction=make_kt_faction(name="Nurgle"), name="Gellerpox")
+    roster = make_kt_roster(owner=make_user(username="other2", email="other2@test.invalid"), kill_team=team)
+    theirs = KTGame(owner_user_id=roster.owner_user_id, kill_team_id=team.id, roster_id=roster.id)
+    session.add(theirs)
+    session.commit()
+
+    assert client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 401
+    assert auth_client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 404

@@ -629,7 +629,7 @@ catalog.
 
 ## K5. Game tracker
 
-**Status: ✅ Done.** Four tables, a service and fourteen routes under
+**Status: ✅ Done.** Four tables, a service and fifteen routes under
 `/api/v1/me/kill-team/games`. The migration was regenerated to `b8ba89c436bc` (the
 draft's eighth). Four decisions were settled while building it: **#60** deleting a
 roster a game was played from is refused (409), **#61** activation is stored as the

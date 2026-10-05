@@ -83,6 +83,7 @@ by the players. Encoding the rules themselves (a rules engine) is out of scope.
 | 62 | NULL initiative means nobody has rolled | `KTGame.initiative` is nullable -- `NULL`, `'player'` or `'opponent'` -- and defaults to NULL. `advance` puts it back to NULL for the next turning point's roll-off | Initiative is rolled off per turning point, so there is a real third state and the column has to carry it: a game in setup holds nobody, and it had been defaulting to `'player'` -- asserting something no one had rolled. A bool `has_initiative` has the same defect in a worse form, since `False` would mean both "the opponent has it" and "nobody rolled", and it would break the pattern where every closed vocabulary in these tables is a CHECK'd string. NULL as a MEANING rather than a gap is already how `invulnerable_save` and `range_inches` work -- a stat the card genuinely does not print. The consequence a client must honour: `initiative: null` renders as "not rolled", never as the opponent's |
 | 63 | Activating and transforming are their own routes | `POST .../operatives/{id}/activate` and `POST .../operatives/{id}/transform`, not fields on the operative `PATCH`. The PATCH keeps the state a client genuinely SETS: wounds, order, tokens, actions used | This section used to specify `PATCH` with a `becomes_operative_id`, and #61 made that shape untenable for the other one: `activated_in_turning_point` is set by the SERVER from the game's own turning point, so it is not a value a caller supplies and cannot be a field on a PATCH at all. Having been forced to give activation its own route, giving transform a field instead would have left two operations in two different shapes, and the inconsistency is the thing that gets mis-remembered. Both are operations rather than field sets, and a PATCH whose body quietly re-snapshots a datacard is the kind of API that reads fine and surprises everyone -- `extra="forbid"` (the `WriteSchema` rule) would have accepted it silently, since the key is declared |
 | 64 | A roster name is unique per OWNER, in the schema | `UNIQUE(owner_user_id, name)` on `kt_rosters`, alongside the `_require_name_free` check that was there alone | A check-then-act with nothing behind it is a suggestion, not a rule. Postgres reads committed rows only, so two concurrent creates both run that SELECT, both find nothing and both insert -- demonstrated with two connections producing two rosters called "Mine" before this existed. The old reasoning ("a usability rule rather than an integrity one -- two players may both call a roster 'Raveners'") is right about a GLOBAL unique and wrong to conclude there should be none: the alternative to global is SCOPED. Both halves stay, for different jobs -- the check answers 409 naming `name`, where the bare constraint reaches the generic `IntegrityError` backstop and says "conflict with an existing resource"; the constraint is what makes the check true under concurrency. Same split as `add_equipment` and `KTGameEvent.sequence`. Note what this does NOT touch: `kt_roster_operatives` still has no unique constraint, because #50 makes a repeat legitimate -- two Warriors are two rows, and a count could not say which of them is wounded. Added while the migration was still a draft, which is the only reason it was free |
+| 65 | Spending a ploy is ONE operation | `POST .../ploys` takes a name, records `{name, turning_point}` in `ploys_used` AND deducts the snapshot's `cp_cost` from `command_points`. A ploy the game's snapshot does not list is refused, as is one the CP will not cover. `ploys_used` and `command_points` stay directly writable, and the direct path is now checked against the snapshot too | They were two independent fields, so a player could log a ploy without paying for it -- and CP is the one number in a game with mechanical consequence. The cost is not the client's to know either: #24 already puts it in the game's own snapshot, so the server reads it rather than trusting a number sent in. ONE operation because it is one EVENT: `undo` restores the CP and removes the entry together, where two PATCHes would be two events and undoing once would leave either a ploy logged that had been paid for or paid-for CP with no ploy to show it. Validating the direct path closes the missing half of #23 -- `actions_used` was checked against an operative's card and `ploys_used` against nothing, so it accepted a ploy the team does not have. What stays the players' (#1): how often a ploy may be used and how many a turning point allows, neither of which is counted |
 
 Build order and status are tracked in ROADMAP.md (K1–K7), not here.
 
@@ -454,6 +455,14 @@ Both are recorded in the event log (`operative_added`, `operative_transformed`, 
 naming the datacards and the reason), so `undo` works on them like anything else and the
 game screen can show what a model used to be.
 
+**Revealing equipment does not add the operatives it grants**, and that is settled rather
+than pending. A client reveals the piece and then adds the datacards, four generic calls.
+Automating it needs a stored link from a piece of equipment to the datacards it grants --
+structure the catalog deliberately does not hold, since #44 made composition text and #28
+says the catalog never decides what a list may contain. It is the one place where closing
+the gap would cost a principle instead of earning one, so the backend holds no team's rule
+and the event log still shows the reveal and the adds in order.
+
 What stays with the players, per decision #1: Mutation's per-turning-point quota (2, 2,
 3, 4) and its control-range trigger, and which **Accursed Gift** is taken. The quota
 needs no column — "how many transforms this turning point" is a query over the event log
@@ -485,6 +494,8 @@ Endpoints under `/api/v1/me/kill-team/games/...`:
 - `POST .../operatives/{id}/activate` — mark it activated in the game's own turning
   point (#61, #63)
 - `POST .../operatives/{id}/transform` — one card becomes another (#19, #63)
+- `POST .../ploys` — spend one by NAME: records it and deducts the snapshot's
+  `cp_cost` in one event, so `undo` puts both back (#65)
 - `POST .../equipment` / `DELETE .../equipment/{id}` — this battle's picks
 - `PATCH .../equipment/{id}` — reveal it
 - `POST .../advance` — next phase / turning point; the server applies resets

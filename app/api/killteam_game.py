@@ -4,7 +4,7 @@ Identity comes from the JWT, never a path param, and every nested `{game_id}` ro
 goes through `get_owned_game`, which 404s unless the game belongs to the caller — so a
 stranger's `game_id` reveals nothing. The same shape as the rosters router.
 
-Fourteen routes:
+Fifteen routes:
 
     POST   /me/kill-team/games                                 start one from a roster
     GET    /me/kill-team/games                                 paged, lean
@@ -15,6 +15,7 @@ Fourteen routes:
     PATCH  /me/kill-team/games/{id}/operatives/{row_id}        wounds, order, tokens
     POST   /me/kill-team/games/{id}/operatives/{row_id}/activate
     POST   /me/kill-team/games/{id}/operatives/{row_id}/transform
+    POST   /me/kill-team/games/{id}/ploys                      spend one, CP and all
     POST   /me/kill-team/games/{id}/equipment                  take a piece
     PATCH  /me/kill-team/games/{id}/equipment/{row_id}         reveal it
     DELETE /me/kill-team/games/{id}/equipment/{row_id}
@@ -274,6 +275,12 @@ class KTGameEquipment_Add(WriteSchema):
     equipment_id: UUID
 
 
+class KTGamePloy_Use(WriteSchema):
+    #: By NAME, not by id: the game plays from its own snapshot (#24) and never reads the
+    #: catalog again, so a ploy's catalog id is not something this battle still knows.
+    name: Name
+
+
 def _listed(game: KTGame) -> KTGame_ListRead:
     return KTGame_ListRead(
         id=game.id,
@@ -487,6 +494,27 @@ def remove_equipment(
 ) -> Response:
     service.remove_equipment(game.id, row_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{game_id}/ploys", response_model=KTGame_Read)
+def use_ploy(
+    payload: KTGamePloy_Use,
+    game: KTGame = Depends(get_owned_game),
+    service: KTGameService = Depends(get_game_service),
+) -> KTGame_Read:
+    """Spend a ploy: record it and deduct its CP in one operation.
+
+    The cost comes from the game's own snapshot, so a client does not supply it and
+    cannot forget to. One operation because it is one event -- `undo` then restores the
+    CP and removes the entry together, where two PATCHes would let one be undone without
+    the other.
+
+    400 for a ploy this game's snapshot does not list, or if the CP will not cover it.
+    How many ploys a turning point allows is the players' (#1). Returns the game whole,
+    because two of its fields moved.
+    """
+    service.use_ploy(game.id, payload.name)
+    return _detail(service.get_game(game.id))
 
 
 # --- flow ---

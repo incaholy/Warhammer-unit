@@ -3664,6 +3664,65 @@
         }
       }
     },
+    "/api/v1/me/kill-team/games/{game_id}/ploys": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Use Ploy",
+        "description": "Spend a ploy: record it and deduct its CP in one operation.\n\nThe cost comes from the game's own snapshot, so a client does not supply it and\ncannot forget to. One operation because it is one event -- `undo` then restores the\nCP and removes the entry together, where two PATCHes would let one be undone without\nthe other.\n\n400 for a ploy this game's snapshot does not list, or if the CP will not cover it.\nHow many ploys a turning point allows is the players' (#1). Returns the game whole,\nbecause two of its fields moved.",
+        "operationId": "use_ploy_api_v1_me_kill_team_games__game_id__ploys_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGamePloy_Use"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/kill-team/games/{game_id}/advance": {
       "post": {
         "tags": [
@@ -4771,6 +4830,22 @@
           "universal"
         ],
         "title": "KTGamePloy_Read"
+      },
+      "KTGamePloy_Use": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "KTGamePloy_Use"
       },
       "KTGameRule_Read": {
         "properties": {

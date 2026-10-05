@@ -214,7 +214,7 @@ class KTGameService:
         unknown = set(fields) - self._UPDATABLE
         if unknown:
             raise KTGameValidationError("fields", f"cannot update {sorted(unknown)}")
-        self._validate_game_fields(fields)
+        self._validate_game_fields(game, fields)
 
         touched = self._apply(game, fields)
         self._write(game, "game_updated", touched)
@@ -365,6 +365,47 @@ class KTGameService:
         touched = self._apply(row, {"activated_in_turning_point": game.turning_point})
         self._write(game, "operative_activated", touched, target_id=row.id)
         return row
+
+    def use_ploy(self, game_id: UUID, name: str) -> KTGame:
+        """Spend a ploy: record it AND deduct its CP, in one operation.
+
+        The two halves were separate fields a caller set independently, which meant a
+        player could log a ploy without paying for it -- and CP is the one number in a
+        game with mechanical consequence. The cost is not something the client has to
+        know either: it is in the game's own snapshot (#24), so the server reads it.
+
+        One operation rather than two writes, because it is one event. `undo` then
+        restores the CP and removes the entry TOGETHER; two PATCHes would be two events
+        and undoing once would leave a ploy logged that had been paid for, or paid-for CP
+        with no ploy to show it.
+
+        Refused for a ploy this game's snapshot does not list -- the same bookkeeping as
+        `actions_used` against an operative's card (#23) -- and refused if the CP will not
+        cover it, which the `ck_kt_game_command_points` CHECK would refuse anyway. How
+        many ploys a turning point allows is a RULE, so it is not counted here (#1), and
+        `ploys_used` and `command_points` stay directly writable for a custom game.
+        """
+        game = self._require_game(game_id)
+        ploy = next((p for p in game.ploys if p.get("name") == name), None)
+        if ploy is None:
+            raise KTGameValidationError("name", f"{name!r} is not one of this game's ploys")
+
+        cost = ploy.get("cp_cost") or 0
+        if cost > game.command_points:
+            raise KTGameValidationError(
+                "command_points",
+                f"{name!r} costs {cost} CP and the game has {game.command_points}",
+            )
+
+        touched = self._apply(
+            game,
+            {
+                "command_points": game.command_points - cost,
+                "ploys_used": [*game.ploys_used, {"name": name, "turning_point": game.turning_point}],
+            },
+        )
+        self._write(game, "ploy_used", touched)
+        return game
 
     # ----------------------------- equipment -----------------------------
 
@@ -756,7 +797,7 @@ class KTGameService:
                 return row
         raise NotFoundError(f"event {event.id} points at a row that is gone")
 
-    def _validate_game_fields(self, fields: dict[str, Any]) -> None:
+    def _validate_game_fields(self, game: KTGame, fields: dict[str, Any]) -> None:
         if fields.get("status") is not None and fields["status"] not in self._STATUSES:
             raise KTGameValidationError("status", f"must be one of {sorted(self._STATUSES)}")
         if fields.get("initiative") is not None and fields["initiative"] not in self._INITIATIVE:
@@ -768,6 +809,28 @@ class KTGameService:
                 raise KTGameValidationError(field, "cannot be negative")
         if "victory_points" in fields:
             self._validate_victory_points(fields["victory_points"])
+        if "ploys_used" in fields:
+            self._validate_ploys_used(game, fields["ploys_used"])
+
+    @staticmethod
+    def _validate_ploys_used(game: KTGame, entries) -> None:
+        """A ploy recorded must be one this GAME's snapshot lists.
+
+        The exact counterpart of `_validate_actions` against an operative's card (#23),
+        and it was the missing half of that rule: actions were checked and ploys were
+        not, so `ploys_used` accepted a ploy the team does not have. How OFTEN a ploy may
+        be used is a rule, so the same entry twice is accepted.
+        """
+        if not isinstance(entries, list):
+            raise KTGameValidationError("ploys_used", "must be a list of entries")
+        known = {p["name"] for p in game.ploys if isinstance(p, dict) and "name" in p}
+        for entry in entries:
+            if not isinstance(entry, dict) or "name" not in entry:
+                raise KTGameValidationError("ploys_used", "each entry needs a name")
+            if entry["name"] not in known:
+                raise KTGameValidationError(
+                    "ploys_used", f"{entry['name']!r} is not one of this game's ploys"
+                )
 
     @staticmethod
     def _validate_victory_points(value) -> None:

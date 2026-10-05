@@ -877,3 +877,114 @@ def test_an_incapacitated_operative_cannot_activate(session, battle):
 
     # The reserve one is allowed, because that is the players' call.
     assert svc.activate_operative(game.id, reserved.id).activated_in_turning_point == 1
+
+
+# --- spending a ploy is one operation (#24, #1) -----------------------------
+
+
+def test_using_a_ploy_records_it_and_pays_for_it(session, battle):
+    """The two halves were a caller's job to remember, and CP is the number that counts.
+
+    The cost comes from the game's own snapshot, so the client neither supplies it nor
+    can forget it.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, command_points=3)
+    ploy = next(p for p in game.ploys if not p["universal"])
+
+    svc.use_ploy(game.id, ploy["name"])
+
+    assert game.ploys_used == [{"name": ploy["name"], "turning_point": 1}]
+    assert game.command_points == 3 - ploy["cp_cost"]
+
+
+def test_undoing_a_ploy_restores_the_cp_and_the_entry_together(session, battle):
+    """Why it is one operation rather than two writes.
+
+    Two PATCHes would be two events, and undoing once would leave either a ploy logged
+    that had been paid for or paid-for CP with no ploy to show it. One event means one
+    undo puts both back.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, command_points=4)
+    ploy = next(p for p in game.ploys if not p["universal"])
+    svc.use_ploy(game.id, ploy["name"])
+
+    svc.undo(game.id)
+
+    assert game.ploys_used == []
+    assert game.command_points == 4
+
+
+def test_a_ploy_this_game_does_not_have_is_refused(session, battle):
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.use_ploy(game.id, "Teleportarium")
+
+
+def test_a_ploy_cannot_be_spent_on_cp_the_game_does_not_have(session, battle):
+    # Bookkeeping the CHECK would refuse anyway, caught here so the message names the
+    # ploy and the shortfall rather than arriving as an IntegrityError.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    ploy = next(p for p in game.ploys if p["cp_cost"] > 0)
+
+    with pytest.raises(KTGameValidationError, match="costs 1 CP and the game has 0"):
+        svc.use_ploy(game.id, ploy["name"])
+
+
+def test_the_same_ploy_twice_is_accepted_because_that_is_a_rule(session, battle):
+    # How often a ploy may be used, and how many a turning point allows, are the
+    # players' (#1). Only that it EXISTS and that the CP covers it is bookkeeping.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, command_points=5)
+    ploy = next(p for p in game.ploys if p["cp_cost"] > 0)
+
+    svc.use_ploy(game.id, ploy["name"])
+    svc.use_ploy(game.id, ploy["name"])
+
+    assert len(game.ploys_used) == 2
+    assert game.command_points == 5 - 2 * ploy["cp_cost"]
+
+
+def test_a_universal_ploy_can_be_spent_like_the_teams_own(session, battle):
+    # The snapshot carries both (#24), so a game needs no catalog call to spend
+    # Command Re-roll.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, command_points=2)
+    universal = next(p for p in game.ploys if p["universal"])
+
+    svc.use_ploy(game.id, universal["name"])
+
+    assert game.ploys_used[0]["name"] == universal["name"]
+
+
+def test_setting_ploys_used_directly_is_checked_against_the_snapshot(session, battle):
+    """The missing half of #23's rule.
+
+    `actions_used` was checked against an operative's card and `ploys_used` was checked
+    against nothing, so the field accepted a ploy the team does not have. The field stays
+    writable -- a custom game may need to put anything in it -- but a typo is caught.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    real = game.ploys[0]["name"]
+
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.update_game(game.id, ploys_used=[{"name": "Teleportarium", "turning_point": 1}])
+
+    svc.update_game(game.id, ploys_used=[{"name": real, "turning_point": 1}])
+    assert game.ploys_used == [{"name": real, "turning_point": 1}]
