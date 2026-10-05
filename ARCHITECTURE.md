@@ -202,11 +202,14 @@ unhandled-exception handler still returns a sanitized body.
   exposes it, addressing entries as `/me/inventory/{unit_id}` instead. Exposing the surrogate would
   give clients two ways to name one thing.
 
-**Status: Partial.** The verb semantics, plural nouns, status codes, and the natural-key decision are
-right across the board, and the link endpoints are idempotent in practice
-(`UnitService.link_weapon` no-ops when the link exists). Three exceptions: the two quantity endpoints
-accumulate on `POST`, `GET /taxonomy` is a static enum inside the faction id namespace, and
-CRUD coverage is uneven across the catalog resources. See
+**Status: ✅ Holds (R12).** The verb semantics, plural nouns, status codes, and the natural-key
+decision are right across the board, and the link endpoints are idempotent in practice
+(`UnitService.link_weapon` no-ops when the link exists). All three exceptions that kept this
+Partial are closed: the two quantity endpoints are **create-only** now, answering 409 when the
+row exists and taking an absolute amount through `PATCH`; the taxonomy route moved OUT of the
+faction id namespace to `GET /taxonomy`, deliberately, so it cannot collide with a future
+faction resource; and admin catalog CRUD is complete for units, weapons and abilities, with
+subfactions deletable. Factions stay create-and-list by decision, not by omission. See
 [ROADMAP R12](ROADMAP.md#r12-make-quantity-mutations-retry-safe-and-even-out-resource-semantics).
 
 ### 2.6 Response envelope
