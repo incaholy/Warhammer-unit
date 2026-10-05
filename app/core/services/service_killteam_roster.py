@@ -261,6 +261,12 @@ class KTRosterService:
         # gets a 404 naming the problem rather than an IntegrityError.
         if operative.kill_team_id != roster.kill_team_id:
             raise NotFoundError(f"operative {operative_id} is not one of kill team {roster.kill_team_id}'s")
+        # Refused if the catalog has WITHDRAWN it (#55): the source no longer names this
+        # row, so a picker that offered it was stale. Rows already on a roster or in a
+        # game are untouched and keep resolving -- that is the whole reason #55 flags
+        # rather than deletes. Referential, not legal, like the cross-team check beside it.
+        if operative.withdrawn:
+            raise NotFoundError(f"operative {operative_id} is no longer in the catalog")
 
         row = KTRosterOperative(
             roster_id=roster.id,

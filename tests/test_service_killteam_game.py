@@ -988,3 +988,69 @@ def test_setting_ploys_used_directly_is_checked_against_the_snapshot(session, ba
 
     svc.update_game(game.id, ploys_used=[{"name": real, "turning_point": 1}])
     assert game.ploys_used == [{"name": real, "turning_point": 1}]
+
+
+# --- withdrawn rows and a battle (#55, K7) ----------------------------------
+
+
+def test_a_withdrawn_datacard_cannot_be_newly_added_to_a_game(session, battle, make_kt_operative):
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    vermin = make_kt_operative(kill_team=b["team"], name="Cursemite", availability="in_battle")
+    vermin.withdrawn = True
+    session.add(vermin)
+    session.commit()
+
+    with pytest.raises(NotFoundError, match="no longer in the catalog"):
+        svc.add_operative(game.id, vermin.id, source="equipment")
+
+
+def test_withdrawn_equipment_cannot_be_newly_taken(session, battle):
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    b["kit"].withdrawn = True
+    session.add(b["kit"])
+    session.commit()
+
+    with pytest.raises(NotFoundError, match="no longer in the catalog"):
+        svc.add_equipment(game.id, b["kit"].id)
+
+
+def test_a_transform_onto_a_withdrawn_card_is_allowed(session, battle, make_kt_operative):
+    """Deliberately NOT refused, and this is the case the flag exists to survive.
+
+    A model already on the table changing into something the catalog has since dropped is
+    mid-battle state, not a new pick. Refusing it would strand a game over a change
+    upstream -- the thing #55 chose a flag over a delete to avoid.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    row = game.operatives[0]
+    torment = make_kt_operative(kill_team=b["team"], name="Torment", wounds=18, position=8)
+    torment.withdrawn = True
+    session.add(torment)
+    session.commit()
+
+    svc.transform_operative(game.id, row.id, torment.id)
+
+    assert row.name == "Torment"
+
+
+def test_a_game_already_under_way_is_untouched_by_a_withdrawal(session, battle):
+    # A game snapshots everything (#22, #24), so a withdrawal cannot reach it at all.
+    # Stated as a test because it is the strongest form of #55's promise.
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    before = [row.name for row in game.operatives]
+    for card in b["cards"]:
+        card.withdrawn = True
+        session.add(card)
+    session.commit()
+    game_id = game.id
+    session.expunge_all()
+
+    assert [row.name for row in svc.get_game(game_id).operatives] == before

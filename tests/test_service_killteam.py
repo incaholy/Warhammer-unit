@@ -173,9 +173,9 @@ def test_reading_a_team_brings_back_its_whole_page(session, make_kill_team, furn
 
     loaded = _service(session).get_kill_team(team_id)
 
-    assert loaded.name == "Raveners"
-    assert loaded.faction.name  # the faction travels with it
-    assert [operative.name for operative in loaded.operatives] == [
+    assert loaded.team.name == "Raveners"
+    assert loaded.team.faction.name  # the faction travels with it
+    assert [card.operative.name for card in loaded.operatives] == [
         "Operative 0",
         "Operative 1",
         "Operative 2",
@@ -205,17 +205,21 @@ def test_reading_a_team_costs_the_same_number_of_queries_however_big_it_is(sessi
     with counting_queries(session) as for_large:
         _touch_everything(service.get_kill_team(large_id))
 
+    # Still flat, and still nine: the team, its faction, one per collection, and one each
+    # for all the operatives' weapons and abilities grouped by `operative_id` in Python.
+    # The shape changed from `selectinload` to per-collection queries (#55 needs the
+    # catalog to filter where a roster read must not) and the COUNT did not.
     assert len(for_small) == len(for_large) == 9
 
 
-def _touch_everything(team):
-    """Walk every collection, so a missing eager load would issue its lazy query here."""
-    assert team.faction.name is not None
-    for collection in (team.rules, team.ploys, team.equipment, team.selection_rules):
+def _touch_everything(detail):
+    """Walk everything the detail carries, so any lazy load would issue its query here."""
+    assert detail.team.faction.name is not None
+    for collection in (detail.rules, detail.ploys, detail.equipment, detail.selection_rules):
         [row.id for row in collection]
-    for operative in team.operatives:
-        [weapon.id for weapon in operative.weapons]
-        [ability.id for ability in operative.abilities]
+    for card in detail.operatives:
+        [weapon.id for weapon in card.weapons]
+        [ability.id for ability in card.abilities]
 
 
 def test_a_loaded_team_is_readable_once_the_session_is_done_with_it(session, make_kill_team, furnish):
@@ -227,14 +231,17 @@ def test_a_loaded_team_is_readable_once_the_session_is_done_with_it(session, mak
     team_id = furnish(make_kill_team(name="Raveners"), operatives=2, rules=3).id
     session.expunge_all()
 
-    team = _service(session).get_kill_team(team_id)
-    session.expunge(team)  # as a closed request-scoped session would leave it
+    detail = _service(session).get_kill_team(team_id)
+    session.expunge_all()  # as a closed request-scoped session would leave it
 
-    assert team.faction.name
-    assert [r.position for r in team.selection_rules] == [0, 1, 2]
-    assert [r.name for r in team.rules] and [p.name for p in team.ploys]
-    assert [e.name for e in team.equipment]
-    assert all(o.weapons and o.abilities for o in team.operatives)
+    # Nothing here can lazy-load: the detail holds the rows in plain lists rather than
+    # relationships, which is a stronger guarantee than the eager loading it replaced.
+    # `team.faction` is the one relationship left, and it is still eager-loaded.
+    assert detail.team.faction.name
+    assert [r.position for r in detail.selection_rules] == [0, 1, 2]
+    assert [r.name for r in detail.rules] and [p.name for p in detail.ploys]
+    assert [e.name for e in detail.equipment]
+    assert all(card.weapons and card.abilities for card in detail.operatives)
 
 
 def test_reading_a_team_that_does_not_exist_is_a_not_found(session):
@@ -362,3 +369,131 @@ def test_a_listed_operative_brings_its_datacard_with_it(
     assert sorted(o.name for o in rows) == ["Sentinel", "Warden"]
     # operatives, then ONE query for all their weapons and one for all their abilities
     assert len(statements) == 3
+
+
+# --- withdrawn rows are hidden from the catalog (#55, K7) -------------------
+
+
+def _withdraw(session, row):
+    row.withdrawn = True
+    session.add(row)
+    session.commit()
+    return row
+
+
+def test_the_catalog_hides_a_withdrawn_team_and_its_count_agrees(session, make_kill_team, make_kt_faction):
+    """A listing whose total counts rows the page hides is worse than either alone.
+
+    So the filter sits where the listing and the count share it, not in both callers.
+    """
+    faction = make_kt_faction(name="Tyranids")
+    make_kill_team(faction=faction, name="Raveners")
+    gone = make_kill_team(faction=faction, name="Withdrawn Team")
+    service = _service(session)
+    assert len(service.list_kill_teams()) == 2 and service.count_kill_teams() == 2
+
+    _withdraw(session, gone)
+
+    assert [t.name for t in service.list_kill_teams()] == ["Raveners"]
+    assert service.count_kill_teams() == 1
+
+
+def test_the_catalog_hides_a_withdrawn_operative_and_its_count_agrees(
+    session, make_kill_team, make_kt_operative
+):
+    team = make_kill_team(name="Raveners")
+    make_kt_operative(kill_team=team, name="Warrior", position=0)
+    gone = make_kt_operative(kill_team=team, name="Withdrawn Warrior", position=1)
+    service = _service(session)
+    assert service.count_operatives() == 2
+
+    _withdraw(session, gone)
+
+    assert [o.name for o in service.list_operatives()] == ["Warrior"]
+    assert service.count_operatives() == 1
+
+
+def test_a_withdrawn_faction_leaves_the_faction_list(session, make_kt_faction):
+    make_kt_faction(name="Tyranids")
+    gone = make_kt_faction(name="Withdrawn Faction")
+    service = _service(session)
+    assert service.count_kt_factions() == 2
+
+    _withdraw(session, gone)
+
+    assert [f.name for f in service.list_kt_factions()] == ["Tyranids"]
+    assert service.count_kt_factions() == 1
+
+
+def test_a_withdrawn_universal_row_leaves_the_universal_lists(session, make_kt_ploy, make_kt_equipment):
+    make_kt_ploy(kill_team=None, name="Command Re-roll", position=0)
+    gone_ploy = make_kt_ploy(kill_team=None, name="Withdrawn Ploy", position=1)
+    make_kt_equipment(kill_team=None, name="Frag Grenade", position=0)
+    gone_kit = make_kt_equipment(kill_team=None, name="Withdrawn Kit", position=1)
+    service = _service(session)
+
+    _withdraw(session, gone_ploy)
+    _withdraw(session, gone_kit)
+
+    assert [p.name for p in service.list_universal_ploys()] == ["Command Re-roll"]
+    assert [e.name for e in service.list_universal_equipment()] == ["Frag Grenade"]
+
+
+def test_a_team_detail_hides_withdrawn_rows_at_every_level(
+    session,
+    make_kill_team,
+    make_kt_operative,
+    make_kt_weapon,
+    make_kt_ability,
+    make_kill_team_rule,
+    make_kt_ploy,
+    make_kt_equipment,
+):
+    """Every collection, including the ones NESTED under an operative.
+
+    The nested two are the reason `get_kill_team` stopped using `selectinload`: a
+    relationship-level filter would have reached the roster read too, so a weapon the
+    source dropped is filtered by the query that fetches it instead.
+    """
+    team = make_kill_team(name="Raveners")
+    make_kill_team_rule(kill_team=team, name="Burrow", position=0)
+    gone_rule = make_kill_team_rule(kill_team=team, name="Withdrawn Rule", position=1)
+    make_kt_ploy(kill_team=team, name="Tunnel", position=0)
+    gone_ploy = make_kt_ploy(kill_team=team, name="Withdrawn Ploy", position=1)
+    make_kt_equipment(kill_team=team, name="Spike", position=0)
+    gone_kit = make_kt_equipment(kill_team=team, name="Withdrawn Kit", position=1)
+    card = make_kt_operative(kill_team=team, name="Warrior", position=0)
+    gone_card = make_kt_operative(kill_team=team, name="Withdrawn Warrior", position=1)
+    make_kt_weapon(operative=card, name="Claws", position=0)
+    gone_weapon = make_kt_weapon(operative=card, name="Withdrawn Claws", position=1)
+    make_kt_ability(operative=card, name="Pounce", position=0)
+    gone_ability = make_kt_ability(operative=card, name="Withdrawn Ability", position=1)
+    for row in (gone_rule, gone_ploy, gone_kit, gone_card, gone_weapon, gone_ability):
+        _withdraw(session, row)
+    team_id = team.id  # before the expunge, or reading it is a DetachedInstanceError
+    session.expunge_all()
+
+    detail = _service(session).get_kill_team(team_id)
+
+    assert [r.name for r in detail.rules] == ["Burrow"]
+    assert [p.name for p in detail.ploys] == ["Tunnel"]
+    assert [e.name for e in detail.equipment] == ["Spike"]
+    assert [c.operative.name for c in detail.operatives] == ["Warrior"]
+    assert [w.name for w in detail.operatives[0].weapons] == ["Claws"]
+    assert [a.name for a in detail.operatives[0].abilities] == ["Pounce"]
+
+
+def test_the_composition_is_never_filtered_because_it_has_no_flag(
+    session, make_kill_team, make_kt_selection_rule
+):
+    # #44 replaces a composition as a whole, so it already loses whatever the source
+    # dropped. A filter here would have nothing to read.
+    team = make_kill_team(name="Raveners")
+    for n in range(3):
+        make_kt_selection_rule(kill_team=team, position=n)
+    team_id = team.id
+    session.expunge_all()
+
+    detail = _service(session).get_kill_team(team_id)
+
+    assert [r.position for r in detail.selection_rules] == [0, 1, 2]

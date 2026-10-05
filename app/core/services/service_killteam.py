@@ -11,6 +11,8 @@ Reads only, and deliberately no legality anywhere: composition is DESCRIPTION
 K4's report, never this layer's refusal.
 """
 
+from collections import defaultdict
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import func
@@ -20,13 +22,44 @@ from sqlmodel import Session, select
 from app.core.db.columns import json_list_contains
 from app.core.db.models_killteam import (
     KillTeam,
+    KillTeamRule,
+    KTAbility,
     KTEquipment,
     KTFaction,
     KTOperative,
     KTPloy,
     KTSelectionRule,
+    KTWeapon,
 )
 from app.core.services.errors import NotFoundError
+
+
+@dataclass(frozen=True)
+class OperativeCard:
+    """One datacard with the profiles the catalog still serves."""
+
+    operative: KTOperative
+    weapons: list[KTWeapon]
+    abilities: list[KTAbility]
+
+
+@dataclass(frozen=True)
+class KillTeamDetail:
+    """A team and its LIVE collections — withdrawn rows excluded (decision #55).
+
+    Plain data rather than the `KillTeam` row itself, because the collections cannot
+    come from its relationships any more. A roster read reaches the same rules, ploys
+    and equipment through those relationships and must NOT filter (the K7 decisions), so
+    a filter on the relationship would filter both. The catalog does its own queries and
+    hands the pieces back; the router shapes them.
+    """
+
+    team: KillTeam
+    rules: list[KillTeamRule]
+    ploys: list[KTPloy]
+    equipment: list[KTEquipment]
+    selection_rules: list[KTSelectionRule]
+    operatives: list[OperativeCard]
 
 
 class KillTeamService:
@@ -45,11 +78,19 @@ class KillTeamService:
         catalog's factions these are not an enum -- they come from the site's own
         nav, so the rows are the whole truth and there is no constant to publish.
         """
-        statement = select(KTFaction).order_by(KTFaction.name, KTFaction.id).offset(offset).limit(limit)
+        statement = (
+            select(KTFaction)
+            .where(KTFaction.withdrawn.is_(False))  # type: ignore[attr-defined]
+            .order_by(KTFaction.name, KTFaction.id)
+            .offset(offset)
+            .limit(limit)
+        )
         return list(self.session.exec(statement).all())
 
     def count_kt_factions(self) -> int:
-        return self.session.exec(select(func.count(KTFaction.id))).one()
+        return self.session.exec(
+            select(func.count(KTFaction.id)).where(KTFaction.withdrawn.is_(False))  # type: ignore[attr-defined]
+        ).one()
 
     # --- kill teams -------------------------------------------------------
 
@@ -65,56 +106,99 @@ class KillTeamService:
         The faction is eager-loaded because a listing names it -- "Raveners
         (Tyranids)" -- and a lazy load would be one query per row.
         """
-        statement = select(KillTeam).options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
+        statement = (
+            select(KillTeam)
+            .options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
+            .where(KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
+        )
         if faction_id is not None:
             statement = statement.where(KillTeam.faction_id == faction_id)
         statement = statement.order_by(KillTeam.name, KillTeam.id).offset(offset).limit(limit)
         return list(self.session.exec(statement).all())
 
     def count_kill_teams(self, faction_id: UUID | None = None) -> int:
-        statement = select(func.count(KillTeam.id))
+        statement = select(func.count(KillTeam.id)).where(KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
         if faction_id is not None:
             statement = statement.where(KillTeam.faction_id == faction_id)
         return self.session.exec(statement).one()
 
     # --- one team, whole ---------------------------------------------------
 
-    def get_kill_team(self, kill_team_id: UUID) -> KillTeam:
-        """One kill team with everything a reader of its page would see.
+    def get_kill_team(self, kill_team_id: UUID) -> KillTeamDetail:
+        """One kill team with everything a reader of its page would see, minus the
+        rows the source has withdrawn (decision #55).
 
-        Eager-loaded in a FLAT number of queries -- nine, whatever the team's size: the
-        team and its faction, one query per collection, and one each for the two nested
-        levels (an operative's weapons and abilities). Lazy loading would be a query per
-        operative per collection.
+        Assembled from one query per collection rather than `selectinload`, and that is
+        forced rather than preferred: a roster read reaches the team's rules, ploys and
+        equipment through the SAME relationships and must not filter (the K7 decisions),
+        so a condition on the relationship would filter both reads. The catalog asks its
+        own questions instead.
 
-        `selectinload` rather than `joinedload` throughout, including the
-        many-to-one faction: a join would multiply the team row by every collection
-        row and make the result set the product of nine independent lists.
+        Still FLAT, and still nine queries whatever the team's size -- the team, its
+        faction, one per collection, and one each for every operative's weapons and
+        abilities grouped in Python by `operative_id`. Loading those two per operative
+        would be a query per card.
 
-        Nothing is sorted here. Every relationship declares its own `order_by`
-        (decision #25), so print order arrives with the rows.
+        Nothing is sorted in Python. Every query carries the `position` order decision
+        #25 gives it, so print order arrives with the rows.
 
-        `selection_rules` is the composition as the page prints it -- text with an indent
-        depth, nothing derived (decision #28). Read in `position` order, indenting by
-        `depth`, and it is the page's composition section back.
+        `selection_rules` has no flag to filter: a composition is replaced as a whole
+        (#44), so it already loses whatever the source dropped.
         """
-        statement = (
-            select(KillTeam)
-            .where(KillTeam.id == kill_team_id)
-            .options(
-                selectinload(KillTeam.faction),  # type: ignore[arg-type]
-                selectinload(KillTeam.rules),  # type: ignore[arg-type]
-                selectinload(KillTeam.ploys),  # type: ignore[arg-type]
-                selectinload(KillTeam.equipment),  # type: ignore[arg-type]
-                selectinload(KillTeam.selection_rules),  # type: ignore[arg-type]
-                selectinload(KillTeam.operatives).selectinload(KTOperative.weapons),  # type: ignore[arg-type]
-                selectinload(KillTeam.operatives).selectinload(KTOperative.abilities),  # type: ignore[arg-type]
-            )
-        )
-        team = self.session.exec(statement).first()
+        team = self.session.exec(
+            select(KillTeam).where(KillTeam.id == kill_team_id).options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
+        ).first()
         if team is None:
             raise NotFoundError(f"kill team {kill_team_id} not found")
-        return team
+
+        def live(model, order):
+            return list(
+                self.session.exec(
+                    select(model)
+                    .where(model.kill_team_id == kill_team_id, model.withdrawn.is_(False))
+                    .order_by(order)
+                ).all()
+            )
+
+        operatives = live(KTOperative, KTOperative.position)
+        ids = [row.id for row in operatives]
+        weapons: dict[UUID, list[KTWeapon]] = defaultdict(list)
+        abilities: dict[UUID, list[KTAbility]] = defaultdict(list)
+        if ids:
+            for weapon in self.session.exec(
+                select(KTWeapon)
+                .where(KTWeapon.operative_id.in_(ids), KTWeapon.withdrawn.is_(False))  # type: ignore[attr-defined]
+                .order_by(KTWeapon.position)
+            ).all():
+                weapons[weapon.operative_id].append(weapon)
+            for ability in self.session.exec(
+                select(KTAbility)
+                .where(KTAbility.operative_id.in_(ids), KTAbility.withdrawn.is_(False))  # type: ignore[attr-defined]
+                .order_by(KTAbility.position)
+            ).all():
+                abilities[ability.operative_id].append(ability)
+
+        return KillTeamDetail(
+            team=team,
+            rules=live(KillTeamRule, KillTeamRule.position),
+            ploys=live(KTPloy, KTPloy.position),
+            equipment=live(KTEquipment, KTEquipment.position),
+            selection_rules=list(
+                self.session.exec(
+                    select(KTSelectionRule)
+                    .where(KTSelectionRule.kill_team_id == kill_team_id)
+                    .order_by(KTSelectionRule.position)
+                ).all()
+            ),
+            operatives=[
+                OperativeCard(
+                    operative=row,
+                    weapons=weapons[row.id],
+                    abilities=abilities[row.id],
+                )
+                for row in operatives
+            ],
+        )
 
     # --- the composition on its own ---------------------------------------
 
@@ -172,6 +256,10 @@ class KillTeamService:
         return self.session.exec(statement).one()
 
     def _narrow_operatives(self, statement, kill_team_id: UUID | None, keyword: str | None):
+        # The withdrawn filter lives here rather than in the two callers, so the listing
+        # and its COUNT can never disagree -- a page whose total counts rows the page
+        # itself hides is worse than either alone.
+        statement = statement.where(KTOperative.withdrawn.is_(False))  # type: ignore[attr-defined]
         """The two filters, shared so the listing and the count can never disagree."""
         if kill_team_id is not None:
             statement = statement.where(KTOperative.kill_team_id == kill_team_id)
@@ -198,7 +286,7 @@ class KillTeamService:
         """
         statement = (
             select(KTPloy)
-            .where(KTPloy.kill_team_id.is_(None))  # type: ignore[union-attr]
+            .where(KTPloy.kill_team_id.is_(None), KTPloy.withdrawn.is_(False))  # type: ignore[union-attr]
             .order_by(KTPloy.position, KTPloy.name)
         )
         return list(self.session.exec(statement).all())
@@ -211,7 +299,10 @@ class KillTeamService:
         """
         statement = (
             select(KTEquipment)
-            .where(KTEquipment.kill_team_id.is_(None))  # type: ignore[union-attr]
+            .where(
+                KTEquipment.kill_team_id.is_(None),  # type: ignore[union-attr]
+                KTEquipment.withdrawn.is_(False),  # type: ignore[attr-defined]
+            )
             .order_by(KTEquipment.position, KTEquipment.name)
         )
         return list(self.session.exec(statement).all())

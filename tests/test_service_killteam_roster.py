@@ -614,3 +614,67 @@ def test_a_roster_with_no_games_still_deletes(session, make_kt_roster, make_kt_r
     session.commit()
 
     assert session.get(KTRoster, roster.id) is None
+
+
+# --- withdrawn rows: a roster keeps what it already has (#55, K7) -----------
+
+
+def test_a_rostered_operative_keeps_resolving_after_it_is_withdrawn(
+    session, make_kt_roster, make_kt_operative, make_kt_roster_operative
+):
+    """The whole reason #55 flags rather than deletes.
+
+    The catalog stops offering the datacard; a roster that already fields it still
+    renders. If this read filtered, a list built last month would lose a model because
+    of a change upstream -- which is what deleting the row would have done.
+    """
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team, name="Warrior")
+    make_kt_roster_operative(roster=roster, operative=operative)
+    operative.withdrawn = True
+    session.add(operative)
+    session.commit()
+    roster_id = roster.id
+    session.expunge_all()
+
+    loaded = _service(session).get_roster(roster_id)
+
+    assert [row.operative.name for row in loaded.operatives] == ["Warrior"]
+    assert loaded.operatives[0].operative.withdrawn is True, "it is flagged, and it resolves"
+
+
+def test_a_roster_read_shows_the_teams_withdrawn_reference_too(
+    session, make_kt_roster, make_kill_team_rule, make_kt_ploy, make_kt_equipment
+):
+    # The K7 decision: a roster read resolves whatever it references. The catalog read is
+    # the picker and filters; this read is "what I have" and does not. Which is why the
+    # filter could not go on the relationships -- both reads share them.
+    roster = make_kt_roster()
+    rule = make_kill_team_rule(kill_team=roster.kill_team, name="Withdrawn Rule", position=0)
+    ploy = make_kt_ploy(kill_team=roster.kill_team, name="Withdrawn Ploy", position=0)
+    kit = make_kt_equipment(kill_team=roster.kill_team, name="Withdrawn Kit", position=0)
+    for row in (rule, ploy, kit):
+        row.withdrawn = True
+        session.add(row)
+    session.commit()
+    roster_id = roster.id
+    session.expunge_all()
+
+    loaded = _service(session).get_roster(roster_id)
+
+    assert [r.name for r in loaded.kill_team.rules] == ["Withdrawn Rule"]
+    assert [p.name for p in loaded.kill_team.ploys] == ["Withdrawn Ploy"]
+    assert [e.name for e in loaded.kill_team.equipment] == ["Withdrawn Kit"]
+
+
+def test_a_withdrawn_operative_cannot_be_newly_added_to_a_roster(session, make_kt_roster, make_kt_operative):
+    # A NEW pick is refused: the source no longer names it, so a picker that offered it
+    # was stale. Existing rows are untouched, which the test above pins.
+    roster = make_kt_roster()
+    operative = make_kt_operative(kill_team=roster.kill_team)
+    operative.withdrawn = True
+    session.add(operative)
+    session.commit()
+
+    with pytest.raises(NotFoundError, match="no longer in the catalog"):
+        _service(session).add_operative(roster.id, operative.id, roster.owner_user_id)

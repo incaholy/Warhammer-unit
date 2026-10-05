@@ -253,6 +253,14 @@ class KTGameService:
         # anyway. Checked here so the caller gets a 404 naming the problem.
         if operative.kill_team_id != game.kill_team_id:
             raise NotFoundError(f"operative {operative_id} is not one of kill team {game.kill_team_id}'s")
+        # Refused if the catalog has WITHDRAWN it (#55): the source no longer names this
+        # row, so a picker that offered it was stale. Rows already in a game or on a
+        # roster are untouched and keep resolving -- that is the whole reason #55 flags
+        # rather than deletes. Deliberately NOT applied to `transform_operative`: a model
+        # already on the table changing into something the catalog has since dropped is
+        # the case the flag exists to survive.
+        if operative.withdrawn:
+            raise NotFoundError(f"operative {operative_id} is no longer in the catalog")
 
         row = self._new_operative(
             game,
@@ -426,6 +434,9 @@ class KTGameService:
         # The schema cannot express this pair, so it is checked here.
         if item.kill_team_id is not None and item.kill_team_id != game.kill_team_id:
             raise NotFoundError(f"equipment {equipment_id} is not available to kill team {game.kill_team_id}")
+        # Withdrawn equipment cannot be newly taken either (#55).
+        if item.withdrawn:
+            raise NotFoundError(f"equipment {equipment_id} is no longer in the catalog")
         if self._equipment_row(game_id, equipment_id) is not None:
             raise ConflictError(f"{item.name!r} is already taken in this game", field="equipment_id")
 

@@ -2365,7 +2365,7 @@
           "kill team"
         ],
         "summary": "Get Kill Team",
-        "description": "One kill team with its rules, ploys, equipment, datacards and composition.\n\n404 for an unknown id, through the service's `NotFoundError` -- `app/main.py`\nregisters one handler against `CodedError`, so nothing is mapped here.",
+        "description": "One kill team with its rules, ploys, equipment, datacards and composition.\n\n404 for an unknown id, through the service's `NotFoundError` -- `app/main.py`\nregisters one handler against `CodedError`, so nothing is mapped here.\n\nRows the source has withdrawn are absent (decision #55). The service hands back\nplain lists rather than the `KillTeam` row, because its relationships are shared\nwith the roster read, which must NOT filter -- so the shaping happens here.",
         "operationId": "get_kill_team_api_v1_kill_team_teams__kill_team_id__get",
         "parameters": [
           {

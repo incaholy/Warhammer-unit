@@ -225,8 +225,31 @@ def get_kill_team(
 
     404 for an unknown id, through the service's `NotFoundError` -- `app/main.py`
     registers one handler against `CodedError`, so nothing is mapped here.
+
+    Rows the source has withdrawn are absent (decision #55). The service hands back
+    plain lists rather than the `KillTeam` row, because its relationships are shared
+    with the roster read, which must NOT filter -- so the shaping happens here.
     """
-    return service.get_kill_team(kill_team_id)
+    detail = service.get_kill_team(kill_team_id)
+    return KillTeam_Detail(
+        id=detail.team.id,
+        name=detail.team.name,
+        faction_id=detail.team.faction_id,
+        rules=detail.rules,
+        ploys=detail.ploys,
+        equipment=detail.equipment,
+        selection_rules=detail.selection_rules,
+        operatives=[
+            KTOperative_Read.model_validate(
+                {
+                    **card.operative.model_dump(),
+                    "weapons": [w.model_dump() for w in card.weapons],
+                    "abilities": [a.model_dump() for a in card.abilities],
+                }
+            )
+            for card in detail.operatives
+        ],
+    )
 
 
 @router.get("/teams/{kill_team_id}/composition", response_model=list[KTSelectionRule_Read])

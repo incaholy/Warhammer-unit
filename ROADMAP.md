@@ -714,7 +714,7 @@ marker is what leaves it possible.
 
 ## K7. Withdrawn catalog rows
 
-**Status: Decided (#55), not built.** The seed is an append-and-rewrite superset: outside
+**Status: ✅ Done.** The seed is an append-and-rewrite superset: outside
 the composition, a row the source REMOVED or RENAMED stays behind and nothing marks it
 stale, so a withdrawn ploy keeps being served and a renamed team leaves its old subtree
 beside the new one. The seed said so from the start and deferred the answer to K4; K4
@@ -730,10 +730,19 @@ composition is replaced as a whole and so already loses what the source dropped.
 The sweep is scoped to the PARENTS the payload contains, so a partial scrape cannot
 mass-flag a catalog it simply did not mention.
 
-**The condition is: before a client consumes the catalog as a picker.** Until then a
-superset is untidy; after, it offers a player operatives and ploys that no longer exist.
-Deliberately NOT gated on the `fire-team` merge — the column is additive, so it costs the
-same before or after.
+Built ahead of its condition (*before a client consumes the catalog as a picker*), which
+had not been reached — the frontend does not read the Kill Team API yet.
+
+Three decisions were settled while building it. **Where the filter lives:** in the catalog
+service's own queries, not on the relationships, because a roster read reaches the same
+rules, ploys and equipment through them and must not filter — so `get_kill_team` assembles
+the detail from one query per collection instead of `selectinload`. Still nine queries,
+which is what it promised before. **What a roster read shows:** everything it references,
+withdrawn or not; the catalog read is the picker and the roster read is "what I have".
+**What a write does:** a NEW pick of a withdrawn row is refused with a 404, while rows
+already on a roster or in a game are untouched — and `transform_operative` is deliberately
+not refused, since a model already on the table changing into something the catalog has
+since dropped is the case the flag exists to survive.
 
 Also here, and independent: capturing the footnote bodies a weapon rule's marker points
 at (#56), which is a scraper job across 48 pages rather than a schema one.
