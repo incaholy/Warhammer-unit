@@ -62,7 +62,7 @@ you add a second entry point (a CLI, a scheduled job, a queue consumer), busines
   `lint-imports` alongside `pytest`: a `layers` contract (`app.api` > `app.core.services` >
   `app.core.db`, so a lower layer may not import a higher one) and a `forbidden` contract
   (`app.core` may not import `fastapi` or `starlette`, directly or transitively). A service that
-  imports from `app/api/` tomorrow fails the build rather than passing 654 green tests.
+  imports from `app/api/` tomorrow fails the build rather than passing 689 green tests.
 - **The one real violation is split.** `app/core/security.py` kept the domain half (hashing, token
   encode and decode) and `app/api/deps.py` took the transport half (`get_current_user` /
   `get_current_admin`, turning a decode failure into a 401 with a `WWW-Authenticate` header).

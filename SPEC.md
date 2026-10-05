@@ -262,7 +262,7 @@ exposes CRUD methods.
 | `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
 | `KillTeamService` | implemented (+ tests) | the Kill Team CATALOG, read-only (KILLTEAM.md #21): `list_kt_factions`, `list_kill_teams`, `get_kill_team`, `list_selection_rules`, `list_operatives`, `list_universal_ploys`, `list_universal_equipment` and their counts |
 | `KTRosterService` | implemented (+ tests) | `create_roster`, `get_roster`, `get_roster_shallow`, `list_rosters`, `update_roster`, `delete_roster`, `add_operative`, `move_operative`, `remove_operative`, `list_roster_operatives` |
-| `KTGameService` | implemented (+ tests) | `create_game`, `get_game`, `get_game_shallow`, `list_games`, `update_game`, `delete_game`, `add_operative`, `transform_operative`, `update_operative`, `activate_operative`, `add_equipment`, `reveal_equipment`, `remove_equipment`, `advance`, `undo` |
+| `KTGameService` | implemented (+ tests) | `create_game`, `get_game`, `get_game_shallow`, `list_games`, `update_game`, `delete_game`, `add_operative`, `transform_operative`, `update_operative`, `activate_operative`, `add_equipment`, `reveal_equipment`, `remove_equipment`, `use_ploy` (#65), `advance`, `undo` |
 
 `UserService`:
 - `create_user(username, email, password_hash)` — `ValueError` if the username
@@ -937,6 +937,13 @@ XSS surface.
   checklist, not code.
 
 ## Frontend integration
+
+> **Built, in a sibling repo.** `warhammer_web` exists and is live — React 19, react-query,
+> types generated from this repo's `openapi.json` via `openapi-typescript`. CORS is
+> installed in `app/main.py` behind an `ALLOWED_ORIGINS` allow-list. The section below
+> was written when none of that existed and describes a `frontend/` monorepo subfolder
+> that never happened; the items marked *(Effort: S)* in it are all done. Kept for the
+> reasoning about what a frontend would need from this API.
 
 **Planned — not yet built.** How the "Muster" browser UI (Vite/React) will talk
 to this API. The connection choice is **Option B: relative URLs + a proxy**, so

@@ -549,9 +549,10 @@ changeable until `fire-team` merges, since nothing is deployed against it.
 The nine `kt_*` catalog tables from KILLTEAM.md and their migration, with test
 factories and model tests. Fifteen `kt_*` tables exist now: those nine, K4's two roster
 tables and K5's four game tables. Still treated as a draft: the migration has been
-regenerated nine times -- six as the pages showed a column was wrong, then for
-decision #54's owner column, K5's game tables and #64's roster-name unique -- and stays
-regenerable
+regenerated repeatedly -- most recently for decision #54's owner column, K5's game
+tables, #64's roster-name unique and K7's `withdrawn` flag. The count is deliberately not
+stated: a regeneration REPLACES the file, so git cannot be asked for it and two audits
+disagreed (ten versus twenty-four). `alembic heads` is the answer. It stays regenerable
 until `fire-team` merges.
 
 ## K2. Data pipeline
@@ -630,8 +631,8 @@ catalog.
 ## K5. Game tracker
 
 **Status: ✅ Done.** Four tables, a service and fifteen routes under
-`/api/v1/me/kill-team/games`. The migration was regenerated to `b8ba89c436bc` (the
-draft's eighth). Four decisions were settled while building it: **#60** deleting a
+`/api/v1/me/kill-team/games`. The migration was regenerated again (one of
+several times since; `alembic heads` names the current one). Four decisions were settled while building it: **#60** deleting a
 roster a game was played from is refused (409), **#61** activation is stored as the
 turning point rather than a flag so `advance` clears nothing, **#62** `initiative` is
 nullable because a turning point before its roll-off holds nobody, and **#63**

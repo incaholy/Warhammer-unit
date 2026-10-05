@@ -1,10 +1,21 @@
 # Code review — Warhammer Unit (API + web)
 
-A full review of both repos: `Warhammer-unit` (FastAPI backend) and `warhammer_unit_web` (React frontend).
+A full review of both repos: `warhammer_unit` (FastAPI backend) and `warhammer_web` (React frontend).
 
-**Status: the suite is green and the architecture is sound.** 210 backend tests pass, 144 frontend tests pass, frontend lint and build are clean. The layering (`api → services → db`, session-injected services, thin routers, a typed error hierarchy) holds up, and the frontend has exactly one module that owns the token and HTTP, which is the right shape.
+> **⚠ SNAPSHOT, 2026-08. Every correctness bug below is FIXED.** This file is kept for
+> the reasoning, not as a bug list — the reasoning is still worth reading, the findings
+> are not actionable. Each one carries its outcome inline; verified against the code on
+> 2026-10-05, when the backend suite was 689 (SQLite) / 690 (Postgres parity).
+>
+> Do not cite this file as evidence of a current gap. `DEPLOY-GCP.md` did exactly that
+> with the "no CI" claim below, which was false by then, and planned a stage of work
+> around it.
 
-There are **four real bugs**, all verified by running the code, plus a few gaps. Everything below says how it was checked so you can reproduce it.
+**Status at the time: the suite is green and the architecture is sound.** 210 backend tests passed, 144 frontend tests passed, frontend lint and build were clean. The layering (`api → services → db`, session-injected services, thin routers, a typed error hierarchy) holds up, and the frontend has exactly one module that owns the token and HTTP, which is the right shape.
+
+There were **four real bugs**, all verified by running the code, plus a few gaps.
+Everything below says how it was checked so you can reproduce it. **All four are now
+fixed** — see each heading.
 
 **How this was verified:** `pytest` (210 passed), `npm test` (144 passed), `npm run lint`, `npm run build`, plus a throwaway probe test file that exercised specific endpoints and was deleted afterward.
 
@@ -12,7 +23,11 @@ There are **four real bugs**, all verified by running the code, plus a few gaps.
 
 ## Correctness bugs
 
-### 1. `PATCH` with an explicit `null` returns a 500
+### 1. `PATCH` with an explicit `null` returns a 500 — ✅ FIXED
+
+> Fixed twice over: each service rejects a null on a NOT NULL field as a clean 400
+> (`_NOT_NULLABLE` guards in the army, unit and kill-team-roster services), and
+> `app/main.py` registers an `IntegrityError` handler returning a sanitized 409.
 
 `PATCH /me/armies/{id}` with body `{"faction_id": null}` (or `{"name": null}`) crashes:
 
@@ -35,7 +50,11 @@ So the guard validated the value and the loop wrote it, and those two steps disa
 
 This affects **any non-nullable updatable column**, not just these two.
 
-### 2. The catch-all `ValueError` / `TypeError` handlers leak internals and hide bugs
+### 2. The catch-all `ValueError` / `TypeError` handlers leak internals and hide bugs — ✅ FIXED
+
+> Those handlers are gone. `app/main.py` now carries a comment saying their absence is
+> deliberate, and registers exactly four: `CodedError`, `RequestValidationError`,
+> `IntegrityError` and a generic `Exception` with a sanitized body.
 
 `app/main.py` (around lines 61 to 68) registers app-wide handlers mapping `ValueError → 400` and `TypeError → 400`, with `content={"detail": str(exc)}`.
 
@@ -55,7 +74,10 @@ Your own comment already calls these "Fallbacks for any un-migrated raises of th
 
 The generalizable question: **which exceptions in your app represent a client mistake, and which represent your mistake?** Should those two ever produce the same status code? A catch-all handler always fires for a much wider set of inputs than the person who wrote it had in mind, which is the actual lesson here.
 
-### 3. Registration accepts empty and malformed input
+### 3. Registration accepts empty and malformed input — ✅ FIXED
+
+> `Register_Create` inherits `WriteSchema` and uses `Username` (3–64, blank refused),
+> `EmailStr`, and a password bounded 8–72. See `app/api/fields.py`.
 
 All three of these returned `201 Created`:
 
@@ -68,7 +90,9 @@ All three of these returned `201 Created`:
 
 Concept to look up: Pydantic field constraints as the boundary layer (`Field(min_length=...)`, `EmailStr`) and where that responsibility sits relative to service-layer business rules. You already draw that line well elsewhere, this endpoint just predates it.
 
-### 4. Passwords are silently truncated at 72 bytes
+### 4. Passwords are silently truncated at 72 bytes — ✅ FIXED
+
+> Capped at `max_length=72` with that exact rationale in the comment above it.
 
 bcrypt only ever looks at the first 72 bytes of its input. Verified:
 
@@ -109,7 +133,7 @@ This is fine at your current scale, and it is not worth contorting the code over
 
 ## Process and docs gaps
 
-- **The backend has no CI.** `warhammer_unit_web` has `.github/workflows/ci.yml` running lint, build, and test on every push and PR. This repo has no `.github/workflows` directory at all, so 210 tests exist that nothing runs automatically. You already wrote the frontend workflow, so porting it is mostly mechanical: swap Node for Python, `npm ci` for `pip install -r requirements.txt -r requirements-dev.txt`, and `npm test` for `pytest`. This is the highest value per minute of anything in this document.
+- ~~**The backend has no CI.**~~ **✅ FIXED — and this claim is what `DEPLOY-GCP.md` cited.** `.github/workflows/ci.yml` runs ruff check and format, `lint-imports`, an `openapi.json` freshness gate, the SQLite suite, and a `parity` job doing `alembic upgrade head && alembic check` plus the suite against Postgres 16. Original note: `warhammer_unit_web` has `.github/workflows/ci.yml` running lint, build, and test on every push and PR. This repo has no `.github/workflows` directory at all, so 210 tests exist that nothing runs automatically. You already wrote the frontend workflow, so porting it is mostly mechanical: swap Node for Python, `npm ci` for `pip install -r requirements.txt -r requirements-dev.txt`, and `npm test` for `pytest`. This is the highest value per minute of anything in this document.
 - **`README.md` is 2 lines** while `SPEC.md` is 1,179. Someone landing on the repo learns nothing about what this is or how to run it. The content largely exists already, it just needs a front door that links to `SPEC.md`, `MVP.md`, and `DEPLOY.md`.
 
 ---
@@ -125,6 +149,9 @@ Genuinely minor, batch them whenever.
 ---
 
 ## Suggested fix order
+
+> **Historical.** Every item in this list is done. Kept to show what was prioritised and
+> why, not as work remaining.
 
 1. **Remove the catch-all `ValueError` / `TypeError` handlers (finding 2), then fix the explicit-null `PATCH` (finding 1), together.** They interact: today the handlers are the only reason some internal failures do not look like 500s, so pulling them makes real failures visible. Do them as one change and add a regression test that `PATCH`es an explicit `null` and asserts the response is a clean `400`, not a `500`.
 2. **Registration validation and the 72-byte password cap (findings 3 and 4), together.** Both live in the same DTO and are the same kind of fix.

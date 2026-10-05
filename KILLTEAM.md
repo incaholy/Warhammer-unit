@@ -136,8 +136,9 @@ divided by path:
   exception: a team's **composition is replaced as a whole**, because a selection
   RULE's identity is its print position (#44), so a page that gains or reorders a line
   shifts every row after it rather than changing one. Rows the source *removes*
-  elsewhere are left behind; decision #55 settles that they will be FLAGGED rather than
-  deleted, which is K7's job and not K4's.
+  elsewhere are FLAGGED rather than deleted (#55, built in K7): `_withdraw_missing` in
+  the seed sets the flag, `_upsert` clears it when the source brings a row back, and the
+  catalog reads hide a flagged row while a roster read still resolves one.
 - `make scrape-kt`, `make seed-kt`. The page cache has no expiry, so
   `make scrape-kt-fresh` is what picks up a **changed** page.
 - A team whose page the parsers cannot read is listed in the payload's `skipped` and
@@ -208,9 +209,17 @@ reader of the tables would not guess them:
 ## Catalog
 
 Provisional tables — the migration is a **draft until `fire-team` merges**: a column
-the pages show is wrong is fixed and the migration regenerated, which has happened nine
-times, the last three for decision #54's owner column, K5's game tables and #64's
-roster-name unique. Checked against all 48 team pages: all 48 parse and seed, with no warnings.
+the pages show is wrong is fixed and the migration regenerated, which has happened
+repeatedly — most recently for decision #54's owner column, K5's game tables, #64's
+roster-name unique and K7's `withdrawn` flag. The count is deliberately not stated: each
+regeneration replaces the file, so git cannot be asked and two audits of it disagreed.
+The current revision is `e6d56ea7d09e`, which `alembic heads` will confirm. Checked against all 48 team pages: all 48 parse and seed, with no warnings.
+
+**Every table below except `KTSelectionRule` also carries `withdrawn`** (decision #55,
+built in K7), omitted from the rows to keep them about what the PAGE holds. A flagged row
+is hidden by the catalog reads and still resolved by a roster read. `KTSelectionRule` has
+no flag because a composition is replaced as a whole (#44), so it already loses whatever
+the source dropped.
 
 | Table | Holds |
 |---|---|
@@ -424,7 +433,10 @@ the CP column has a readable history beside it.
 
 Service-enforced bookkeeping (→ 400 `VALIDATION`), not rules:
 
-- wounds within `0..max`; `0` sets status to incapacitated
+- wounds within `0..max`; `0` sets status to incapacitated, and raising wounds back
+  above 0 clears it — both directions, because asymmetric automation is worse than none
+- an incapacitated operative cannot activate (not extended to `reserve`: whether one can
+  arrive and act in a turning point is a RULE, #1)
 - one activation per operative per turning point. Stored as `activated_in_turning_point`
   rather than a flag (#61), so advancing clears nothing and undoing an advance restores
   nothing per operative

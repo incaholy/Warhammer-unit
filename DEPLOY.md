@@ -81,7 +81,8 @@ idle spin-down (first request after a nap is slow) — fine for a demo.
 - **Port**: nothing to set. The image binds to Render's `$PORT` automatically
   (`CMD` → `--port ${PORT:-8000}`).
 
-On deploy, migrations create all 11 tables in Neon and the service comes up at
+On deploy, migrations create all 26 tables in Neon (11 for the 40k army builder, 15
+`kt_*` for Kill Team) and the service comes up at
 `https://<name>.onrender.com`. It has **no catalog data yet** — that's Step 3.
 
 ---
@@ -157,7 +158,7 @@ The frontend and API are on different origins, so the browser needs CORS:
 
 ```bash
 curl https://<api>.onrender.com/health                 # {"status":"ok"}
-curl "https://<api>.onrender.com/units?limit=3"        # real units (seeded)
+curl "https://<api>.onrender.com/api/v1/units?limit=3" # real units (seeded)
 ```
 
 Then open the frontend URL, register an account, and build an army.
