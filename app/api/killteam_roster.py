@@ -218,8 +218,10 @@ def _detail(roster: KTRoster, catalog: KillTeamService) -> KTRoster_Read:
         rules=roster.kill_team.rules,
         ploys=roster.kill_team.ploys,
         equipment=roster.kill_team.equipment,
-        universal_ploys=catalog.list_universal_ploys(),
-        universal_equipment=catalog.list_universal_equipment(),
+        # A roster read RESOLVES a withdrawn row (#55), so these two match the team-owned
+        # ploys and equipment beside them, which arrive through unfiltered relationships.
+        universal_ploys=catalog.list_universal_ploys(include_withdrawn=True),
+        universal_equipment=catalog.list_universal_equipment(include_withdrawn=True),
     )
 
 

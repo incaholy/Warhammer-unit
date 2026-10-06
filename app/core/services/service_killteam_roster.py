@@ -78,8 +78,17 @@ class KTRosterService:
         """
         if self.session.get(User, user_id) is None:
             raise NotFoundError(f"user {user_id} not found")
-        if self.session.get(KillTeam, kill_team_id) is None:
+        team = self.session.get(KillTeam, kill_team_id)
+        if team is None:
             raise NotFoundError(f"kill team {kill_team_id} not found")
+        # Refused if the catalog has WITHDRAWN it (#55), the same refusal `add_operative`
+        # makes below and for the same reason: the source no longer names this team, so a
+        # picker that offered it was stale. Rosters that already name it keep resolving --
+        # that is the whole point of flagging rather than deleting. This was the FOURTH
+        # write path to need it; three were fixed in K7 and a roster could still be
+        # started from a team the catalog no longer serves.
+        if team.withdrawn:
+            raise NotFoundError(f"kill team {kill_team_id} is no longer in the catalog")
         self._require_name_free(user_id, name)
 
         roster = KTRoster(

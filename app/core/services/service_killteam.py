@@ -106,21 +106,35 @@ class KillTeamService:
         The faction is eager-loaded because a listing names it -- "Raveners
         (Tyranids)" -- and a lazy load would be one query per row.
         """
-        statement = (
-            select(KillTeam)
-            .options(selectinload(KillTeam.faction))  # type: ignore[arg-type]
-            .where(KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
+        statement = self._narrow_kill_teams(
+            select(KillTeam).options(selectinload(KillTeam.faction)),  # type: ignore[arg-type]
+            faction_id,
         )
-        if faction_id is not None:
-            statement = statement.where(KillTeam.faction_id == faction_id)
         statement = statement.order_by(KillTeam.name, KillTeam.id).offset(offset).limit(limit)
         return list(self.session.exec(statement).all())
 
     def count_kill_teams(self, faction_id: UUID | None = None) -> int:
-        statement = select(func.count(KillTeam.id)).where(KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
+        return self.session.exec(self._narrow_kill_teams(select(func.count(KillTeam.id)), faction_id)).one()
+
+    def _narrow_kill_teams(self, statement, faction_id: UUID | None):
+        """The filters, shared so the listing and its COUNT can never disagree.
+
+        A withdrawn team is hidden, and so is a live team under a withdrawn FACTION:
+        withdrawal has to reach the children or it is only skin deep. The faction list
+        already hid the faction, but `?faction_id=` on the withdrawn one still served
+        its teams whole -- so the row was unreachable by browsing and reachable by id.
+        A subquery rather than a join, because the same expression has to work for the
+        `count()` form above.
+        """
+        statement = statement.where(
+            KillTeam.withdrawn.is_(False),  # type: ignore[attr-defined]
+            KillTeam.faction_id.in_(  # type: ignore[attr-defined]
+                select(KTFaction.id).where(KTFaction.withdrawn.is_(False))  # type: ignore[attr-defined]
+            ),
+        )
         if faction_id is not None:
             statement = statement.where(KillTeam.faction_id == faction_id)
-        return self.session.exec(statement).one()
+        return statement
 
     # --- one team, whole ---------------------------------------------------
 
@@ -293,11 +307,22 @@ class KillTeamService:
         return self.session.exec(statement).one()
 
     def _narrow_operatives(self, statement, kill_team_id: UUID | None, keyword: str | None):
-        # The withdrawn filter lives here rather than in the two callers, so the listing
-        # and its COUNT can never disagree -- a page whose total counts rows the page
-        # itself hides is worse than either alone.
-        statement = statement.where(KTOperative.withdrawn.is_(False))  # type: ignore[attr-defined]
-        """The two filters, shared so the listing and the count can never disagree."""
+        """The filters, shared so the listing and its COUNT can never disagree.
+
+        A page whose total counts rows the page itself hides is worse than either alone,
+        which is why this lives here rather than in the two callers.
+
+        A withdrawn operative is hidden, and so is a live operative on a withdrawn TEAM
+        -- the same reach `_narrow_kill_teams` gives a withdrawn faction. `?kill_team_id=`
+        on a withdrawn team served its whole roster of datacards, which made the team
+        unreachable by browsing and reachable by id.
+        """
+        statement = statement.where(
+            KTOperative.withdrawn.is_(False),  # type: ignore[attr-defined]
+            KTOperative.kill_team_id.in_(  # type: ignore[attr-defined]
+                select(KillTeam.id).where(KillTeam.withdrawn.is_(False))  # type: ignore[attr-defined]
+            ),
+        )
         if kill_team_id is not None:
             statement = statement.where(KTOperative.kill_team_id == kill_team_id)
         if keyword:
@@ -315,31 +340,33 @@ class KillTeamService:
 
     # --- the rows that belong to no team ----------------------------------
 
-    def list_universal_ploys(self) -> list[KTPloy]:
+    def list_universal_ploys(self, include_withdrawn: bool = False) -> list[KTPloy]:
         """The ploys every kill team may use: `kill_team_id` IS NULL.
 
         One row rather than a copy per team (Command Re-roll from the core rules), so
         a team's ploy list reads as "its own, plus these". Unpaginated: there is one.
-        """
-        statement = (
-            select(KTPloy)
-            .where(KTPloy.kill_team_id.is_(None), KTPloy.withdrawn.is_(False))  # type: ignore[union-attr]
-            .order_by(KTPloy.position, KTPloy.name)
-        )
-        return list(self.session.exec(statement).all())
 
-    def list_universal_equipment(self) -> list[KTEquipment]:
+        `include_withdrawn` exists because this method serves two readers with opposite
+        rules under #55: the catalog hides a withdrawn row, a ROSTER read still resolves
+        it. The roster read reaches the team's own ploys through a relationship, which
+        does not filter, and the universal ones through here, which did -- so one
+        response filtered half its ploys and kept the other half.
+        """
+        statement = select(KTPloy).where(KTPloy.kill_team_id.is_(None))  # type: ignore[union-attr]
+        if not include_withdrawn:
+            statement = statement.where(KTPloy.withdrawn.is_(False))  # type: ignore[attr-defined]
+        return list(self.session.exec(statement.order_by(KTPloy.position, KTPloy.name)).all())
+
+    def list_universal_equipment(self, include_withdrawn: bool = False) -> list[KTEquipment]:
         """The universal equipment list, which belongs to no team either.
 
         Equipment is chosen per GAME rather than per roster (decision #17), so this
         is reference data a game screen reads, not something a roster holds.
+
+        `include_withdrawn` for the same reason as the ploys above: the catalog hides a
+        withdrawn row and a roster read resolves it, and both call this.
         """
-        statement = (
-            select(KTEquipment)
-            .where(
-                KTEquipment.kill_team_id.is_(None),  # type: ignore[union-attr]
-                KTEquipment.withdrawn.is_(False),  # type: ignore[attr-defined]
-            )
-            .order_by(KTEquipment.position, KTEquipment.name)
-        )
-        return list(self.session.exec(statement).all())
+        statement = select(KTEquipment).where(KTEquipment.kill_team_id.is_(None))  # type: ignore[union-attr]
+        if not include_withdrawn:
+            statement = statement.where(KTEquipment.withdrawn.is_(False))  # type: ignore[attr-defined]
+        return list(self.session.exec(statement.order_by(KTEquipment.position, KTEquipment.name)).all())

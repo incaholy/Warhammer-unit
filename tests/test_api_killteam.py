@@ -314,3 +314,36 @@ def test_a_keyword_matching_nothing_is_an_empty_page(client, make_kill_team, mak
 
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "total": 0, "limit": 50, "offset": 0}
+
+
+def test_withdrawal_reaches_a_rows_children_not_just_the_row(
+    client, make_kt_faction, make_kill_team, make_kt_operative, session
+):
+    """A withdrawn parent hides its children, or the flag is only skin deep (#55).
+
+    Both halves were reachable by id while unreachable by browsing, which is the worst
+    of both: `/teams?faction_id=` on a withdrawn faction served its teams whole, and
+    `/operatives?kill_team_id=` on a withdrawn team served its whole set of datacards.
+    The parent listings already hid the parents, so nothing in the UI could reach them --
+    and a stored id, which is exactly what a bookmark or an old roster holds, could.
+    """
+    faction = make_kt_faction(name="Tyranids")
+    team = make_kill_team(faction=faction, name="Raveners")
+    make_kt_operative(kill_team=team, name="Warrior", wounds=12, position=0)
+
+    assert client.get("/api/v1/kill-team/teams", params={"faction_id": str(faction.id)}).json()["total"] == 1
+
+    team.withdrawn = True
+    session.add(team)
+    session.commit()
+    by_team = client.get("/api/v1/kill-team/operatives", params={"kill_team_id": str(team.id)}).json()
+    assert by_team["total"] == 0, "a withdrawn team still served its datacards"
+    assert by_team["items"] == []
+
+    team.withdrawn = False
+    faction.withdrawn = True
+    session.add_all([team, faction])
+    session.commit()
+    by_faction = client.get("/api/v1/kill-team/teams", params={"faction_id": str(faction.id)}).json()
+    assert by_faction["total"] == 0, "a withdrawn faction still served its teams"
+    assert by_faction["items"] == []

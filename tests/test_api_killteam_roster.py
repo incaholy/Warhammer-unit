@@ -490,3 +490,56 @@ def test_deleting_a_roster_a_game_was_played_from_is_an_explained_409(
     assert body["code"] == "CONFLICT"
     # Still there, and still readable.
     assert auth_client.get(f"{BASE}/{roster['id']}").status_code == 200
+
+
+def test_a_roster_cannot_be_started_from_a_withdrawn_kill_team(
+    auth_client, session, make_kt_faction, make_kill_team
+):
+    """The FOURTH write path to need #55's refusal; three were fixed in K7.
+
+    `add_operative` refuses a withdrawn operative, and the game writes refuse too, but a
+    roster could still be STARTED from a team the catalog no longer serves -- so the very
+    first step of the flow could name a row every read downstream hides.
+    """
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    team.withdrawn = True
+    session.add(team)
+    session.commit()
+
+    resp = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Mine"})
+
+    assert resp.status_code == 404, resp.text
+    assert "no longer in the catalog" in resp.json()["detail"]
+
+
+def test_a_roster_read_resolves_withdrawn_universal_rows_like_the_team_s_own(
+    auth_client, session, make_kt_faction, make_kill_team, make_kt_ploy, make_kt_equipment
+):
+    """One roster response must not filter half its ploys and keep the other half.
+
+    #55 splits by READER, not by row: the catalog hides a withdrawn row, a roster read
+    still resolves it so a roster built last month still renders. The team's own ploys
+    and equipment arrive through relationships, which do not filter; the universal ones
+    came from the catalog service, which did. So the same response hid a withdrawn
+    universal ploy while showing a withdrawn team one.
+    """
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    own = make_kt_ploy(kill_team=team, name="Predatory Instincts", position=0)
+    universal = make_kt_ploy(kill_team=None, name="Command Re-roll", position=0)
+    own_kit = make_kt_equipment(kill_team=team, name="Grisly Trophy", position=0)
+    universal_kit = make_kt_equipment(kill_team=None, name="Frag Grenade", position=0)
+    roster = auth_client.post(BASE, json={"kill_team_id": str(team.id), "name": "Mine"}).json()
+
+    for row in (own, universal, own_kit, universal_kit):
+        row.withdrawn = True
+        session.add(row)
+    session.commit()
+
+    body = auth_client.get(f"{BASE}/{roster['id']}").json()
+
+    assert [p["name"] for p in body["ploys"]] == ["Predatory Instincts"]
+    assert [p["name"] for p in body["universal_ploys"]] == ["Command Re-roll"], (
+        "the team's withdrawn ploy resolved but the universal one was filtered"
+    )
+    assert [e["name"] for e in body["equipment"]] == ["Grisly Trophy"]
+    assert [e["name"] for e in body["universal_equipment"]] == ["Frag Grenade"]
