@@ -273,3 +273,31 @@ def test_a_weapon_stat_and_its_dice_notation_are_bounded(admin_client):
     # bounds the length, the service validates the value, and that status is pinned by
     # `test_create_weapon_invalid_category_returns_400`.
     assert admin_client.post("/api/v1/weapons", json={**body, "category": "thrown"}).status_code == 400
+
+
+def test_every_list_route_bounds_its_offset_at_both_ends(auth_client):
+    """`offset` is bounded above on every paginated route, derived from the spec.
+
+    Read-side rather than write-side, but the same class of bug and the same reason it
+    belongs here: an unbounded incoming int is a 500. A Python int has no width, so
+    `?offset=10**21` passed validation and reached the driver as an `OverflowError`
+    (SQLite) or `NumericValueOutOfRange` (Postgres) -- unhandled on BOTH tiers, which is
+    how it survived 689 green tests.
+
+    Derived from `app.openapi()` rather than listed, because the risk is not the bound
+    itself -- that lives in one shared `PageParams` -- but a route that declares its own
+    `limit`/`offset` instead of depending on it. A listing would pass the day someone
+    adds the thirteenth route; this fails.
+    """
+    routes = [
+        path
+        for path, operations in app.openapi()["paths"].items()
+        for operation in operations.values()
+        if any(p.get("name") == "offset" for p in operation.get("parameters", []))
+    ]
+    assert len(routes) >= 12, routes  # every list route the project serves
+
+    for path in routes:
+        assert auth_client.get(path, params={"offset": INT32_MAX + 1}).status_code == 422, path
+        assert auth_client.get(path, params={"offset": -1}).status_code == 422, path
+        assert auth_client.get(path, params={"offset": INT32_MAX}).status_code == 200, path
