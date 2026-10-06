@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, inspect
 from sqlmodel import select
 
 from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative
@@ -82,11 +82,18 @@ def battle(
         user = make_user()
         roster = make_kt_roster(owner=user, kill_team=team, name="Mine")
         cards = []
-        for n in range(operatives):
-            card = make_kt_operative(kill_team=team, name=f"Warrior {n}", wounds=12, position=n)
+        # `index`, not `n` -- `n` is the per-call counter above, and reusing it here left
+        # it holding the last loop value for anything added after this loop.
+        for index in range(operatives):
+            card = make_kt_operative(kill_team=team, name=f"Warrior {index}", wounds=12, position=index)
             make_kt_weapon(operative=card, name="Claws", position=0)
             make_kt_ability(operative=card, name="Pounce", position=0)
-            make_kt_roster_operative(roster=roster, operative=card)
+            # `position` is PASSED. Left to the column default every roster row sat at 0,
+            # and `create_game` copies the roster row's position -- so every game
+            # operative sat at 0 too and three properties could not be asserted at all:
+            # `_next_position`'s increment, the position copy itself, and the
+            # `(position, id)` tie-break on the game's operatives relationship.
+            make_kt_roster_operative(roster=roster, operative=card, position=index)
             cards.append(card)
         return {
             "user": user,
@@ -175,6 +182,27 @@ def test_creating_a_game_needs_a_user_and_a_roster_that_exist(session, battle):
         svc.create_game(b["user"].id, uuid.uuid4())
 
 
+def _touch_whole_game(game):
+    """Walk everything a game read carries, so a lazy load would issue its query here."""
+    assert game.kill_team.name is not None
+    for collection in (game.operatives, game.equipment, game.events):
+        [row.id for row in collection]
+
+
+def _assert_eagerly_loaded(game):
+    """The collections are already loaded when the read RETURNS.
+
+    Asked of SQLAlchemy directly, the way the router's shallow-read test asks the
+    inverse, because a query COUNT cannot tell eager from lazy here and never could:
+    for a single parent, a lazy collection costs one query on access and `selectinload`
+    costs one query up front -- the same number, just at a different moment. Deleting
+    all three `selectinload`s left the count at five and every test green.
+    """
+    unloaded = inspect(game).unloaded
+    for name in ("operatives", "equipment", "events", "kill_team"):
+        assert name not in unloaded, f"{name} came back lazy, so a battle screen pays per access"
+
+
 def test_a_game_read_is_flat_whatever_the_battles_size(session, battle):
     """One query count for three operatives and for six.
 
@@ -189,11 +217,21 @@ def test_a_game_read_is_flat_whatever_the_battles_size(session, battle):
     session.expunge_all()
 
     with _counting(session) as c3:
-        svc.get_game(game3.id)
+        small = svc.get_game(game3.id)
+        _assert_eagerly_loaded(small)
+        _touch_whole_game(small)
     with _counting(session) as c6:
-        svc.get_game(game6.id)
+        large = svc.get_game(game6.id)
+        _assert_eagerly_loaded(large)
+        _touch_whole_game(large)
 
-    assert c3["n"] == c6["n"], f"{c3['n']} queries for three, {c6['n']} for six"
+    # An ABSOLUTE count, and every collection walked inside the measured block. Both are
+    # load-bearing, and this test had neither: it asserted only `c3 == c6`, so deleting
+    # all three `selectinload`s left it green. Lazy loading costs ZERO queries inside
+    # `get_game` when nothing touches the collections, and `selectinload` costs one per
+    # collection whatever the size -- so the two sides moved together under every
+    # mutation. The catalog's equivalent already asserts `== 9` for exactly this reason.
+    assert c3["n"] == c6["n"] == 5, f"{c3['n']} queries for three, {c6['n']} for six"
 
 
 def test_a_read_after_a_write_sees_the_write(session, battle):
@@ -1054,3 +1092,76 @@ def test_a_game_already_under_way_is_untouched_by_a_withdrawal(session, battle):
     session.expunge_all()
 
     assert [row.name for row in svc.get_game(game_id).operatives] == before
+
+
+def test_a_games_operatives_keep_the_rosters_order(session, battle):
+    """`create_game` copies each roster row's `position`, rather than numbering afresh.
+
+    The roster order is the PLAYER's (decision #25's exception: every other `position` is
+    the printed one, a roster's is theirs to set), so a battle screen that renumbered
+    would reorder the models the player deliberately arranged.
+
+    Unassertable until the `battle` fixture passed a position: left to the column default
+    every roster row sat at 0, so `position=row.position` and a literal `position=0` were
+    indistinguishable.
+    """
+    b = battle(operatives=4)
+    game = _service(session).create_game(b["user"].id, b["roster"].id)
+
+    roster_order = [(row.position, row.operative.name) for row in b["roster"].operatives]
+    assert [(row.position, row.name) for row in game.operatives] == roster_order
+    assert [row.position for row in game.operatives] == [0, 1, 2, 3], "positions were not copied"
+
+
+def test_an_operative_added_mid_battle_goes_last(session, battle, make_kt_operative):
+    """`_next_position` is the highest PLUS ONE, so a granted model lands after the rest.
+
+    Revealing equipment or a team rule can field a datacard the roster never held (#18).
+    It goes last, because it arrived last -- and with `+ 0` instead of `+ 1` it would tie
+    with the model already at the end and the pair's order would fall to the id
+    tie-break, i.e. to chance.
+    """
+    b = battle(operatives=3)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    granted = make_kt_operative(kill_team=b["team"], name="Vermin", wounds=4, position=9)
+
+    row = svc.add_operative(game.id, granted.id, source="equipment")
+
+    assert row.position == 3, "the granted model did not go last"
+    assert [r.name for r in svc.get_game(game.id).operatives][-1] == "Vermin"
+
+
+def test_game_operatives_tied_on_position_are_ordered_by_id(session, battle):
+    """`(position, id)`, so two models at the same position have ONE order.
+
+    Nothing stops a tie -- there is no `UNIQUE(game_id, position)`, deliberately, because
+    `_next_position` is a read-then-write and a unique constraint would turn a race into
+    an error rather than a harmless tie. So the tie-break is what makes the read
+    deterministic, and without it the two rows come back in whatever order the plan gave.
+
+    The ids are fixed and inserted DESCENDING, like the roster and game sibling tests, so
+    dropping the tie-break fails this every run rather than only when random uuid4s
+    happen to disagree with insertion order.
+    """
+    b = battle(operatives=1)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    original = game.operatives[0]
+
+    ids = [uuid.UUID(f"ffffffff-0000-0000-0000-00000000000{n}") for n in (3, 2, 1)]
+    for row_id in ids:  # descending ids, so insertion order is the reverse of id order
+        clone = KTGameOperative(
+            **{
+                column: getattr(original, column)
+                for column in KTGameOperative.__table__.columns.keys()
+                if column not in {"id", "created_at", "updated_at"}
+            }
+        )
+        clone.id = row_id
+        clone.position = original.position  # tied with every other row on purpose
+        session.add(clone)
+    session.commit()
+
+    tied = [row.id for row in svc.get_game(game.id).operatives if row.id in set(ids)]
+    assert tied == sorted(ids), "rows tied on position came back in insertion order, not id order"
