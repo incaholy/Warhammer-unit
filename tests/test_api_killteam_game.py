@@ -462,3 +462,63 @@ def test_a_write_that_changes_nothing_records_nothing_and_undo_still_works(
     # So the one undo reaches the one real change, rather than the empty event above it.
     assert auth_client.post(f"{BASE}/{gid}/undo", json={}).status_code == 200
     assert auth_client.get(f"{BASE}/{gid}").json()["command_points"] == started_with
+
+
+def test_a_null_or_malformed_value_is_a_400_and_never_a_500(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Every NOT NULL field refuses null as a 400, and the row is left alone.
+
+    These failed two different wrong ways, and the split is the interesting part:
+
+      `status`, `order`   NOT NULL fired, the `IntegrityError` backstop reported it as a
+                          409 "conflict with an existing resource" -- a status that tells
+                          a client nothing it can act on -- and logged a driver traceback.
+      the JSON columns    NOT NULL did NOT fire at all. SQLAlchemy's `JSON` stores Python
+                          `None` as the JSON value `null` rather than SQL NULL, so the
+                          write SUCCEEDED and the RESPONSE model rejected it: a 500, after
+                          the row had already changed.
+
+    A non-string entry name was a third shape -- `known` is a set, so a dict or a list
+    raised `TypeError: unhashable type` on the membership test.
+
+    `initiative` is checked the other way round: null is VALID there (#62, not rolled
+    yet), which is why the guard reads column nullability instead of a hand-kept list.
+    """
+    _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    before = auth_client.get(f"{BASE}/{gid}").json()
+    oid = before["operatives"][0]["id"]
+
+    for field in (
+        "status",
+        "command_points",
+        "victory_points",
+        "opponent_victory_points",
+        "markers",
+        "ploys_used",
+        "choices",
+    ):
+        resp = auth_client.patch(f"{BASE}/{gid}", json={field: None})
+        assert resp.status_code == 400, f"{field}: {resp.status_code} {resp.text[:120]}"
+
+    for field in ("current_wounds", "order", "status", "tokens", "actions_used"):
+        resp = auth_client.patch(f"{BASE}/{gid}/operatives/{oid}", json={field: None})
+        assert resp.status_code == 400, f"operative {field}: {resp.status_code} {resp.text[:120]}"
+
+    # A name that cannot go in a set: refused, rather than raising on the lookup.
+    assert auth_client.patch(f"{BASE}/{gid}", json={"ploys_used": [{"name": ["x"]}]}).status_code == 400
+    assert (
+        auth_client.patch(
+            f"{BASE}/{gid}/operatives/{oid}", json={"actions_used": [{"name": {"a": 1}}]}
+        ).status_code
+        == 400
+    )
+
+    # Refused, so nothing moved -- not even the version, and no event was recorded.
+    after = auth_client.get(f"{BASE}/{gid}").json()
+    assert after["version"] == before["version"]
+    assert len(after["events"]) == len(before["events"])
+
+    # And null stays valid where the column really is nullable (#62).
+    assert auth_client.patch(f"{BASE}/{gid}", json={"initiative": None}).status_code == 200

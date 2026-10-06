@@ -29,6 +29,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models import User
 from app.core.db.models_killteam import (
     KillTeam,
@@ -93,6 +94,13 @@ class KTGameService:
     # the same reason: `activate_operative` sets it to the game's OWN turning point, so
     # a caller cannot record an activation in a turning point that is not happening.
     _OPERATIVE_UPDATABLE = {"current_wounds", "order", "status", "tokens", "actions_used"}
+
+    # Of those, the ones mapped to a NOT NULL column -- derived from the tables rather
+    # than restated, the way `KTRosterService` does it, so a column that becomes
+    # nullable cannot leave a stale name behind. `initiative` is deliberately absent
+    # from the game's set: it IS nullable, because null means "not rolled yet" (#62).
+    _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE)
+    _OPERATIVE_NOT_NULLABLE = not_nullable_fields(KTGameOperative, _OPERATIVE_UPDATABLE)
 
     _STATUSES = {"setup", "in_progress", "finished"}
     _INITIATIVE = {"player", "opponent"}
@@ -832,7 +840,33 @@ class KTGameService:
                 return row
         raise NotFoundError(f"event {event.id} points at a row that is gone")
 
+    @staticmethod
+    def _refuse_nulls(fields: dict[str, Any], not_nullable: frozenset[str]) -> None:
+        """A null for a NOT NULL column is a 400, not whatever the database says next.
+
+        Every per-field check below is written `fields.get(x) is not None and ...`, which
+        skips null rather than refusing it, and nothing caught it centrally -- so a null
+        reached the database and surfaced two different wrong ways:
+
+          `status`, `order`        NOT NULL fired, the `IntegrityError` backstop turned it
+                                  into a 409 "conflict with an existing resource", and a
+                                  full driver traceback went to the log.
+          `choices`, `tokens`,     NOT NULL did NOT fire. SQLAlchemy's `JSON` stores Python
+          `markers`, `ploys_used`, `None` as the JSON value `null` rather than SQL NULL, so
+          `actions_used`          the write SUCCEEDED and the RESPONSE model rejected it --
+                                  an unhandled `ValidationError`, i.e. a 500, after the row
+                                  had already changed.
+
+        One guard, so both become the 400 they always were. Driven by the column's own
+        `nullable`, so `initiative` -- where null means "not rolled yet" (#62) -- is
+        untouched.
+        """
+        for field in sorted(fields):
+            if field in not_nullable and fields[field] is None:
+                raise KTGameValidationError(field, "cannot be null")
+
     def _validate_game_fields(self, game: KTGame, fields: dict[str, Any]) -> None:
+        self._refuse_nulls(fields, self._NOT_NULLABLE)
         if fields.get("status") is not None and fields["status"] not in self._STATUSES:
             raise KTGameValidationError("status", f"must be one of {sorted(self._STATUSES)}")
         if fields.get("initiative") is not None and fields["initiative"] not in self._INITIATIVE:
@@ -860,7 +894,10 @@ class KTGameService:
             raise KTGameValidationError("ploys_used", "must be a list of entries")
         known = {p["name"] for p in game.ploys if isinstance(p, dict) and "name" in p}
         for entry in entries:
-            if not isinstance(entry, dict) or "name" not in entry:
+            # `isinstance(..., str)` rather than just present: `known` is a SET, so a
+            # name that was a dict or a list raised `TypeError: unhashable type` on the
+            # membership test below -- an unhandled 500 from a well-formed request.
+            if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
                 raise KTGameValidationError("ploys_used", "each entry needs a name")
             if entry["name"] not in known:
                 raise KTGameValidationError(
@@ -883,6 +920,7 @@ class KTGameService:
                 )
 
     def _validate_operative_fields(self, row: KTGameOperative, fields: dict[str, Any]) -> None:
+        self._refuse_nulls(fields, self._OPERATIVE_NOT_NULLABLE)
         if "current_wounds" in fields:
             wounds = fields["current_wounds"]
             if wounds is None or not 0 <= wounds <= row.wounds:
@@ -908,7 +946,10 @@ class KTGameService:
             raise KTGameValidationError("actions_used", "must be a list of entries")
         known = {ability["name"] for ability in row.abilities if isinstance(ability, dict)}
         for entry in actions:
-            if not isinstance(entry, dict) or "name" not in entry:
+            # `isinstance(..., str)` rather than just present: `known` is a SET, so a
+            # name that was a dict or a list raised `TypeError: unhashable type` on the
+            # membership test below -- an unhandled 500 from a well-formed request.
+            if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
                 raise KTGameValidationError("actions_used", "each entry needs a name")
             if entry["name"] not in known:
                 raise KTGameValidationError(
