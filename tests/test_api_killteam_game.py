@@ -112,14 +112,24 @@ def test_a_game_cannot_be_started_from_a_stranger_s_roster(
     make_kt_operative,
     make_kt_roster,
 ):
-    # The roster belongs to someone else, so `create_game` cannot name it -- and would
-    # be refused by the composite foreign key even if this route forgot to care (#54).
+    """404, and the SAME 404 a roster that does not exist gets.
+
+    This asserted `in {404, 409}` and so pinned neither. The real answer was 409
+    "conflict with an existing resource", from the composite foreign key refusing the
+    insert (#54) -- safe, in that the row never landed, but distinguishable from the
+    404 a missing id gets, which makes it an oracle for whether an id is real. The two
+    are compared here rather than checked separately, because being equal is the point.
+    """
     team = make_kill_team(faction=make_kt_faction(name="Nurgle"), name="Gellerpox")
     theirs = make_kt_roster(owner=make_user(username="other", email="other@test.invalid"), kill_team=team)
 
-    resp = auth_client.post(BASE, json={"roster_id": str(theirs.id)})
+    stranger = auth_client.post(BASE, json={"roster_id": str(theirs.id)})
+    missing = auth_client.post(BASE, json={"roster_id": str(uuid.uuid4())})
 
-    assert resp.status_code in {404, 409}, resp.text
+    assert stranger.status_code == 404, stranger.text
+    assert stranger.json()["code"] == missing.json()["code"] == "NOT_FOUND"
+    # Indistinguishable: a stranger's roster and a roster that was never there.
+    assert stranger.status_code == missing.status_code
 
 
 def test_a_stranger_s_game_is_a_404_not_a_403(

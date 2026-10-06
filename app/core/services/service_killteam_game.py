@@ -117,11 +117,12 @@ class KTGameService:
         `owner_user_id` is the CALLER's, not the roster's, for the reason #54 gives:
         written independently, the composite foreign key refuses the insert unless the
         caller really owns that roster, so a route that forgot to check could not land
-        the row.
+        the row. The roster is ALSO read scoped to the caller, so a stranger's id is a
+        404 rather than the foreign key's 409 -- see `_require_roster_with_operatives`.
         """
         if self.session.get(User, user_id) is None:
             raise NotFoundError(f"user {user_id} not found")
-        roster = self._require_roster_with_operatives(roster_id)
+        roster = self._require_roster_with_operatives(roster_id, user_id)
 
         game = KTGame(
             owner_user_id=user_id,
@@ -586,10 +587,19 @@ class KTGameService:
             raise NotFoundError(f"equipment {row_id} is not in game {game_id}")
         return row
 
-    def _require_roster_with_operatives(self, roster_id: UUID) -> KTRoster:
+    def _require_roster_with_operatives(self, roster_id: UUID, user_id: UUID) -> KTRoster:
+        """The caller's roster, loaded whole. Scoped to the OWNER, not just the id.
+
+        Unscoped, this was the one route in the Kill Team surface where a stranger's id
+        answered differently from a missing one: the composite foreign key refused the
+        insert, so the row never landed, but it surfaced as 409 "conflict with an
+        existing resource" where a roster that does not exist is 404 -- an oracle for
+        whether an id is real. Scoping the read makes both answers 404, and leaves the
+        foreign key as what it was meant to be: the backstop, not the check.
+        """
         statement = (
             select(KTRoster)
-            .where(KTRoster.id == roster_id)
+            .where(KTRoster.id == roster_id, KTRoster.owner_user_id == user_id)
             .options(
                 selectinload(KTRoster.kill_team).selectinload(KillTeam.rules),  # type: ignore[arg-type]
                 selectinload(KTRoster.kill_team).selectinload(KillTeam.ploys),  # type: ignore[arg-type]
