@@ -824,6 +824,26 @@ def test_a_row_from_another_game_reads_as_missing(session, battle):
         svc.update_operative(mine.id, theirs.operatives[0].id, current_wounds=1)
 
 
+def test_an_equipment_row_from_another_game_reads_as_missing(session, battle):
+    """`_require_equipment` scopes by `game_id`, not by row id alone.
+
+    The operative twin above was tested and this was not, so dropping
+    `or row.game_id != game_id` here let a `PATCH` or `DELETE` under one game reach
+    another game's equipment row -- including a game the caller does not own, since the
+    router's ownership dependency only vouches for the game in the PATH.
+    """
+    b = battle()
+    svc = _service(session)
+    mine = svc.create_game(b["user"].id, b["roster"].id)
+    theirs = svc.create_game(b["user"].id, b["roster"].id)
+    theirs_kit = svc.add_equipment(theirs.id, b["kit"].id)
+
+    with pytest.raises(NotFoundError, match="is not in game"):
+        svc.reveal_equipment(mine.id, theirs_kit.id)
+    with pytest.raises(NotFoundError, match="is not in game"):
+        svc.remove_equipment(mine.id, theirs_kit.id)
+
+
 def test_deleting_a_game_takes_its_rows_and_leaves_the_roster(session, battle):
     b = battle()
     svc = _service(session)

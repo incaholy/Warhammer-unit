@@ -484,7 +484,11 @@ def test_a_row_cannot_be_added_to_a_roster_its_owner_does_not_own(
     operative = make_kt_operative(kill_team=victim_roster.kill_team)
     stranger = make_user(username="stranger", email="stranger@test.invalid")
 
-    with pytest.raises(IntegrityError):
+    # Matched on the FOREIGN KEY, not bare. A bare `IntegrityError` is satisfied by a
+    # NOT NULL violation from any column added later, so it would keep passing while the
+    # composite leg this test exists for had stopped firing -- the same shape that was
+    # found and tightened twice elsewhere in this suite.
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
         _service(session).add_operative(victim_roster.id, operative.id, stranger.id)
     session.rollback()
 

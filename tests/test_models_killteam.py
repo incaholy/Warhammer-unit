@@ -89,7 +89,9 @@ def test_deleting_a_faction_with_kill_teams_is_refused(session, make_kt_faction,
     make_kill_team(faction=tyranids)
 
     session.delete(tyranids)
-    with pytest.raises(IntegrityError):
+    # Matched, not bare: a bare `IntegrityError` is satisfied by a NOT NULL violation
+    # from any column someone adds later, and the FOREIGN KEY restrict is the point.
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
         session.commit()
     session.rollback()
 

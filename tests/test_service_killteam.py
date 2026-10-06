@@ -582,3 +582,145 @@ def test_both_catalog_reads_agree_on_one_datacard(session, make_kill_team, make_
     from_listing = service.list_operatives(kill_team_id=team_id)[0]
 
     assert [w.name for w in from_detail.weapons] == [w.name for w in from_listing.weapons]
+
+
+# --- the orderings and pagings nothing pinned -------------------------------
+#
+# Every assertion below inserts rows so that printed order, alphabetical order and
+# insertion order all DISAGREE. The audit found six `ORDER BY`s and two pagings in this
+# service that no test could fail, and several of the orderings that WERE asserted were
+# satisfied by alphabetical too -- so a relationship switched to `.name` stayed green.
+
+
+def _named(rows):
+    return [row.name for row in rows]
+
+
+def test_the_universal_lists_come_back_in_printed_order(session, make_kt_ploy, make_kt_equipment):
+    """`(position, name)`, not alphabetical and not insertion order.
+
+    Every other test has exactly ONE universal row of each kind, which cannot fail an
+    ordering assertion. These are inserted so all three orders differ.
+    """
+    service = _service(session)
+    for name, position in (("Ash", 1), ("Mire", 2), ("Zeal", 0)):  # inserted out of order
+        make_kt_ploy(kill_team=None, name=name, position=position)
+        make_kt_equipment(kill_team=None, name=name, position=position)
+
+    assert _named(service.list_universal_ploys()) == ["Zeal", "Ash", "Mire"]
+    assert _named(service.list_universal_equipment()) == ["Zeal", "Ash", "Mire"]
+    assert _named(service.list_universal_ploys()) != sorted(_named(service.list_universal_ploys()))
+
+
+def test_operatives_are_ordered_by_team_then_printed_position(
+    session, make_kt_faction, make_kill_team, make_kt_operative
+):
+    """The order the docstring and the router both promise, and nothing asserted.
+
+    Two teams, each with cards whose printed order is the reverse of alphabetical, so a
+    missing `ORDER BY` or one switched to `name` both fail here.
+    """
+    service = _service(session)
+    faction = make_kt_faction(name="Tyranids")
+    # Fixed ids, so "ordered by team" is a definite sequence rather than whichever team
+    # a random uuid4 happened to sort first.
+    low = make_kill_team(faction=faction, name="Aaa Team", id=uuid.UUID(int=1))
+    high = make_kill_team(faction=faction, name="Bbb Team", id=uuid.UUID(int=2))
+    # Inserted high-team-first, and within each team position-1 before position-0, so
+    # INSERTION order disagrees with the asserted order on both keys. Without that,
+    # dropping the `ORDER BY` is invisible on SQLite, which returns rows in rowid order.
+    for team, names in ((high, ("Mire", "Ash")), (low, ("Zealot", "Acolyte"))):
+        for name, position in ((names[1], 1), (names[0], 0)):
+            make_kt_operative(kill_team=team, name=name, position=position)
+
+    cards = [card.operative for card in service.list_operatives()]
+
+    assert _named(cards) == ["Zealot", "Acolyte", "Mire", "Ash"]
+    assert [card.kill_team_id for card in cards] == [low.id, low.id, high.id, high.id]
+    assert _named(cards) != sorted(_named(cards))
+
+
+def test_the_operative_and_team_listings_page_independently_of_their_counts(
+    session, make_kt_faction, make_kill_team, make_kt_operative
+):
+    """`limit` and `offset` reach the query on both listings.
+
+    `test_factions_page_and_count_independently` exists for factions; the teams and the
+    cross-team operative listing had no equivalent, so dropping either `.offset()` or
+    either `.limit()` was invisible.
+    """
+    service = _service(session)
+    faction = make_kt_faction(name="Tyranids")
+    teams = [make_kill_team(faction=faction, name=f"Team {letter}") for letter in "ABCD"]
+    for index, team in enumerate(teams):
+        make_kt_operative(kill_team=team, name=f"Warrior {index}", position=index)
+
+    assert len(service.list_kill_teams(limit=2)) == 2
+    assert len(service.list_kill_teams(limit=2, offset=2)) == 2
+    assert service.list_kill_teams(limit=2)[0].id != service.list_kill_teams(limit=2, offset=2)[0].id
+    assert service.count_kill_teams() == 4
+
+    assert len(service.list_operatives(limit=2)) == 2
+    assert len(service.list_operatives(limit=2, offset=2)) == 2
+    first_page = [c.operative.id for c in service.list_operatives(limit=2)]
+    second_page = [c.operative.id for c in service.list_operatives(limit=2, offset=2)]
+    assert set(first_page).isdisjoint(second_page), "offset did not move the window"
+    assert service.count_operatives() == 4
+
+
+def test_a_listed_card_carries_its_profiles_in_printed_order(
+    session, make_kill_team, make_kt_operative, make_kt_weapon, make_kt_ability
+):
+    """`_live_profiles` orders by `position`, on the LISTING as well as the detail.
+
+    Asserted against names whose printed order is the reverse of alphabetical, because
+    everywhere else the two coincide -- which is how the ability relationship survived
+    being switched to `order_by: name`.
+    """
+    service = _service(session)
+    card = make_kt_operative(kill_team=make_kill_team(name="Raveners"), name="Warrior", position=0)
+    # Inserted LAST-first, so insertion order is the reverse of printed order.
+    for name, position in (("Ember Claw", 1), ("Zealous Strike", 0)):
+        make_kt_weapon(operative=card, name=name, position=position)
+        make_kt_ability(operative=card, name=name, position=position)
+
+    listed = service.list_operatives()[0]
+    assert _named(listed.weapons) == ["Zealous Strike", "Ember Claw"]
+    assert _named(listed.abilities) == ["Zealous Strike", "Ember Claw"]
+    assert _named(listed.abilities) != sorted(_named(listed.abilities))
+
+
+def test_a_detail_read_orders_every_collection_it_carries(
+    session,
+    make_kt_faction,
+    make_kill_team,
+    make_kill_team_rule,
+    make_kt_ploy,
+    make_kt_equipment,
+    make_kt_operative,
+    make_kt_selection_rule,
+):
+    """`get_kill_team`'s own `ORDER BY`s, including the composition's.
+
+    `list_selection_rules` is covered; the detail's separate copy of that query was not,
+    and neither were the detail's rules, ploys, equipment or operative orderings.
+    """
+    service = _service(session)
+    team = make_kill_team(faction=make_kt_faction(name="Tyranids"), name="Raveners")
+    # Inserted middle, last, first -- so insertion order matches neither the printed
+    # order nor alphabetical, and dropping an `ORDER BY` fails rather than coinciding.
+    for name, position in (("Ash", 1), ("Mire", 2), ("Zeal", 0)):
+        make_kill_team_rule(kill_team=team, name=name, position=position)
+        make_kt_ploy(kill_team=team, name=name, position=position)
+        make_kt_equipment(kill_team=team, name=name, position=position)
+        make_kt_operative(kill_team=team, name=name, position=position)
+    for text, position in (("A leader", 1), ("Mixed", 2), ("Zero to six", 0)):
+        make_kt_selection_rule(kill_team=team, text=text, position=position)
+
+    detail = service.get_kill_team(team.id)
+
+    for collection in (detail.rules, detail.ploys, detail.equipment):
+        assert _named(collection) == ["Zeal", "Ash", "Mire"]
+        assert _named(collection) != sorted(_named(collection))
+    assert _named([card.operative for card in detail.operatives]) == ["Zeal", "Ash", "Mire"]
+    assert [rule.text for rule in detail.selection_rules] == ["Zero to six", "A leader", "Mixed"]
