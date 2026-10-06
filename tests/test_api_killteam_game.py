@@ -431,3 +431,34 @@ def test_spending_a_ploy_needs_a_token_and_the_caller_s_own_game(
 
     assert client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 401
     assert auth_client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 404
+
+
+def test_a_write_that_changes_nothing_records_nothing_and_undo_still_works(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """A no-op PATCH must not insert an event, or the next undo spends itself on it.
+
+    `_apply` reports only the fields that moved, so sending a field its current value
+    left `touched` empty -- and `_write` recorded the empty dict anyway. Undo walks back
+    one event at a time, so it reverted the event that did nothing and the real change
+    below it survived: tapping the same value twice made undo appear broken. The version
+    bump was the second half, 409-ing the other tab over a write that never happened.
+    """
+    _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    started_with = auth_client.get(f"{BASE}/{gid}").json()["command_points"]
+
+    auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    real = auth_client.get(f"{BASE}/{gid}").json()
+    assert real["command_points"] == 3
+
+    # The same value again: accepted, but nothing happened, so nothing is recorded.
+    again = auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    assert again.status_code == 200
+    quiet = auth_client.get(f"{BASE}/{gid}").json()
+    assert quiet["version"] == real["version"], "a no-op write moved the version"
+    assert len(quiet["events"]) == len(real["events"]), "a no-op write left an event behind"
+
+    # So the one undo reaches the one real change, rather than the empty event above it.
+    assert auth_client.post(f"{BASE}/{gid}/undo", json={}).status_code == 200
+    assert auth_client.get(f"{BASE}/{gid}").json()["command_points"] == started_with

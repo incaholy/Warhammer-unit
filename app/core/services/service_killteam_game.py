@@ -555,6 +555,7 @@ class KTGameService:
             target_id=event.id,
             op="undo",
         )
+        assert compensating is not None  # `op="undo"` always carries `undoes`
         event.undone_by = compensating.id
         self.session.add(event)
         self.session.flush()
@@ -721,13 +722,26 @@ class KTGameService:
         *,
         target_id: UUID | None = None,
         op: str = "fields",
-    ) -> KTGameEvent:
+    ) -> KTGameEvent | None:
         """Record what happened and bump the game's version.
 
         One place, so no mutation can forget either: an event that was never written is
         a change `undo` cannot reach, and a version that did not move lets the other tab
         overwrite this write without ever seeing a 409 (#9).
+
+        A write that changed NOTHING records nothing. `_apply` reports only the fields
+        that actually moved, so sending a field its current value leaves `touched` empty
+        -- and an empty event is worse than useless: `undo` walks back one event at a
+        time, so the next undo spends itself reverting the event that did nothing and
+        the real change below it survives. A player who tapped the same value twice
+        found undo silently doing nothing. It also bumped `version`, 409-ing the other
+        tab over a write that never happened.
+
+        Only `op="fields"` can be empty; `created`, `deleted` and `undo` each pass a
+        payload of their own, so the guard cannot swallow one of those.
         """
+        if not touched:
+            return None
         payload: dict[str, Any] = {"op": op}
         if target_id is not None:
             payload["target_id"] = str(target_id)
