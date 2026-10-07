@@ -567,3 +567,89 @@ def test_a_stale_write_from_the_database_is_a_clean_409(
     # No driver internals in the body -- the message above names the table and the row count.
     for leak in ("kt_games", "UPDATE statement", "sqlalchemy", "Traceback"):
         assert leak not in resp.text, f"{leak!r} leaked into the response"
+
+
+def test_a_finished_game_refuses_every_write_but_stays_readable(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative, make_kt_equipment
+):
+    """Decision #66: finishing a game closes it to edits, and `undo` is the way back out.
+
+    Every write route is covered, with a body valid enough to reach the service -- a 422
+    from a malformed payload would hide the 400 this is testing. Reads, `delete` and
+    `undo` are deliberately NOT refused, each for its own reason (see `_require_game`).
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    kit = make_kt_equipment(kill_team=team, name="Grisly Trophy", position=0)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    whole = auth_client.get(f"{BASE}/{gid}").json()
+    row_id = whole["operatives"][0]["id"]
+    equipment = auth_client.post(f"{BASE}/{gid}/equipment", json={"equipment_id": str(kit.id)}).json()
+    ploy_name = whole["ploys"][0]["name"] if whole["ploys"] else None
+
+    assert auth_client.patch(f"{BASE}/{gid}", json={"status": "finished"}).status_code == 200
+
+    refused = {
+        "PATCH the game": auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}),
+        "advance": auth_client.post(f"{BASE}/{gid}/advance", json={}),
+        "add an operative": auth_client.post(
+            f"{BASE}/{gid}/operatives", json={"operative_id": str(cards[0].id), "source": "rule"}
+        ),
+        "PATCH an operative": auth_client.patch(
+            f"{BASE}/{gid}/operatives/{row_id}", json={"current_wounds": 5}
+        ),
+        "activate": auth_client.post(f"{BASE}/{gid}/operatives/{row_id}/activate", json={}),
+        "transform": auth_client.post(
+            f"{BASE}/{gid}/operatives/{row_id}/transform",
+            json={"becomes_operative_id": str(cards[1].id)},
+        ),
+        "add equipment": auth_client.post(f"{BASE}/{gid}/equipment", json={"equipment_id": str(kit.id)}),
+        "reveal equipment": auth_client.patch(
+            f"{BASE}/{gid}/equipment/{equipment['id']}", json={"revealed": True}
+        ),
+        "remove equipment": auth_client.delete(f"{BASE}/{gid}/equipment/{equipment['id']}"),
+    }
+    if ploy_name:
+        refused["use a ploy"] = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": ploy_name})
+
+    for label, resp in refused.items():
+        assert resp.status_code == 400, f"{label}: {resp.status_code} {resp.text[:140]}"
+        assert resp.json()["field"] == "status", label
+        assert "finished" in resp.json()["detail"], label
+
+    # Still fully readable -- a finished game is the one you most want to look back at.
+    assert auth_client.get(f"{BASE}/{gid}").status_code == 200
+    assert auth_client.get(BASE).status_code == 200
+
+
+def test_undo_is_the_way_back_out_of_a_finished_game(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """No `reopen` route, because `undo` already is one (#66).
+
+    The event that finished the game is the newest one, so one undo reverts exactly it --
+    and the game is writable again. That is why `undo` is the single write a finished
+    game still accepts.
+    """
+    _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    before = auth_client.get(f"{BASE}/{gid}").json()["status"]
+
+    auth_client.patch(f"{BASE}/{gid}", json={"status": "finished"})
+    assert auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}).status_code == 400
+
+    assert auth_client.post(f"{BASE}/{gid}/undo", json={}).status_code == 200
+
+    assert auth_client.get(f"{BASE}/{gid}").json()["status"] == before
+    assert auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}).status_code == 200
+
+
+def test_a_finished_game_can_still_be_deleted(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Deleting is not editing, and a finished game is the one most likely to be deleted."""
+    _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+    auth_client.patch(f"{BASE}/{gid}", json={"status": "finished"})
+
+    assert auth_client.delete(f"{BASE}/{gid}").status_code == 204
+    assert auth_client.get(f"{BASE}/{gid}").status_code == 404

@@ -192,7 +192,7 @@ class KTGameService:
         as much as a full read, which is a defect the roster router has and this one
         does not inherit.
         """
-        return self._require_game(game_id)
+        return self._require_game(game_id, allow_finished=True)  # a read; see #66
 
     def list_games(self, user_id: UUID, limit: int = 50, offset: int = 0) -> list[KTGame]:
         """A player's games, newest first — and deliberately without the bundle.
@@ -231,7 +231,8 @@ class KTGameService:
 
     def delete_game(self, game_id: UUID) -> None:
         """Delete a game and everything on it. The roster and the catalog are untouched."""
-        self.session.delete(self._require_game(game_id))
+        # Deleting is not editing: a finished game is the one most likely to be deleted.
+        self.session.delete(self._require_game(game_id, allow_finished=True))
         self.session.flush()
 
     # ---------------------------- operatives -----------------------------
@@ -508,7 +509,8 @@ class KTGameService:
         Activations need no clearing (#61) -- they are stamped with the turning point
         they happened in, so they stop counting the moment it changes.
         """
-        game = self._require_game(game_id)
+        # `advance` refuses a finished game itself, with a more specific message.
+        game = self._require_game(game_id, allow_finished=True)
         if game.status == "finished":
             raise KTGameValidationError("status", "the game is already finished")
 
@@ -541,7 +543,9 @@ class KTGameService:
         `before` values back, a row that was created is deleted, and a row that was
         deleted is recreated from the copy its event carried.
         """
-        game = self._require_game(game_id)
+        # The way back OUT of a finished game (#66): undoing the event that finished
+        # it is how a premature finish is fixed, so there is no `reopen` route.
+        game = self._require_game(game_id, allow_finished=True)
         event = self._newest_standing_event(game_id)
         if event is None:
             raise KTGameValidationError("undo", "this game has nothing left to undo")
@@ -571,10 +575,29 @@ class KTGameService:
 
     # ------------------------------ helpers ------------------------------
 
-    def _require_game(self, game_id: UUID, expected_version: int | None = None) -> KTGame:
+    def _require_game(
+        self, game_id: UUID, expected_version: int | None = None, *, allow_finished: bool = False
+    ) -> KTGame:
+        """The game, refusing the write if it is already finished (decision #66).
+
+        The refusal defaults to ON and is opted OUT of, rather than the other way round,
+        for the reason `_write` is one place: a mutation added later is covered the day
+        it arrives, where an opt-in list would quietly not cover it. Four callers opt
+        out, each for a stated reason:
+
+          `get_game_shallow`  a READ. A finished game is still fully readable.
+          `delete_game`       deleting is not editing, and a finished game is the one
+                              most likely to be deleted.
+          `undo`              the way back OUT (#58, and the K8 decisions). Undoing the
+                              event that finished the game is how a premature finish is
+                              fixed, which is why no `reopen` route is needed.
+          `advance`           refuses on its own with a more specific message.
+        """
         game = self.session.get(KTGame, game_id)
         if game is None:
             raise NotFoundError(f"game {game_id} not found")
+        if game.status == "finished" and not allow_finished:
+            raise KTGameValidationError("status", "this game is finished")
         if expected_version is not None and expected_version != game.version:
             # Decision #9: the other tab moved on, so this write is answered rather than
             # applied over the top of it.

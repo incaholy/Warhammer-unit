@@ -771,7 +771,9 @@ def test_undoing_a_removed_piece_of_equipment_brings_it_back(session, battle):
 
 def test_undo_reopens_a_game_that_was_finished_by_accident(session, battle):
     # The finish is an event like any other, which is the reason `advance` was allowed
-    # to end the game rather than refusing (#60's sibling decision).
+    # to end the game rather than refusing (#60's sibling decision) -- and the reason
+    # decision #66 lets a FINISHED game accept `undo` and needs no `reopen` route. This
+    # test predates #66 and is what it was built on.
     b = battle()
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
@@ -1277,3 +1279,29 @@ def test_two_undos_of_the_same_event_cannot_both_land(session, battle):
     with pytest.raises(StaleDataError):
         svc.undo(game.id)
     session.rollback()
+
+
+def test_the_finished_refusal_defaults_on_so_a_new_write_is_covered(session, battle):
+    """`_require_game` refuses by DEFAULT; a caller must opt out explicitly (#66).
+
+    This is the property that matters more than any one route: the nine write paths are
+    covered because the refusal lives in the loader they all share, not because nine
+    places remembered it. A mutation added next month inherits it on the day it is
+    written, where an opt-in list would quietly not cover it.
+
+    The four opt-outs each have a reason stated at `_require_game`: a read, a delete,
+    `undo` (the way back out), and `advance` (which refuses on its own with a better
+    message).
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, status="finished")
+
+    with pytest.raises(KTGameValidationError, match="finished") as refused:
+        svc._require_game(game.id)
+    assert refused.value.field == "status"
+
+    # And the opt-out really does let a caller through, which is what the read, the
+    # delete, `undo` and `advance` rely on.
+    assert svc._require_game(game.id, allow_finished=True).id == game.id
