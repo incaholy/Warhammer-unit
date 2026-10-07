@@ -30,7 +30,16 @@ autogenerate, `tests/conftest.py` for the test schema.
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -710,6 +719,9 @@ class KTRosterOperative(TimestampMixin, table=True):
     )
 
 
+_KT_GAME_VERSION = Column("version", Integer, nullable=False, default=1)
+
+
 class KTGame(TimestampMixin, table=True):
     """One battle, played from a roster — and self-contained once it starts.
 
@@ -827,7 +839,28 @@ class KTGame(TimestampMixin, table=True):
     # Ops taken. A document so a new one of those is not a migration.
     choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
 
-    version: int = Field(default=1)
+    # Declared as a real `Column` rather than through `sa_type`, because
+    # `__mapper_args__` below needs the column OBJECT to lock on. The DDL is unchanged:
+    # `INTEGER NOT NULL` with a Python-side default of 1.
+    version: int = Field(default=1, sa_column=_KT_GAME_VERSION)
+
+    # Decision #9, ENFORCED. `version` used to be compared in Python and incremented in
+    # Python, which under READ COMMITTED is a check-then-act with nothing behind it: two
+    # writers who both read version 5 both passed the check and both wrote. Mapped as
+    # SQLAlchemy's `version_id_col`, every UPDATE of this row carries
+    # `WHERE version = <the value we read>` and a loser matches zero rows, which
+    # SQLAlchemy raises as `StaleDataError`.
+    #
+    # `version_id_generator=False` because `_write` assigns the next value itself. That
+    # is deliberate and load-bearing: SQLAlchemy only updates a row it considers dirty,
+    # so a write that touches only a CHILD row -- an operative, a piece of equipment --
+    # would not update `kt_games` at all and would take no lock. `_write` bumping the
+    # version is what makes every mutation of a game, however deep, go through this one
+    # row and therefore through this one check.
+    __mapper_args__ = {
+        "version_id_col": _KT_GAME_VERSION,
+        "version_id_generator": False,
+    }
 
     kill_team: KillTeam = Relationship(
         # `kill_team_id` is written by the composite roster leg too, so the relationship

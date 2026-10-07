@@ -8,6 +8,8 @@ a yes/no.
 
 import uuid
 
+from sqlalchemy.orm.exc import StaleDataError
+
 from app.core.db.models_killteam import KTGame
 from app.core.services.service_killteam_game import EQUIPMENT_LIMIT
 from app.main import app
@@ -522,3 +524,46 @@ def test_a_null_or_malformed_value_is_a_400_and_never_a_500(
 
     # And null stays valid where the column really is nullable (#62).
     assert auth_client.patch(f"{BASE}/{gid}", json={"initiative": None}).status_code == 200
+
+
+def test_a_stale_write_from_the_database_is_a_clean_409(
+    monkeypatch, auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """`StaleDataError` reaches the client as 409, with no driver detail in the body.
+
+    `test_a_stale_version_answers_409` covers the client that SENDS a version, which the
+    service compares in Python. This covers the other half: the row moving between a
+    read and the write, which that comparison cannot see and which the `version_id_col`
+    lock turns into `StaleDataError` at flush (proved against real SQL in
+    `test_a_write_onto_a_row_that_moved_is_refused_by_the_database`).
+
+    The error is RAISED here rather than raced into existence, deliberately. The route
+    re-reads the game inside the request, so an update made from the test beforehand is
+    simply read by the route and is not stale at all -- an in-process race would prove
+    nothing. What is worth pinning is the mapping: this must not fall through to the
+    catch-all as a 500, and must not carry the driver's message, which is the same
+    contract the `IntegrityError` backstop beside it has.
+    """
+    from app.core.services.service_killteam_game import KTGameService
+
+    _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+
+    def moved_on(*_args, **_kwargs):
+        raise StaleDataError(
+            "UPDATE statement on table 'kt_games' expected to update 1 row(s); 0 were matched."
+        )
+
+    monkeypatch.setattr(KTGameService, "update_game", moved_on)
+
+    resp = auth_client.patch(f"{BASE}/{gid}", json={"command_points": 7})
+
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "CONFLICT"
+    assert body["field"] == "version"
+    assert "moved on" in body["detail"]
+    assert body["errors"] == [{"code": "CONFLICT", "field": "version", "detail": body["detail"]}]
+    # No driver internals in the body -- the message above names the table and the row count.
+    for leak in ("kt_games", "UPDATE statement", "sqlalchemy", "Traceback"):
+        assert leak not in resp.text, f"{leak!r} leaked into the response"

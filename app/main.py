@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.army import router as army_router
 from app.api.auth import router as auth_router
@@ -161,6 +162,31 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
         status=CODE_STATUS[ErrorCode.CONFLICT],
         detail="conflict with an existing resource",
         code=ErrorCode.CONFLICT,
+    )
+
+
+# Backstop for the optimistic-version race, the sibling of the one above. `KTGame`
+# maps `version` as SQLAlchemy's `version_id_col` (KILLTEAM.md decision #9), so every
+# UPDATE of a game row carries `WHERE version = <the value the writer read>`. A writer
+# whose row has moved on matches zero rows, and SQLAlchemy raises `StaleDataError`.
+#
+# Handled here rather than converted in the service for the same reason `IntegrityError`
+# is: it surfaces at FLUSH, which can be the service's own flush or an autoflush from
+# any query that follows the write, so there is no single service-level statement to
+# wrap. One handler covers every write path, including ones added later.
+#
+# The service's own `expected_version` check still runs first and still produces the
+# more specific message naming both versions; this catches the genuine race that a
+# Python-level comparison cannot, and the write a caller sent with no version at all.
+@app.exception_handler(StaleDataError)
+def _stale_data_error(request: Request, exc: StaleDataError) -> JSONResponse:
+    logger.info("stale write on %s %s", request.method, request.url.path)
+    return _error_response(
+        request,
+        status=CODE_STATUS[ErrorCode.CONFLICT],
+        detail="this game has moved on since it was read — read it again and retry",
+        code=ErrorCode.CONFLICT,
+        field="version",
     )
 
 

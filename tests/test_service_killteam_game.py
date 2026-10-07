@@ -12,7 +12,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, inspect
+from sqlalchemy import event, inspect, update
+from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import select
 
 from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative
@@ -1185,3 +1186,94 @@ def test_game_operatives_tied_on_position_are_ordered_by_id(session, battle):
 
     tied = [row.id for row in svc.get_game(game.id).operatives if row.id in set(ids)]
     assert tied == sorted(ids), "rows tied on position came back in insertion order, not id order"
+
+
+def test_a_write_onto_a_row_that_moved_is_refused_by_the_database(session, battle):
+    """Decision #9 is ENFORCED, not checked. The write loses the row, not the race.
+
+    `version` used to be compared in Python and incremented in Python, which under READ
+    COMMITTED is a check-then-act with nothing behind it: two writers who both read
+    version 5 both passed the check and both wrote, and the second silently overwrote
+    the first. `use_ploy` was the costly case -- it reads `command_points`, computes
+    `- cost` and writes the absolute value, so one CP paid for two ploys.
+
+    Mapped as SQLAlchemy's `version_id_col`, every UPDATE of a game row carries
+    `WHERE version = <the value this writer read>`, so the loser matches zero rows.
+
+    The other writer is simulated with a Core `update()` rather than a second session,
+    for the reason `test_a_direct_update_cannot_move_a_row_into_another_players_roster`
+    does the same: the test tier is one shared in-memory connection, so two sessions
+    would share a transaction and prove nothing. `synchronize_session=False` leaves this
+    session's loaded game holding the version it read, which IS the stale state.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    read_version = game.version
+
+    moved = session.execute(
+        update(KTGame)
+        .where(KTGame.id == game.id)
+        .values(version=KTGame.version + 1)
+        .execution_options(synchronize_session=False)
+    )
+    assert moved.rowcount == 1, "the other writer's update did not land"
+    assert game.version == read_version, "this session no longer holds the stale version"
+
+    with pytest.raises(StaleDataError):
+        svc.update_game(game.id, None, command_points=4)
+    session.rollback()
+
+
+def test_a_ploy_cannot_be_paid_for_twice_from_one_pool(session, battle):
+    """The lost update that cost real CP, now refused rather than silently applied.
+
+    Two writers reading `command_points = 5` both computed 4 and both appended a
+    one-element `ploys_used`, so the pool paid once and the log showed one ploy where
+    two had been spent. The version lock makes the second write lose its row.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=5)
+    ploy_name = game.ploys[0]["name"]
+    read_version = game.version
+
+    session.execute(  # the other tab spends the same CP first
+        update(KTGame)
+        .where(KTGame.id == game.id)
+        .values(version=KTGame.version + 1, command_points=4)
+        .execution_options(synchronize_session=False)
+    )
+    assert game.version == read_version
+
+    with pytest.raises(StaleDataError):
+        svc.use_ploy(game.id, ploy_name)
+    session.rollback()
+
+
+def test_two_undos_of_the_same_event_cannot_both_land(session, battle):
+    """`undo` is a read-then-write too, and had no version parameter to guard it.
+
+    Both writers found the same newest standing event, so the event was reverted twice
+    and the change below it was stranded -- the log said two steps back, the game had
+    taken one. The lock catches it because `undo` writes its compensating event through
+    `_write`, which moves the version like every other mutation.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=3)
+    read_version = game.version
+
+    session.execute(
+        update(KTGame)
+        .where(KTGame.id == game.id)
+        .values(version=KTGame.version + 1)
+        .execution_options(synchronize_session=False)
+    )
+    assert game.version == read_version
+
+    with pytest.raises(StaleDataError):
+        svc.undo(game.id)
+    session.rollback()
