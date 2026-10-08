@@ -13,8 +13,11 @@ total in the Firebase→Cloud Run deploy). See ARCHITECTURE.md §2.3.
 from fastapi import Query
 from pydantic import BaseModel
 
+from app.api.fields import INT32_MAX
+
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+MAX_OFFSET = INT32_MAX
 
 
 class Page[T](BaseModel):
@@ -25,12 +28,20 @@ class Page[T](BaseModel):
 
 
 class PageParams:
-    """Shared `limit`/`offset` query params for list endpoints (`Depends()`)."""
+    """Shared `limit`/`offset` query params for list endpoints (`Depends()`).
+
+    Both are bounded at BOTH ends. `offset` had only `ge=0`, and an unbounded upper
+    end is a 500 rather than a 422: a Python int has no width, so `?offset=10**21`
+    passed validation and reached the driver, which raised `OverflowError` on SQLite
+    and `NumericValueOutOfRange` on Postgres -- neither a `CodedError`, so neither
+    handled. `INT32_MAX` is the project's existing ceiling for an incoming int
+    (`app/api/fields.py`), and it is far past any reachable page.
+    """
 
     def __init__(
         self,
         limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
-        offset: int = Query(default=0, ge=0),
+        offset: int = Query(default=0, ge=0, le=MAX_OFFSET),
     ):
         self.limit = limit
         self.offset = offset

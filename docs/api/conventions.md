@@ -105,6 +105,21 @@ never a header (a header is invisible to cross-origin JS unless CORS exposes it)
     returning the whole catalog while the client renders an owned-only view is the
     worst outcome available. (An invalid or expired token counts as anonymous here,
     so it `401`s too.)
+- **An unknown key in a request BODY is rejected** with a 422 naming it. Every
+  `*_Create` / `*_Update` schema inherits `WriteSchema`, which sets Pydantic's
+  `extra="forbid"`, and the published schema carries `additionalProperties: false`. So
+  `PATCH {"nmae": "x"}` is an error rather than a no-op — before this it validated clean,
+  changed nothing and answered **200**, which a client could not tell from a successful
+  write. Note this is the OPPOSITE of the query-parameter rule below. The two are
+  deliberately different, and getting them the wrong way round is the easy mistake.
+- **Strings and ints in a body are bounded**, so a value past the bound is a 422 rather
+  than a 500. The shared types are in `app/api/fields.py`: `Name` (1–128, blank or
+  whitespace-only refused), `Username` (3–64), `Stat` (0 to 2³¹−1, the datasheet stats),
+  `DiceValue` (1–16, for `attacks`/`damage` dice notation), `WeaponCategory` (1–8), and
+  `password` 8–72. A SQLModel `max_length` constrains the generated DDL and *not* the
+  request schema, which is why these are declared separately —
+  `tests/test_api_write_bounds.py` asserts over `openapi.json` that nothing is left
+  unbounded except six genuinely-`TEXT` `description` fields.
 - **Query parameters an endpoint doesn't declare are ignored**, not rejected: FastAPI
   drops them, and they have no effect. So `GET /api/v1/units/facets?faction_id=…` is
   the whole-catalog breakdown, because a faction filter on a per-faction count is
@@ -116,8 +131,11 @@ never a header (a header is invisible to cross-origin JS unless CORS exposes it)
   (one SQL `GROUP BY`) — so a client never downloads a collection to count it.
 
 Not paginated (by design): computed reports about a single resource
-(`/me/armies/{id}/shortfall`, `.../validate`) and the static `/api/v1/taxonomy`
-map — those return complete results.
+(`/me/armies/{id}/shortfall`, `.../validate`), the static `/api/v1/taxonomy` map, and
+two Kill Team reads that are one document rather than a collection —
+`/api/v1/kill-team/teams/{id}/composition` (a bare array: one team's printed
+composition) and `/api/v1/kill-team/universal` (an object: the ploy and equipment rows
+that belong to no team). Those all return complete results.
 
 ## Observability
 

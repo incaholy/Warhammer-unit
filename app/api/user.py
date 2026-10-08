@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, SQLModel
 
 from app.api.deps import get_current_admin, get_current_user
+from app.api.fields import WriteSchema
 from app.core.db.connection import get_session
 from app.core.db.models import User
 from app.core.services.service_user import UserService
@@ -24,7 +25,7 @@ class User_Read(SQLModel):
     is_admin: bool
 
 
-class AdminUpdate(SQLModel):
+class AdminUpdate(WriteSchema):
     is_admin: bool
 
 

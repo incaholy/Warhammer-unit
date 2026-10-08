@@ -10,8 +10,8 @@ from sqlmodel import SQLModel
 # SQLModel.metadata, which is what autogenerate compares the database against. It
 # looks unused, and `ruff check --fix` deleted it once (3c670cf) -- after which
 # autogenerate saw zero tables and proposed dropping every one. `alembic check` in
-# CI now fails if that happens again.
-from app.core.db import models  # noqa: F401
+# CI now fails if that happens again. Every models module needs a line here.
+from app.core.db import models, models_killteam  # noqa: F401
 
 # Load .env before any DATABASE_URL lookup below (imports above read no env).
 load_dotenv()

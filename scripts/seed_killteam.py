@@ -1,0 +1,635 @@
+"""Load the Kill Team catalog from scripts/data/killteam.json.
+
+    python -m scripts.seed_killteam
+    make seed-kt
+
+Written by `make scrape-kt`, which resolves every name while both halves of a page are
+in hand -- so this script looks rows up by natural key and never guesses.
+
+Running it again brings the database up to the payload: a row is created if absent and
+REWRITTEN if the source changed it, so a rebalanced stat or a reworded ploy lands on the
+next scrape. A team's selection RULES are the exception -- they are replaced as a whole
+(see `_seed_rules`), because a composition rule's identity is its print position.
+
+What that leaves is a SUPERSET of the payload, not a match: outside the composition,
+rows the source has REMOVED or RENAMED stay behind, and nothing marks them as stale
+(`updated_at` cannot -- it only moves when a row is written). A withdrawn ploy therefore
+keeps being served and a renamed team leaves its old subtree beside the new one.
+
+That is **decided and not yet built**: decision #55 marks a withdrawn row with a
+`withdrawn` flag rather than deleting it, so catalog reads hide it while a roster or game
+read still resolves the datacard it was built against. Deleting instead was the 40k
+answer (`UnitService.delete_unit` 409s when an army references the unit) and would leave
+the rows anyone has rostered permanently stuck. The condition for building it is **before
+a client consumes the catalog as a picker** -- until then a superset is merely untidy;
+after, it offers withdrawn rows to a player. Not before `fire-team` merges: the column is
+additive, so it is no cheaper now than later.
+
+Everything happens in one transaction, so a team that fails mid-run leaves nothing
+half-written.
+
+No service layer in between: `KillTeamService` (ROADMAP K3) reads the catalog and never
+writes it, so a seed writes the models directly. Every
+rule still applies: the constraints in `models_killteam.py` are what reject a bad row,
+and a seed cannot get past them any more than an API request could.
+
+killteam.json shape:
+
+    {
+      "kill_teams": [
+        { "name", "faction",
+          "rules":      [ { "name", "description", "group" }, ... ],
+          "ploys":      [ { "name", "kind", "description", "cp_cost"? }, ... ],
+          "equipment":  [ { "name", "description" }, ... ],
+          "operatives": [ { "name", "apl", "move", "save", "wounds", "keywords", "availability",
+                            "weapons":   [ { "name", "category", "range", "attacks",
+                                             "hit", "normal_damage", "crit_damage",
+                                             "rules" }, ... ],
+                            "abilities": [ { "name", "description" }, ... ] }, ... ],
+          "selection_rules": [ { "position", "depth", "kind", "text" }, ... ] }, ...
+      ],
+      "universal_ploys":     [ { "name", "kind", "description", "cp_cost"? }, ... ],
+      "universal_equipment": [ { "name", "description" }, ... ],
+      "skipped":             [ { "team", "reason" }, ... ],
+      "warnings":            [ { "team", "warning" }, ... ]
+    }
+
+Every key above is REQUIRED and read as such, so a scraper-side rename breaks the seed
+instead of loading 454 operatives with empty keywords. `range` may be null (no printed
+Range rule); `cp_cost` is the one optional key, since a page that prints no cost means
+the default. A selection rule's `kind` is `heading`, `line`, `restriction` or `note`, and
+`depth` is the page's indent and is 0 for every kind but `line` (see `KTSelectionRule`).
+
+`skipped` names the teams the scraper could not read (ambiguous pages, KILLTEAM.md → K6).
+It is reported at the end of a run: the catalog loads fine without them, but a seed that
+printed only its own counts would look like a complete one.
+"""
+
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel import Session, select
+
+from app.core.db.connection import get_engine
+from app.core.db.models_killteam import (
+    DEFAULT_PLOY_CP_COST,
+    KillTeam,
+    KillTeamRule,
+    KTAbility,
+    KTEquipment,
+    KTFaction,
+    KTOperative,
+    KTPloy,
+    KTSelectionRule,
+    KTWeapon,
+    default_range,
+)
+
+DATA_PATH = Path(__file__).parent / "data" / "killteam.json"
+
+COUNT_KEYS = (
+    "factions",
+    "kill_teams",
+    "rules",
+    "ploys",
+    "equipment",
+    "operatives",
+    "weapons",
+    "abilities",
+    "selection_rules",
+    "universal_ploys",
+    "universal_equipment",
+    "updated",  # rows that already existed and had at least one column rewritten
+    "compositions_replaced",  # teams whose composition was rewritten wholesale
+    "withdrawn",  # rows the source no longer names, flagged rather than deleted (#55)
+)
+
+
+class SeedError(Exception):
+    """A problem in killteam.json — a bad cross-reference or a malformed record."""
+
+
+def _duplicate(items: list[dict], key) -> Any | None:
+    """The first key that appears twice in `items`, or None."""
+    seen = set()
+    for item in items:
+        value = key(item)
+        if value in seen:
+            return value
+        seen.add(value)
+    return None
+
+
+def _check_no_duplicates(data: dict) -> None:
+    """Refuse a payload that names the same thing twice inside one section.
+
+    Every natural key below is a unique constraint, so a repeat does not become a second
+    row: `_upsert` finds the first and REWRITES it, and the last entry silently wins. An
+    API request for that second row would be refused as a conflict, so the seed refuses
+    it too rather than quietly keeping one of the two. Checked before anything is written,
+    because the whole payload is one transaction.
+    """
+    sections: list[tuple[str, list[dict], Any]] = [
+        ("kill team", data["kill_teams"], lambda team: team["name"]),
+        ("universal ploy", data.get("universal_ploys", []), lambda ploy: ploy["name"]),
+        ("universal equipment", data.get("universal_equipment", []), lambda item: item["name"]),
+    ]
+    for team in data["kill_teams"]:
+        where = team["name"]
+        sections += [
+            (f"{where} rule", team.get("rules", []), lambda rule: rule["name"]),
+            (f"{where} ploy", team.get("ploys", []), lambda ploy: ploy["name"]),
+            (f"{where} equipment", team.get("equipment", []), lambda item: item["name"]),
+            (f"{where} operative", team.get("operatives", []), lambda op: op["name"]),
+            (
+                f"{where} selection rule position",
+                team.get("selection_rules", []),
+                lambda rule: rule["position"],
+            ),
+        ]
+        for operative in team.get("operatives", []):
+            sections += [
+                (
+                    f"{where}'s {operative['name']} weapon",
+                    operative.get("weapons", []),
+                    lambda weapon: (weapon["name"], weapon["category"]),
+                ),
+                (
+                    f"{where}'s {operative['name']} ability",
+                    operative.get("abilities", []),
+                    lambda ability: ability["name"],
+                ),
+            ]
+
+    for what, items, key in sections:
+        repeat = _duplicate(items, key)
+        if repeat is not None:
+            raise SeedError(f"{what} {repeat!r} appears twice in the payload")
+
+
+def _upsert(
+    session: Session,
+    model,
+    counts: dict,
+    count_key: str,
+    values: dict[str, Any] | None = None,
+    **keys,
+):
+    """The row matching `keys`: created if absent, brought up to date if present.
+
+    `keys` is the row's NATURAL key, and in every case here it is also a UNIQUE
+    constraint — a faction's name, an operative's (kill_team, name), a weapon's
+    (operative, name, category). Keeping those two identical is the whole trick: the
+    lookup cannot disagree with what the database considers the same row, so a second run
+    finds the first run's work instead of colliding with it. Anything extra in the key is
+    a guess, and anything missing collapses two source rows into one.
+
+    A selection list does NOT come through here: its only stable identity is its print
+    position, which an upsert cannot follow. `_seed_rules` replaces that subtree.
+
+    A `None` in `keys` is matched with `IS NULL`, which is how the universal ploys and
+    equipment (`kill_team_id = NULL`) are found. SQLAlchemy would render `column == None`
+    that way too; `is_()` says it outright rather than leaning on that.
+
+    `values` are REWRITTEN on an existing row. The catalog is derived data: when the
+    source changes an operative's wounds, the payload is right and the stored row is
+    stale, and create-once would leave the old value silently in place. A column whose
+    value comes from a database default is left OUT of `values` by the caller, so a
+    re-run does not overwrite it with `None`.
+
+    Counts the row under `count_key` when it was created, and under `"updated"` when an
+    existing row actually changed.
+    """
+    # A row the source has brought BACK must stop being withdrawn (#55). Set here rather
+    # than in each caller's `values` so no caller can forget it -- the same reason the game
+    # service bumps `version` in one place. `KTSelectionRule` has no such column and never
+    # comes through here anyway.
+    if "withdrawn" in model.__table__.columns:
+        values = {**(values or {}), "withdrawn": False}
+
+    row = session.exec(select(model).where(*_match(model, keys))).first()
+    if row is None:
+        row = model(**keys, **(values or {}))
+        session.add(row)
+        # Not for the id -- every id is a client-generated uuid4, so the row has one before
+        # it is added. The flush makes it VISIBLE to the queries that follow in this
+        # transaction, so a child's foreign key has something to point at and a second
+        # lookup of the same natural key finds this row rather than creating another.
+        session.flush()
+        counts[count_key] += 1
+        return row
+
+    changed = [field for field, value in (values or {}).items() if getattr(row, field) != value]
+    for field in changed:
+        setattr(row, field, values[field])
+    counts["updated"] += bool(changed)
+    return row
+
+
+def _withdraw_missing(
+    session: Session,
+    model,
+    counts: dict,
+    *,
+    parent: dict[str, Any],
+    key_fields: tuple[str, ...],
+    seen: set,
+) -> None:
+    """Flag the parent's children the payload no longer names (decision #55).
+
+    Scoped to the PARENT, which is what makes a partial run safe: a team absent from the
+    payload is never swept, so a scrape that read three teams cannot flag the other
+    forty-five. `_upsert` has already cleared the flag on every row the payload DID name,
+    so this only ever sets it -- the two halves never fight over a row.
+
+    `key_fields` is the same natural key `_upsert` matched on, which is the whole trick
+    again: sweeping by a different key than the upsert used would flag rows the payload
+    had just written.
+    """
+    for row in session.exec(select(model).where(*_match(model, parent))).all():
+        if tuple(getattr(row, field) for field in key_fields) in seen:
+            continue
+        if not row.withdrawn:
+            row.withdrawn = True
+            session.add(row)
+            counts["withdrawn"] += 1
+
+
+def _match(model, keys: dict[str, Any]):
+    """`keys` as WHERE clauses, with `IS NULL` where the value is None."""
+    for field, value in keys.items():
+        column = getattr(model, field)
+        yield column.is_(None) if value is None else column == value
+
+
+def _ploy_values(ploy: dict) -> dict[str, Any]:
+    # A page that prints no cost means the default, which is WRITTEN rather than left to
+    # the column: a column default only fires on INSERT, so omitting the field would
+    # freeze a cost the source has since stopped printing (KTPloy.cp_cost says the same).
+    printed = ploy.get("cp_cost")
+    return {
+        "kind": ploy["kind"],
+        "description": ploy["description"],
+        "cp_cost": DEFAULT_PLOY_CP_COST if printed is None else printed,
+    }
+
+
+def _seed_operative(
+    session: Session, team: KillTeam, data: dict, counts: dict, position: int = 0
+) -> KTOperative:
+    operative = _upsert(
+        session,
+        KTOperative,
+        counts,
+        "operatives",
+        {
+            "apl": data["apl"],
+            "move": data["move"],
+            "save": data["save"],
+            "wounds": data["wounds"],
+            "keywords": data["keywords"],
+            "position": position,
+            "availability": data["availability"],
+        },
+        kill_team_id=team.id,
+        name=data["name"],
+    )
+
+    # `enumerate` is the print order throughout this module: every list in the payload is
+    # in the order the page prints it, and `position` is what keeps that once a row can be
+    # rewritten (decision #25). Without it the order read back is whatever storage gives.
+    for index, weapon in enumerate(data.get("weapons", [])):
+        printed = weapon["range"]
+        _upsert(
+            session,
+            KTWeapon,
+            counts,
+            "weapons",
+            {
+                # A melee profile prints no range, so the shared rule supplies one
+                # (decision #15). Written, not omitted: see `_ploy_values`.
+                "range": default_range(weapon["category"]) if printed is None else printed,
+                "attacks": weapon["attacks"],
+                "hit": weapon["hit"],
+                "normal_damage": weapon["normal_damage"],
+                "crit_damage": weapon["crit_damage"],
+                "weapon_rules": weapon["rules"],
+                "position": index,
+            },
+            operative_id=operative.id,
+            name=weapon["name"],
+            category=weapon["category"],
+        )
+
+    for index, ability in enumerate(data.get("abilities", [])):
+        _upsert(
+            session,
+            KTAbility,
+            counts,
+            "abilities",
+            {"description": ability["description"], "position": index},
+            operative_id=operative.id,
+            name=ability["name"],
+        )
+
+    # A weapon's natural key is (name, category) -- the same pair `_upsert` matched on,
+    # because a Sanctifiers brazier appears as both a ranged and a melee profile.
+    _withdraw_missing(
+        session,
+        KTWeapon,
+        counts,
+        parent={"operative_id": operative.id},
+        key_fields=("name", "category"),
+        seen={(w["name"], w["category"]) for w in data.get("weapons", [])},
+    )
+    _withdraw_missing(
+        session,
+        KTAbility,
+        counts,
+        parent={"operative_id": operative.id},
+        key_fields=("name",),
+        seen={(a["name"],) for a in data.get("abilities", [])},
+    )
+    return operative
+
+
+def _comparable(rules) -> list:
+    """A composition as one comparable value, independent of row order.
+
+    Rows come back from the database in no particular order, so both sides are sorted by
+    `position` -- unique within a team, and an integer, so the sort never reaches the text
+    and cannot raise comparing a string against None.
+    """
+    return sorted(rules, key=lambda row: row[0])
+
+
+def _seed_rules(session: Session, team: KillTeam, data: dict, counts: dict) -> None:
+    """Replace the team's composition rules when they differ from the payload.
+
+    An upsert is wrong for this subtree, for the same reason it was wrong for the lists
+    this replaces: a rule is identified by its `position` -- the page's print order --
+    because nothing else about a line is stable. A page that gains, loses or reorders a
+    line does not change one row, it SHIFTS them all, and every surviving row would be
+    rewritten with the next rule's text while reported as a tidy incremental update.
+
+    Composition is small, derived, and pointed at by nothing, so the honest operation is
+    replace-if-changed: compare the whole run, and when it differs delete the team's rules
+    and write the payload's. A team whose composition matches is not touched, which is the
+    common case on a re-run.
+
+    Simpler than the version it replaces because there is nothing to resolve. No operative
+    to look up, no reference to link in a second pass, no position to translate back from
+    a stored id -- the rows are text, so comparing them is comparing text.
+    """
+    if "selection_rules" not in data:
+        # Absent is NOT empty. The scraper raises rather than emitting a team without the
+        # section (that team lands in `skipped`), so a missing key means a partial or
+        # hand-made payload -- and reading it as "this team has no composition" would
+        # delete every rule the team has, reported as a tidy replace. An explicit `[]`
+        # still means "replace it with nothing", which is a statement.
+        return
+
+    wanted = [
+        (rule["position"], rule["depth"], rule["kind"], rule["text"]) for rule in data["selection_rules"]
+    ]
+    existing = session.exec(select(KTSelectionRule).where(KTSelectionRule.kill_team_id == team.id)).all()
+    stored = [(row.position, row.depth, row.kind, row.text) for row in existing]
+    if _comparable(stored) == _comparable(wanted):
+        return
+
+    for row in existing:
+        session.delete(row)
+    session.flush()  # the DELETEs must land before an INSERT reuses (kill_team_id, position)
+
+    for position, depth, kind, text in wanted:
+        session.add(
+            KTSelectionRule(
+                kill_team_id=team.id,
+                position=position,
+                depth=depth,
+                kind=kind,
+                text=text,
+            )
+        )
+
+    if existing:
+        # Counted per team, not per row: "3 selection rules created" would be a lie about
+        # a page that moved one line.
+        counts["compositions_replaced"] += 1
+    else:
+        counts["selection_rules"] += len(wanted)
+
+
+def _seed_kill_team(session: Session, data: dict, counts: dict) -> None:
+    faction = _upsert(session, KTFaction, counts, "factions", name=data["faction"])
+    team = _upsert(
+        session,
+        KillTeam,
+        counts,
+        "kill_teams",
+        {"faction_id": faction.id},
+        name=data["name"],
+    )
+
+    for index, rule in enumerate(data.get("rules", [])):
+        _upsert(
+            session,
+            KillTeamRule,
+            counts,
+            "rules",
+            # `group` is the section a CHOSEN rule was printed under, NULL for an
+            # always-on one (decision #27).
+            {"description": rule["description"], "group": rule["group"], "position": index},
+            kill_team_id=team.id,
+            name=rule["name"],
+        )
+    _withdraw_missing(
+        session,
+        KillTeamRule,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(rule["name"],) for rule in data.get("rules", [])},
+    )
+
+    for index, ploy in enumerate(data.get("ploys", [])):
+        _upsert(
+            session,
+            KTPloy,
+            counts,
+            "ploys",
+            _ploy_values(ploy) | {"position": index},
+            kill_team_id=team.id,
+            name=ploy["name"],
+        )
+    _withdraw_missing(
+        session,
+        KTPloy,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(ploy["name"],) for ploy in data.get("ploys", [])},
+    )
+
+    for index, item in enumerate(data.get("equipment", [])):
+        _upsert(
+            session,
+            KTEquipment,
+            counts,
+            "equipment",
+            {"description": item["description"], "position": index},
+            kill_team_id=team.id,
+            name=item["name"],
+        )
+    _withdraw_missing(
+        session,
+        KTEquipment,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(item["name"],) for item in data.get("equipment", [])},
+    )
+
+    for index, operative in enumerate(data.get("operatives", [])):
+        _seed_operative(session, team, operative, counts, index)
+    _withdraw_missing(
+        session,
+        KTOperative,
+        counts,
+        parent={"kill_team_id": team.id},
+        key_fields=("name",),
+        seen={(operative["name"],) for operative in data.get("operatives", [])},
+    )
+
+    _seed_rules(session, team, data, counts)
+
+
+def seed(session: Session, data: dict) -> dict[str, int]:
+    """Load every row in `data`; returns how many were created, plus how many changed."""
+    counts = dict.fromkeys(COUNT_KEYS, 0)
+    if not data.get("kill_teams"):
+        raise SeedError("killteam.json lists no kill teams — run `make scrape-kt` first")
+    _check_no_duplicates(data)
+
+    try:
+        for team in data["kill_teams"]:
+            _seed_kill_team(session, team, counts)
+
+        # Available to every kill team, so stored with NO kill team. The partial unique
+        # index on those rows is what stops a second Command Re-roll; `kill_team_id=None`
+        # here is matched with IS NULL, so these never collide with a team's own ploy of the
+        # same name.
+        for index, ploy in enumerate(data.get("universal_ploys", [])):
+            _upsert(
+                session,
+                KTPloy,
+                counts,
+                "universal_ploys",
+                _ploy_values(ploy) | {"position": index},
+                kill_team_id=None,
+                name=ploy["name"],
+            )
+
+        for index, item in enumerate(data.get("universal_equipment", [])):
+            _upsert(
+                session,
+                KTEquipment,
+                counts,
+                "universal_equipment",
+                {"description": item["description"], "position": index},
+                kill_team_id=None,
+                name=item["name"],
+            )
+
+        # The TOP level has no parent to scope a sweep by, so the per-parent guard above
+        # cannot protect it: sweeping `kt_kill_teams` against a payload that read three
+        # teams would flag the other forty-five. The payload says whether it is complete --
+        # `skipped` names the teams the scraper could not read -- so the sweep runs only
+        # when nothing was skipped. That is a fact the payload carries rather than a
+        # guess about it.
+        #
+        # Without this, a RENAMED team keeps its old row and its whole subtree, which is
+        # one of the two problems #55 exists to fix. The other, a withdrawn ploy, is
+        # handled by the per-parent sweeps.
+        skipped = data.get("skipped") or []
+        if skipped:
+            print(
+                f"  not sweeping withdrawn teams or factions: {len(skipped)} team(s) were "
+                "skipped, so the payload is not a complete picture of the source",
+                flush=True,
+            )
+        else:
+            _withdraw_missing(
+                session,
+                KillTeam,
+                counts,
+                parent={},
+                key_fields=("name",),
+                seen={(team["name"],) for team in data["kill_teams"]},
+            )
+            _withdraw_missing(
+                session,
+                KTFaction,
+                counts,
+                parent={},
+                key_fields=("name",),
+                seen={(team["faction"],) for team in data["kill_teams"]},
+            )
+
+        session.commit()
+    except Exception:
+        # All or nothing. The rows written before the failure are only FLUSHED, so a
+        # caller that keeps this session would otherwise still see them -- and could
+        # commit a catalog no single scrape ever produced.
+        session.rollback()
+        raise
+    return counts
+
+
+def _fail(message: str) -> None:
+    print(f"seed error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main() -> None:
+    try:
+        raw = DATA_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        _fail(f"cannot read {DATA_PATH}: {exc} — run `make scrape-kt` first")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _fail(f"{DATA_PATH} is not valid JSON: {exc}")
+    try:
+        with Session(get_engine()) as session:
+            counts = seed(session, data)
+    except (SeedError, KeyError, ValueError, TypeError, LookupError, SQLAlchemyError) as exc:
+        # SQLAlchemyError included because the constraints in `models_killteam.py` are
+        # what reject a bad row, and they raise IntegrityError -- which is none of the
+        # builtins above. The session rolls back either way; this is about the message.
+        _fail(str(exc))
+    written = ", ".join(f"{count} {name}" for name, count in counts.items() if count)
+    # flushed so the note below, which goes to stderr, cannot overtake it in a terminal
+    print("seeded:", written or "nothing new — the database already matches the payload", flush=True)
+
+    for entry in data.get("warnings") or []:
+        print(f"check by hand: {entry['team']}: {entry['warning']}", file=sys.stderr)
+
+    skipped = data.get("skipped") or []
+    if skipped:
+        # Not a failure -- the other teams are complete and usable -- but the counts above
+        # would otherwise read as a whole catalog.
+        print(
+            f"\nincomplete: {len(skipped)} kill team(s) were not in the payload, "
+            f"because the scraper could not read their pages:",
+            file=sys.stderr,
+        )
+        for entry in skipped:
+            print(f"  {entry['team']}: {entry['reason']}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

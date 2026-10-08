@@ -322,6 +322,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -831,6 +832,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -949,6 +951,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -1163,6 +1166,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -1360,6 +1364,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -1534,6 +1539,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -1780,6 +1786,7 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 2147483647,
               "minimum": 0,
               "default": 0,
               "title": "Offset"
@@ -2227,6 +2234,1604 @@
           }
         }
       }
+    },
+    "/api/v1/kill-team/factions": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "List Kt Factions",
+        "description": "The Kill Team faction list, alphabetically.\n\nA flat list of its own, one level deep (decision #12): no grand-alliance level\nabove it and no link to the 40k faction tables. A faction is how a team is FOUND.",
+        "operationId": "list_kt_factions_api_v1_kill_team_factions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTFaction_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/teams": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "List Kill Teams",
+        "description": "Kill teams, alphabetically, optionally narrowed to one faction.\n\nAlphabetical because that is the only order there is: decision #25 gives print\norder to every CHILD of a kill team, not to the teams themselves, so the site's\nnav order is not stored.\n\nA `faction_id` matching nothing is an empty page, not a 404 -- a filter naming\nnothing is a legitimate result, where a missing ROW asked for by id is not.",
+        "operationId": "list_kill_teams_api_v1_kill_team_teams_get",
+        "parameters": [
+          {
+            "name": "faction_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Faction Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KillTeam_Read_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/teams/{kill_team_id}": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "Get Kill Team",
+        "description": "One kill team with its rules, ploys, equipment, datacards and composition.\n\n404 for an unknown id, through the service's `NotFoundError` -- `app/main.py`\nregisters one handler against `CodedError`, so nothing is mapped here.\n\nRows the source has withdrawn are absent (decision #55). The service hands back\nplain lists rather than the `KillTeam` row, because its relationships are shared\nwith the roster read, which must NOT filter -- so the shaping happens here.",
+        "operationId": "get_kill_team_api_v1_kill_team_teams__kill_team_id__get",
+        "parameters": [
+          {
+            "name": "kill_team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Kill Team Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillTeam_Detail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/teams/{kill_team_id}/composition": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "Read Composition",
+        "description": "A team's composition without its datacards.\n\nThe detail already carries these (#47); this is for a reader that wants the printed\nrules alone -- a roster view beside its picker. It saves less than it looks: the\ncomposition is 2-29% of a detail response, median 10%.\n\nUnpaginated, like `/universal`: this is one document, and a page of a team's\ncomposition would be a page of half a printed section.\n\n404 for an unknown team rather than an empty list, because \"no composition\" and \"no\nsuch team\" are different answers.",
+        "operationId": "read_composition_api_v1_kill_team_teams__kill_team_id__composition_get",
+        "parameters": [
+          {
+            "name": "kill_team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Kill Team Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KTSelectionRule_Read"
+                  },
+                  "title": "Response Read Composition Api V1 Kill Team Teams  Kill Team Id  Composition Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/operatives": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "List Operatives",
+        "description": "Operatives across teams, optionally narrowed by team or keyword.\n\nThe cross-team question a nested operative cannot answer: \"every operative with\nLEADER\", \"compare these two teams' Warriors\". Ordered by team then printed position.\n\nRows the source has withdrawn are absent, and so are withdrawn weapon or ability\nPROFILES on the rows that remain (#55) -- the profiles are filtered by the query that\nfetches them, because the relationships are shared with the roster read.\n\n`keyword` is matched EXACTLY against what the datacard prints, upper-cased: `GUN`\nfinds Battleclade's Gun Servitor, which prints `GUN` and `SERVITOR` as two keywords,\nand not Inquisitorial Agent's, which prints `GUN SERVITOR` as one. A substring match\nwould conflate them. On Postgres this is `keywords @> '[\"GUN\"]'` against a GIN index\n(decision #26); on SQLite it scans with `json_each`, so the default test tier\nexercises the same filter.",
+        "operationId": "list_operatives_api_v1_kill_team_operatives_get",
+        "parameters": [
+          {
+            "name": "kill_team_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kill Team Id"
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Keyword"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTOperative_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/kill-team/universal": {
+      "get": {
+        "tags": [
+          "kill team"
+        ],
+        "summary": "Read Universal",
+        "description": "Command Re-roll and the universal equipment list: the rows no team owns.\n\nUnpaginated, deliberately. This is one document rather than a collection -- one\nploy and eleven pieces of equipment, static until a re-scrape -- so a client\nfetches it once and keeps it.",
+        "operationId": "read_universal_api_v1_kill_team_universal_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Universal_Read"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters": {
+      "post": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Create Roster",
+        "description": "A new, empty roster. 409 if the player already has one by that name.",
+        "operationId": "create_roster_api_v1_me_kill_team_rosters_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRoster_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "List Rosters",
+        "description": "The caller's rosters, oldest first. Only ever the caller's.",
+        "operationId": "list_rosters_api_v1_me_kill_team_rosters_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTRoster_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}": {
+      "get": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Get Roster",
+        "operationId": "get_roster_api_v1_me_kill_team_rosters__roster_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Update Roster",
+        "operationId": "update_roster_api_v1_me_kill_team_rosters__roster_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRoster_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRoster_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Delete Roster",
+        "operationId": "delete_roster_api_v1_me_kill_team_rosters__roster_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}/operatives": {
+      "post": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Add Operative",
+        "description": "Append one operative. A repeat is a second operative, not a 409.\n\nThe armies router's equivalent is create-only, because an incrementing add is not\nretry-safe. There is no quantity here (decision #50), so a retried add appends --\nwhich is a real outcome, and a caller that did not mean it removes the extra row.",
+        "operationId": "add_operative_api_v1_me_kill_team_rosters__roster_id__operatives_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRosterOperative_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRosterOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/rosters/{roster_id}/operatives/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Move Operative",
+        "description": "Set a row's position. Addressed by the ROW's id, not the operative's.",
+        "operationId": "move_operative_api_v1_me_kill_team_rosters__roster_id__operatives__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTRosterOperative_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTRosterOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team rosters"
+        ],
+        "summary": "Remove Operative",
+        "operationId": "remove_operative_api_v1_me_kill_team_rosters__roster_id__operatives__row_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "roster_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Roster Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Create Game",
+        "description": "Start a battle from one of the caller's rosters, copying everything it needs.\n\n404 if the roster is not theirs: `create_game` writes the CALLER's id and the\ncomposite foreign key refuses a roster they do not own, so this cannot start a\nbattle from a stranger's list even if the route forgot to look (#54).",
+        "operationId": "create_game_api_v1_me_kill_team_games_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGame_Create"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "List Games",
+        "description": "The caller's games, newest first. Only ever the caller's.",
+        "operationId": "list_games_api_v1_me_kill_team_games_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2147483647,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_KTGame_ListRead_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}": {
+      "get": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Get Game",
+        "operationId": "get_game_api_v1_me_kill_team_games__game_id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Update Game",
+        "description": "CP, VP, markers, the ploys spent. 409 if `version` is behind (#9).",
+        "operationId": "update_game_api_v1_me_kill_team_games__game_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGame_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Delete Game",
+        "operationId": "delete_game_api_v1_me_kill_team_games__game_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Add Operative",
+        "description": "Field a datacard the battle produced \u2014 Gellerpox's vermin, a rule's grant (#18).",
+        "operationId": "add_operative_api_v1_me_kill_team_games__game_id__operatives_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Add"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Update Operative",
+        "description": "Wounds, order, tokens, the actions used. Zero wounds takes it out of the battle.",
+        "operationId": "update_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}/activate": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Activate Operative",
+        "description": "Mark it activated in the game's CURRENT turning point (#61).\n\nIts own route rather than a field on the PATCH, because the server reads the turning\npoint off the game \u2014 so an activation cannot be recorded in one that is not\nhappening. 400 on a second activation in the same turning point.",
+        "operationId": "activate_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__activate_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/operatives/{row_id}/transform": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Transform Operative",
+        "description": "One card becomes another, in place (#19) \u2014 the same model on the table.\n\nThe row keeps its id, tokens, actions used and position; only the catalog pointer\nmoves and the snapshot is rewritten. How many transforms a turning point allows is\nthe players' (#1), so nothing here counts them.",
+        "operationId": "transform_operative_api_v1_me_kill_team_games__game_id__operatives__row_id__transform_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameOperative_Transform"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameOperative_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/equipment": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Add Equipment",
+        "description": "Take a piece into this battle (#17), with its text copied.\n\n409 for the same piece twice, which is integrity. The ALLOWANCE is not checked\n(#57): the detail read reports `equipment_limit` and a fifth piece is accepted, so\na custom game can be built.",
+        "operationId": "add_equipment_api_v1_me_kill_team_games__game_id__equipment_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameEquipment_Add"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameEquipment_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/equipment/{row_id}": {
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Reveal Equipment",
+        "description": "Reveal it \u2014 which can change what is on the table (Gellerpox's vermin, #18).",
+        "operationId": "reveal_equipment_api_v1_me_kill_team_games__game_id__equipment__row_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGameEquipment_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Remove Equipment",
+        "operationId": "remove_equipment_api_v1_me_kill_team_games__game_id__equipment__row_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Row Id"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/ploys": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Use Ploy",
+        "description": "Spend a ploy: record it and deduct its CP in one operation.\n\nThe cost comes from the game's own snapshot, so a client does not supply it and\ncannot forget to. One operation because it is one event -- `undo` then restores the\nCP and removes the entry together, where two PATCHes would let one be undone without\nthe other.\n\n400 for a ploy this game's snapshot does not list, or if the CP will not cover it.\nHow many ploys a turning point allows is the players' (#1). Returns the game whole,\nbecause two of its fields moved.",
+        "operationId": "use_ploy_api_v1_me_kill_team_games__game_id__ploys_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGamePloy_Use"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/advance": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Advance",
+        "description": "Next phase, next turning point, or finish the game.\n\nThe server applies what goes with the move: initiative back to nobody for the new\nturning point's roll-off (#62), and nothing at all for activations, which are\nstamped with the turning point they happened in (#61). Advancing out of the fourth\nfirefight phase FINISHES the game, and because that is an event like any other,\n`undo` reopens one closed by accident.",
+        "operationId": "advance_api_v1_me_kill_team_games__game_id__advance_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/undo": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Undo",
+        "description": "Revert the newest change that still stands, and record having done so (#58).\n\nReturns the game whole rather than the compensating event, because an undo can move\nanything -- a wound, a turning point, a row that existed -- and a client that got\nonly the event would have to re-read to know what changed. 400 when there is\nnothing left.",
+        "operationId": "undo_api_v1_me_kill_team_games__game_id__undo_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2239,6 +3844,7 @@
             "title": "Ability Id"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "ability_id"
@@ -2249,6 +3855,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
@@ -2256,6 +3864,7 @@
             "title": "Description"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -2292,7 +3901,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -2312,6 +3923,7 @@
             "title": "Description"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "Ability_Update"
       },
@@ -2322,6 +3934,7 @@
             "title": "Is Admin"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "is_admin"
@@ -2332,9 +3945,11 @@
         "properties": {
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "title": "Amount"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "amount"
@@ -2350,11 +3965,13 @@
           },
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Amount",
             "default": 1
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "unit_id"
@@ -2382,6 +3999,8 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "faction_id": {
@@ -2415,7 +4034,9 @@
           "points_limit": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -2424,6 +4045,7 @@
             "title": "Points Limit"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -2517,7 +4139,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -2563,7 +4187,9 @@
           "points_limit": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -2572,6 +4198,7 @@
             "title": "Points Limit"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "Army_Update"
       },
@@ -2651,6 +4278,7 @@
             "$ref": "#/components/schemas/FactionName"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name"
@@ -2706,16 +4334,1721 @@
           },
           "amount": {
             "type": "integer",
+            "maximum": 2147483647.0,
             "minimum": 1.0,
             "title": "Amount",
             "default": 1
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "unit_id"
         ],
         "title": "InventoryAdd"
+      },
+      "KTAbility_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "position"
+        ],
+        "title": "KTAbility_Read"
+      },
+      "KTEquipment_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "position"
+        ],
+        "title": "KTEquipment_Read"
+      },
+      "KTFaction_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "KTFaction_Read"
+      },
+      "KTGameAbility_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "KTGameAbility_Read"
+      },
+      "KTGameEquipment_Add": {
+        "properties": {
+          "equipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Equipment Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "equipment_id"
+        ],
+        "title": "KTGameEquipment_Add"
+      },
+      "KTGameEquipment_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "equipment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Equipment Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "revealed": {
+            "type": "boolean",
+            "title": "Revealed"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "equipment_id",
+          "name",
+          "text",
+          "revealed",
+          "position"
+        ],
+        "title": "KTGameEquipment_Read"
+      },
+      "KTGameEvent_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload",
+            "default": {}
+          },
+          "undone_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Undone By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "type",
+          "turning_point",
+          "undone_by",
+          "created_at"
+        ],
+        "title": "KTGameEvent_Read",
+        "description": "One entry in the log (#8, #58), which is also what `undo` walks back over."
+      },
+      "KTGameOperative_Add": {
+        "properties": {
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operative_id",
+          "source"
+        ],
+        "title": "KTGameOperative_Add"
+      },
+      "KTGameOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "apl": {
+            "type": "integer",
+            "title": "Apl"
+          },
+          "move": {
+            "type": "integer",
+            "title": "Move"
+          },
+          "save": {
+            "type": "integer",
+            "title": "Save"
+          },
+          "wounds": {
+            "type": "integer",
+            "title": "Wounds"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords",
+            "default": []
+          },
+          "weapons": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameWeapon_Read"
+            },
+            "type": "array",
+            "title": "Weapons",
+            "default": []
+          },
+          "abilities": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameAbility_Read"
+            },
+            "type": "array",
+            "title": "Abilities",
+            "default": []
+          },
+          "current_wounds": {
+            "type": "integer",
+            "title": "Current Wounds"
+          },
+          "order": {
+            "type": "string",
+            "title": "Order"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "activated_in_turning_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated In Turning Point"
+          },
+          "tokens": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tokens",
+            "default": []
+          },
+          "actions_used": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Actions Used",
+            "default": []
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "added_in_turning_point": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added In Turning Point"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "operative_id",
+          "name",
+          "apl",
+          "move",
+          "save",
+          "wounds",
+          "current_wounds",
+          "order",
+          "status",
+          "activated_in_turning_point",
+          "source",
+          "added_in_turning_point"
+        ],
+        "title": "KTGameOperative_Read",
+        "description": "One model in the battle: its card as it was snapshotted, then its state."
+      },
+      "KTGameOperative_Transform": {
+        "properties": {
+          "becomes_operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Becomes Operative Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "becomes_operative_id"
+        ],
+        "title": "KTGameOperative_Transform"
+      },
+      "KTGameOperative_Update": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "current_wounds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Wounds"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokens"
+          },
+          "actions_used": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actions Used"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTGameOperative_Update"
+      },
+      "KTGamePloy_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cp_cost": {
+            "type": "integer",
+            "title": "Cp Cost"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "universal": {
+            "type": "boolean",
+            "title": "Universal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "cp_cost",
+          "description",
+          "universal"
+        ],
+        "title": "KTGamePloy_Read"
+      },
+      "KTGamePloy_Use": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "KTGamePloy_Use"
+      },
+      "KTGameRule_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "KTGameRule_Read"
+      },
+      "KTGameWeapon_Read": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "range": {
+            "type": "integer",
+            "title": "Range"
+          },
+          "attacks": {
+            "type": "integer",
+            "title": "Attacks"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "normal_damage": {
+            "type": "integer",
+            "title": "Normal Damage"
+          },
+          "crit_damage": {
+            "type": "integer",
+            "title": "Crit Damage"
+          },
+          "weapon_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Weapon Rules",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "range",
+          "attacks",
+          "hit",
+          "normal_damage",
+          "crit_damage"
+        ],
+        "title": "KTGameWeapon_Read"
+      },
+      "KTGame_Create": {
+        "properties": {
+          "roster_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Roster Id"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "roster_id"
+        ],
+        "title": "KTGame_Create"
+      },
+      "KTGame_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "victory_points": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Victory Points",
+            "default": {}
+          },
+          "opponent_victory_points": {
+            "type": "integer",
+            "title": "Opponent Victory Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "opponent_name",
+          "status",
+          "turning_point",
+          "phase",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name",
+          "opponent_victory_points"
+        ],
+        "title": "KTGame_ListRead",
+        "description": "A row of the game listing: enough to choose one, and none of the bundle.\n\nCarries the score, because \"which game was that?\" is answered by who and how it\nwent. Deliberately NOT the operatives: a game stores the roster detail's 24-42 KB\nas JSON (#52), so a page of fifty would be megabytes.\n\nNames the kill team and its faction for the same reason `KTRoster_ListRead` does --\na deliberate exception to #46, since a player's own game list should not require\nfetching the catalog to render \"Raveners, Tyranids\"."
+      },
+      "KTGame_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "roster_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Roster Id"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "turning_point": {
+            "type": "integer",
+            "title": "Turning Point"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "initiative": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initiative"
+          },
+          "command_points": {
+            "type": "integer",
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Victory Points",
+            "default": {}
+          },
+          "opponent_victory_points": {
+            "type": "integer",
+            "title": "Opponent Victory Points"
+          },
+          "markers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Markers",
+            "default": []
+          },
+          "ploys_used": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ploys Used",
+            "default": []
+          },
+          "choices": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Choices",
+            "default": {}
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "equipment_limit": {
+            "type": "integer",
+            "title": "Equipment Limit",
+            "default": 4
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTGamePloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/KTGameEvent_Read"
+            },
+            "type": "array",
+            "title": "Events",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "roster_id",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name",
+          "opponent_name",
+          "status",
+          "turning_point",
+          "phase",
+          "initiative",
+          "command_points",
+          "opponent_victory_points",
+          "version"
+        ],
+        "title": "KTGame_Read",
+        "description": "A battle whole \u2014 everything the screen needs, and no catalog call (#24)."
+      },
+      "KTGame_Update": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "opponent_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "initiative": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initiative"
+          },
+          "command_points": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Victory Points"
+          },
+          "opponent_victory_points": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Victory Points"
+          },
+          "markers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markers"
+          },
+          "ploys_used": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ploys Used"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTGame_Update"
+      },
+      "KTOperative_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "apl": {
+            "type": "integer",
+            "title": "Apl"
+          },
+          "move": {
+            "type": "integer",
+            "title": "Move"
+          },
+          "save": {
+            "type": "integer",
+            "title": "Save"
+          },
+          "wounds": {
+            "type": "integer",
+            "title": "Wounds"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "weapons": {
+            "items": {
+              "$ref": "#/components/schemas/KTWeapon_Read"
+            },
+            "type": "array",
+            "title": "Weapons",
+            "default": []
+          },
+          "abilities": {
+            "items": {
+              "$ref": "#/components/schemas/KTAbility_Read"
+            },
+            "type": "array",
+            "title": "Abilities",
+            "default": []
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "apl",
+          "move",
+          "save",
+          "wounds",
+          "keywords",
+          "availability",
+          "position",
+          "kill_team_id"
+        ],
+        "title": "KTOperative_ListRead",
+        "description": "The flat form (`GET /operatives`), which carries the team it belongs to.\n\nThe nested form inside a team detail can omit it, because its parent supplies it --\nthe same split the 40k catalog makes between `Subfaction_Read` and\n`Subfaction_ListRead`."
+      },
+      "KTOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "apl": {
+            "type": "integer",
+            "title": "Apl"
+          },
+          "move": {
+            "type": "integer",
+            "title": "Move"
+          },
+          "save": {
+            "type": "integer",
+            "title": "Save"
+          },
+          "wounds": {
+            "type": "integer",
+            "title": "Wounds"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords"
+          },
+          "availability": {
+            "type": "string",
+            "title": "Availability"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "weapons": {
+            "items": {
+              "$ref": "#/components/schemas/KTWeapon_Read"
+            },
+            "type": "array",
+            "title": "Weapons",
+            "default": []
+          },
+          "abilities": {
+            "items": {
+              "$ref": "#/components/schemas/KTAbility_Read"
+            },
+            "type": "array",
+            "title": "Abilities",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "apl",
+          "move",
+          "save",
+          "wounds",
+          "keywords",
+          "availability",
+          "position"
+        ],
+        "title": "KTOperative_Read"
+      },
+      "KTPloy_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "cp_cost": {
+            "type": "integer",
+            "title": "Cp Cost"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "cp_cost",
+          "description",
+          "position"
+        ],
+        "title": "KTPloy_Read"
+      },
+      "KTRosterOperative_Create": {
+        "properties": {
+          "operative_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operative Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "operative_id"
+        ],
+        "title": "KTRosterOperative_Create"
+      },
+      "KTRosterOperative_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "operative": {
+            "$ref": "#/components/schemas/KTOperative_Read"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "operative"
+        ],
+        "title": "KTRosterOperative_Read",
+        "description": "One operative on the roster: the row's own id, its place, and the datacard.\n\nThe row id and not the operative's, because two rows may name the same operative\n(decision #50) \u2014 it is what `PATCH`/`DELETE` address."
+      },
+      "KTRosterOperative_Update": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "maximum": 2147483647.0,
+            "title": "Position"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "position"
+        ],
+        "title": "KTRosterOperative_Update"
+      },
+      "KTRoster_Create": {
+        "properties": {
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kill_team_id",
+          "name"
+        ],
+        "title": "KTRoster_Create"
+      },
+      "KTRoster_ListRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name"
+        ],
+        "title": "KTRoster_ListRead",
+        "description": "A row of the roster listing: enough to choose one, and nothing heavier.\n\nCarries the kill team's NAME and its faction's, which is a deliberate exception to\ndecision #46 (\"a read names a parent by id, never a copy of its name\"). #46 is\nabout the catalog, where a client holds the faction listing anyway; a player's own\nroster list should not require fetching the catalog to render \"Raveners, Tyranids\".\nDeliberately NOT the operatives: a detail read is 24-42 KB (#52), so a page of\nfifty would be megabytes to answer what the name already answers."
+      },
+      "KTRoster_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "kill_team_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "type": "string",
+            "title": "Kill Team Name"
+          },
+          "faction_name": {
+            "type": "string",
+            "title": "Faction Name"
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTRosterOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeamRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "universal_ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Universal Ploys",
+            "default": []
+          },
+          "universal_equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Universal Equipment",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "kill_team_id",
+          "kill_team_name",
+          "faction_name"
+        ],
+        "title": "KTRoster_Read",
+        "description": "A roster whole, as decision #52 specifies it.\n\nThe player's operatives with their datacards, then everything that applies while\nplaying them: the team's rules, its ploys, its equipment, and the two collections\nthat belong to no team. The equipment lists are the POOL a game chooses from \u2014 the\nchoice itself is per game (#17), so a roster holds no equipment of its own."
+      },
+      "KTRoster_Update": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTRoster_Update"
+      },
+      "KTSelectionRule_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "depth",
+          "kind",
+          "text"
+        ],
+        "title": "KTSelectionRule_Read",
+        "description": "One printed thing from the composition (decisions #44, #45).\n\nRead in `position` order, indenting by `depth`, and this is the page's\ncomposition section back. Nothing is derived from it: no budget, no cap, no\noperative resolved -- `text` is what the page said."
+      },
+      "KTWeapon_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "range": {
+            "type": "integer",
+            "title": "Range"
+          },
+          "attacks": {
+            "type": "integer",
+            "title": "Attacks"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "normal_damage": {
+            "type": "integer",
+            "title": "Normal Damage"
+          },
+          "crit_damage": {
+            "type": "integer",
+            "title": "Crit Damage"
+          },
+          "weapon_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Weapon Rules"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "category",
+          "range",
+          "attacks",
+          "hit",
+          "normal_damage",
+          "crit_damage",
+          "weapon_rules",
+          "position"
+        ],
+        "title": "KTWeapon_Read"
+      },
+      "KillTeamRule_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "group",
+          "position"
+        ],
+        "title": "KillTeamRule_Read"
+      },
+      "KillTeam_Detail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "faction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faction Id"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeamRule_Read"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          },
+          "operatives": {
+            "items": {
+              "$ref": "#/components/schemas/KTOperative_Read"
+            },
+            "type": "array",
+            "title": "Operatives",
+            "default": []
+          },
+          "selection_rules": {
+            "items": {
+              "$ref": "#/components/schemas/KTSelectionRule_Read"
+            },
+            "type": "array",
+            "title": "Selection Rules",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "faction_id"
+        ],
+        "title": "KillTeam_Detail",
+        "description": "A team whole: everything a reader of its page would see (decision #47).\n\nOne request rather than several, because operatives are reachable only nested and\na game snapshots the team's rules, its ploys and every datacard anyway (#24). Measured\nover the served responses: 16 KB to 46 KB, median 24 KB, each in nine queries flat."
+      },
+      "KillTeam_Read": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "faction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Faction Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "faction_id"
+        ],
+        "title": "KillTeam_Read"
       },
       "Page_Ability_Read_": {
         "properties": {
@@ -2809,6 +6142,161 @@
           "offset"
         ],
         "title": "Page[Faction_Read]"
+      },
+      "Page_KTFaction_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTFaction_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTFaction_Read]"
+      },
+      "Page_KTGame_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTGame_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTGame_ListRead]"
+      },
+      "Page_KTOperative_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTOperative_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTOperative_ListRead]"
+      },
+      "Page_KTRoster_ListRead_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KTRoster_ListRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KTRoster_ListRead]"
+      },
+      "Page_KillTeam_Read_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KillTeam_Read"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "Page[KillTeam_Read]"
       },
       "Page_Subfaction_ListRead_": {
         "properties": {
@@ -2938,6 +6426,7 @@
         "properties": {
           "username": {
             "type": "string",
+            "maxLength": 64,
             "minLength": 3,
             "title": "Username"
           },
@@ -2953,6 +6442,7 @@
             "title": "Password"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "username",
@@ -2997,9 +6487,12 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "faction_id",
@@ -3102,40 +6595,58 @@
           },
           "unit_name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Unit Name"
           },
           "movement": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Movement"
           },
           "toughness": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Toughness"
           },
           "armor_save": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Armor Save"
           },
           "wounds": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Wounds"
           },
           "leadership": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Leadership"
           },
           "objective_control": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Objective Control"
           },
           "points": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Points"
           },
           "invulnerable_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3170,6 +6681,7 @@
             "title": "Keywords"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "faction_id",
@@ -3298,7 +6810,9 @@
           "unit_name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3333,7 +6847,9 @@
           "movement": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3344,7 +6860,9 @@
           "toughness": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3355,7 +6873,9 @@
           "armor_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3366,7 +6886,9 @@
           "wounds": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3377,7 +6899,9 @@
           "invulnerable_save": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3388,7 +6912,9 @@
           "leadership": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3399,7 +6925,9 @@
           "objective_control": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3410,7 +6938,9 @@
           "points": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3433,8 +6963,32 @@
             "title": "Keywords"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "Unit_Update"
+      },
+      "Universal_Read": {
+        "properties": {
+          "ploys": {
+            "items": {
+              "$ref": "#/components/schemas/KTPloy_Read"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment": {
+            "items": {
+              "$ref": "#/components/schemas/KTEquipment_Read"
+            },
+            "type": "array",
+            "title": "Equipment",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Universal_Read",
+        "description": "The rows that belong to no kill team: `kill_team_id IS NULL` (decision #48).\n\nOne route for both, because they are one concept and one thing a client wants --\nfetched once, kept for the session, used with every team. Folding them into each\nteam detail instead would add 8 KB to every response and re-send it on every team\nview, to save a call that happens once per GAME."
       },
       "UserUnit_Read": {
         "properties": {
@@ -3589,6 +7143,7 @@
             "title": "Weapon Id"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "weapon_id"
@@ -3599,36 +7154,52 @@
         "properties": {
           "name": {
             "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Name"
           },
           "category": {
             "type": "string",
+            "maxLength": 8,
+            "minLength": 1,
             "title": "Category"
           },
           "attacks": {
             "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
             "title": "Attacks"
           },
           "weapon_skill": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Weapon Skill"
           },
           "strength": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Strength"
           },
           "armor_piercing": {
             "type": "integer",
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
             "title": "Armor Piercing"
           },
           "damage": {
             "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
             "title": "Damage"
           },
           "range_inches": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3651,6 +7222,7 @@
             "title": "Keywords"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -3737,7 +7309,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3748,7 +7322,9 @@
           "category": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 8,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3759,7 +7335,9 @@
           "attacks": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 16,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3770,7 +7348,9 @@
           "weapon_skill": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3781,7 +7361,9 @@
           "strength": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3792,7 +7374,9 @@
           "armor_piercing": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3803,7 +7387,9 @@
           "damage": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 16,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -3814,7 +7400,9 @@
           "range_inches": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -3837,6 +7425,7 @@
             "title": "Keywords"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "Weapon_Update"
       }

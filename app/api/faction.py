@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import SQLModel
 
 from app.api.deps import get_current_admin
+from app.api.fields import DiceValue, Name, Stat, WeaponCategory, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Ability_Read, Weapon_Read, get_unit_service
 from app.core.db.models import FACTION_SUBFACTIONS, FactionName
@@ -37,49 +38,49 @@ class Faction_Read(SQLModel):
     subfactions: list[Subfaction_Read] = []
 
 
-class Faction_Create(SQLModel):
+class Faction_Create(WriteSchema):
     # Restricted to the canonical faction list: an unknown value (e.g. a
     # misspelling) is rejected with 422, and the allowed set is published in the
     # OpenAPI schema (so a frontend can render a dropdown).
     name: FactionName
 
 
-class Subfaction_Create(SQLModel):
+class Subfaction_Create(WriteSchema):
     faction_id: UUID
-    name: str
+    name: Name
 
 
-class Weapon_Create(SQLModel):
-    name: str
-    category: str
-    attacks: str
-    weapon_skill: int
-    strength: int
-    armor_piercing: int
-    damage: str
-    range_inches: int | None = None
+class Weapon_Create(WriteSchema):
+    name: Name
+    category: WeaponCategory
+    attacks: DiceValue
+    weapon_skill: Stat
+    strength: Stat
+    armor_piercing: Stat
+    damage: DiceValue
+    range_inches: Stat | None = None
     keywords: list[str] | None = None
 
 
-class Ability_Create(SQLModel):
-    name: str
+class Ability_Create(WriteSchema):
+    name: Name
     description: str
 
 
-class Weapon_Update(SQLModel):
-    name: str | None = None
-    category: str | None = None
-    attacks: str | None = None
-    weapon_skill: int | None = None
-    strength: int | None = None
-    armor_piercing: int | None = None
-    damage: str | None = None
-    range_inches: int | None = None
+class Weapon_Update(WriteSchema):
+    name: Name | None = None
+    category: WeaponCategory | None = None
+    attacks: DiceValue | None = None
+    weapon_skill: Stat | None = None
+    strength: Stat | None = None
+    armor_piercing: Stat | None = None
+    damage: DiceValue | None = None
+    range_inches: Stat | None = None
     keywords: list[str] | None = None
 
 
-class Ability_Update(SQLModel):
-    name: str | None = None
+class Ability_Update(WriteSchema):
+    name: Name | None = None
     description: str | None = None
 
 

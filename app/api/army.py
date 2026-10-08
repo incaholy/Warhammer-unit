@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlmodel import Field, Session, SQLModel
 
 from app.api.deps import get_current_user
+from app.api.fields import INT32_MAX, Name, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.api.unit import Unit_Read
 from app.core.db.connection import get_session
@@ -39,29 +40,33 @@ class Army_Read(SQLModel):
     units: list[ArmyUnit_Read] = []
 
 
-class Army_Create(SQLModel):
-    name: str
+class Army_Create(WriteSchema):
+    name: Name
     faction_id: UUID
     subfaction_id: UUID | None = None
     description: str | None = None
-    points_limit: int | None = None
+    # `ge=0` is new: nothing above the database bounded this, so a negative limit reached
+    # `ck_army_points_limit_non_negative` and surfaced as a 409 -- bad input reported as a
+    # conflict with another resource.
+    points_limit: int | None = Field(default=None, ge=0, le=INT32_MAX)
 
 
-class Army_Update(SQLModel):
-    name: str | None = None
+class Army_Update(WriteSchema):
+    name: Name | None = None
     faction_id: UUID | None = None
     subfaction_id: UUID | None = None
     description: str | None = None
-    points_limit: int | None = None
+    points_limit: int | None = Field(default=None, ge=0, le=INT32_MAX)
 
 
-class ArmyUnitAdd(SQLModel):
+class ArmyUnitAdd(WriteSchema):
     unit_id: UUID
-    amount: int = Field(default=1, ge=1)
+    amount: int = Field(default=1, ge=1, le=INT32_MAX)
 
 
-class AmountSet(SQLModel):
-    amount: int
+class AmountSet(WriteSchema):
+    # Top bound only: the service raises a 400 below 1, naming `remove_unit`.
+    amount: int = Field(le=INT32_MAX)
 
 
 class Shortfall_Read(SQLModel):

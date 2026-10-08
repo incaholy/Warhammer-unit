@@ -1,0 +1,178 @@
+<!--
+  Synthetic fixture reproducing Wahapedia's kill team datacard DOM for the parser
+  test — NOT scraped content (invented operative, weapon and keyword names). The
+  STRUCTURE is real: one `div.dsOuterFrame` per operative, the name in
+  `h3.pTable_h3`, each stat in a labelled `td.pCell` holding a `div.dsStat`, weapons
+  in a `table.wTable` where the name row's first cell carries `wsDataRanged` or
+  `wsDataMelee`, and the keyword strip in `table.dsKeywords` with the base size
+  trailing the last keyword.
+
+  Deliberately included: a multi-word keyword, a ranged weapon with a printed
+  `Range x` rule, a ranged weapon WITHOUT one, a melee weapon with no rules at all,
+  and a second operative so a parser cannot pass by reading only the first frame.
+-->
+<html><body><div id="wahMainContent">
+
+<div class="pagebreak"><div class="dsOuterFrame"><div class="dsName_Profile"><div>
+  <table><tr class="pHeaderRow">
+    <td class="pDisplayHeaderCell"><div class="dsUnitHeader">
+      <h3 class="pTable_h3"><div>Hollow Sentinel Warden</div></h3>
+      <p class="ShowFluff legend2">Flavour text the parser ignores.</p>
+    </div></td>
+    <td class="pCell">APL<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsAPL.png"/>3</div></td>
+    <td class="pCell">MOVE<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsMove.png"/>7"</div></td>
+    <td class="pCell">SAVE<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsSave.png"/>5<span class="dsPlus">+</span></div></td>
+    <td class="pCell pCellRightmost">WOUNDS<div class="dsStat"><img class="dsStatImg" src="/kill-team3/img/dsWounds.png"/>19</div></td>
+  </tr></table>
+
+  <table class="wTable">
+    <tr class="wTable1"><td></td><td class="wTable_WEAPON"><div class="wTable1">NAME</div></td>
+      <td><div class="ct wTable1">ATK</div></td><td><div class="ct wTable1">HIT</div></td>
+      <td><div class="ct wTable1">DMG</div></td><td><div class="wTable1">WR</div></td></tr>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataRanged"></td><td class="pad2626" colspan="6"><span>Ash lash</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataRanged"></td>
+        <td class="pad2626"><span>Ash lash</span></td><td class="ct pad2626">4</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">3/4</td>
+        <td class="wTable1_short pad2626"><span class="tt kwbu">Range</span> <span class="tt kwbu">3"</span>, <span class="tt kwbu">Silent</span></td></tr>
+    </tbody>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataRanged"></td><td class="pad2626" colspan="6"><span>Cinder bolt</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataRanged"></td>
+        <td class="pad2626"><span>Cinder bolt</span></td><td class="ct pad2626">4</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">3/5</td>
+        <td class="wTable1_short pad2626"><span class="tt kwbu">Piercing</span> <span class="tt kwbu">1</span></td></tr>
+    </tbody>
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataMelee"></td><td class="pad2626" colspan="6"><span>Rusted glaive</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataMelee"></td>
+        <td class="pad2626"><span>Rusted glaive</span></td><td class="ct pad2626">5</td><td class="ct pad2626">3+</td>
+        <td class="ct pad2626">4/5</td><td class="wTable1_short pad2626"></td></tr>
+    </tbody>
+  </table>
+
+  <!-- Abilities and unique actions share one block. An ability is named by a
+       `redfont` span; an action is a `stratWrapper` with its AP in the heading. The
+       action is wrapped in an OUTER BreakInsideAvoid as the real page does, so a
+       parser selecting on that class alone returns it twice. -->
+  <div class="wtOuterFrame Columns2">
+    <div class="BreakInsideAvoid">
+      <span class="redfont">Warden's Vigil</span>: Whenever this operative is activated, it may do the thing.
+    </div>
+    <div class="BreakInsideAvoid">
+      <div class="stratWrapper BreakInsideAvoid">
+        <h3 class="h_actions_ds">EMBER STRIKE<span>1AP</span></h3>
+        <!-- Effect then conditions, as the page prints them. Reading only the effect
+             dropped every "cannot perform this while ..." clause. -->
+        <div>
+          <div class="actionEffect">Select one enemy operative within 2" and inflict D3 damage.</div>
+          <div class="actionConditions">This operative cannot perform this action while within Engagement Range of an enemy operative.</div>
+        </div>
+      </div>
+      <!-- Pathfinders' pages wrap an action's body in a plain <div> with no class, so a
+           parser keying on `actionEffect` kept only the AP cost. The text also carries
+           the site's escaped `<KY>` keyword markers, as 14 real rows do. -->
+      <div class="stratWrapper BreakInsideAvoid">
+        <h3 class="h_actions_ds">EMBER BEACON<span>1AP</span></h3>
+        <div>Place one &lt;KY&gt;EMBER&lt;/KY&gt; marker within 3" of this operative.</div>
+      </div>
+    </div>
+  </div>
+
+  <table class="dsKeywords"><tr><td>
+    <span class="tt kwbu">SENTINEL</span>, <span class="tt kwbu">HOLLOW</span> <span class="tt kwbu">VIGIL</span>,
+    <span class="tt kwbu">WARDEN</span> <span class="dsModelBase2">&#8960;40mm</span>
+  </td></tr></table>
+</div></div></div></div>
+
+<div class="pagebreak"><div class="dsOuterFrame"><div class="dsName_Profile"><div>
+  <table><tr class="pHeaderRow">
+    <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Sentinel</div></h3></div></td>
+    <!-- Deliberately out of the usual order: a parser reading stats by COLUMN
+         would return these swapped, and every value here is distinct so it shows. -->
+    <td class="pCell">WOUNDS<div class="dsStat">12</div></td>
+    <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+    <td class="pCell">MOVE<div class="dsStat">6"</div></td>
+    <td class="pCell pCellRightmost">APL<div class="dsStat">2</div></td>
+  </tr></table>
+  <table class="wTable">
+    <tbody class="bkg">
+      <tr class="wTable2_long"><td class="wsDataMelee"></td><td class="pad2626" colspan="6"><span>Bone shard</span></td></tr>
+      <tr class=""><td class="wTable2_long"></td><td class="wTable2_short wsDataMelee"></td>
+        <td class="pad2626"><span>Bone shard</span></td><td class="ct pad2626">4</td><td class="ct pad2626">4+</td>
+        <td class="ct pad2626">2/3</td><td class="wTable1_short pad2626"></td></tr>
+    </tbody>
+  </table>
+  <table class="dsKeywords"><tr><td>
+    <span class="tt kwbu">SENTINEL</span>, <span class="tt kwbu">HOLLOW</span> <span class="tt kwbu">VIGIL</span> <span class="dsModelBase2">&#8960;32mm</span>
+  </td></tr></table>
+</div></div></div></div>
+
+<!-- Team-level sections. Each is introduced by an h2.outline_header2, prints a
+     ShowFluff paragraph of flavour beside the rules, and nests its blocks. A faction
+     rule is headed by a BARE h3; an action printed inside one keeps its own classed
+     heading and belongs to the rule. Ploys and equipment share the stratWrapper
+     shape, told apart by the stratName variant. -->
+
+<!-- Two teams print what they CHOOSE in sections of their own (Blades of Khaine's
+     Aspect Techniques, Exodite Dragon Masters' Upgrades): named blocks with no CP cost,
+     under their own h2, named by `div.stratName stratStrategicAsset` rather than a bare
+     h3. The heading is the group. -->
+<h2 class="outline_header2">Warden Ember Techniques</h2>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratName stratStrategicAsset">THE RISING EMBER</div>
+  <p class="ShowFluff legend2">Flavour the tracker never shows.</p>
+  <div>Whenever this operative fights, its first attack is critical.</div>
+</div>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratName stratStrategicAsset">ASH ON THE WIND</div>
+  <div>This operative can move through terrain once per turning point.</div>
+</div>
+
+<h2 class="outline_header2">Faction Rules</h2>
+<div class="Columns2"><div class="BreakInsideAvoid">
+  <h3>Ember Tide</h3>
+  <p class="ShowFluff legend2">Flavour prose the tracker never shows.</p>
+  <div>At the end of the Set Up Operatives step, place one Ember marker.</div>
+  <div class="stratWrapper BreakInsideAvoid"><div class="BreakInsideAvoid Corner24"><div class="Corner24_in">
+    <h3 class="h_actions">STOKE<span>1AP</span></h3>
+    <div class="actionEffect">Move the Ember marker up to 3".</div>
+  </div></div></div>
+</div></div>
+<div class="BreakInsideAvoid">
+  <h3>Hollow Resolve</h3>
+  <p class="ShowFluff legend2">More flavour.</p>
+  <div>Friendly operatives ignore the first point of damage each turning point.</div>
+</div>
+
+<h2 class="outline_header2">Strategy Ploys</h2>
+<div class="Columns2"><div class="stratWrapper BreakInsideAvoid">
+  <div class="stratStrategicPloy_wrap"><div class="stratName stratStrategicPloy"><span>ASHEN ADVANCE</span></div></div>
+  <p class="ShowFluff stratLegend2">Flavour beside a ploy.</p>
+  <div>Friendly operatives may move an extra 1" this turning point.</div>
+</div></div>
+
+<h2 class="outline_header2">Firefight Ploys</h2>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratTacticalPloy_wrap"><div class="stratName stratTacticalPloy"><span>EMBER GUARD</span></div></div>
+  <p class="ShowFluff stratLegend2">Flavour beside a ploy.</p>
+  <div>Improve one friendly operative's Save by 1 for this activation.</div>
+</div>
+
+<h2 class="outline_header2">Faction Equipment</h2>
+<div class="stratWrapper BreakInsideAvoid">
+  <div class="stratEquipment_wrap"><div class="stratName stratEquipment"><span>Cinder Charm</span></div></div>
+  <div>The bearer may re-roll one defence die.</div>
+</div>
+
+<!-- Hidden tooltip templates: the site keeps a COPY of some content here to fill
+     hover popups. Novitiates' real page repeats two firefight ploys this way, which
+     read as duplicates and would break UNIQUE(kill_team_id, name) at seed time. -->
+<div class="tooltip_templates">
+  <span><div class="stratWrapper BreakInsideAvoid">
+    <div class="stratTacticalPloy_wrap"><div class="stratName stratTacticalPloy"><span>EMBER GUARD</span></div></div>
+    <div>Improve one friendly operative's Save by 1 for this activation.</div>
+  </div></span>
+</div>
+
+</div></body></html>

@@ -276,7 +276,11 @@ Authenticate GitHub Actions with **Workload Identity Federation**, not a downloa
 
 A service account key in a GitHub secret is a credential that never expires and cannot be scoped to a branch. WIF trades it for a short-lived token issued only to your repo.
 
-> This repo currently has **no CI at all** (see [`CODE-REVIEW.md`](CODE-REVIEW.md)). Add the test job first and get it green before wiring deployment to it. Automated shipping without automated checking is worse than manual shipping.
+> ~~This repo currently has **no CI at all** (see [`CODE-REVIEW.md`](CODE-REVIEW.md)).~~
+> **False as of 2026-09:** `.github/workflows/ci.yml` runs ruff check and format, import
+> contracts, an `openapi.json` freshness gate, the SQLite suite, and a Postgres parity
+> job doing `alembic upgrade head && alembic check`. The `CODE-REVIEW.md` claim cited
+> here was already stale when it was cited — that file now carries a snapshot warning. Add the test job first and get it green before wiring deployment to it. Automated shipping without automated checking is worse than manual shipping.
 
 **Read for this stage** (the most important reading in the document)
 
@@ -295,7 +299,7 @@ Right now, if the deployed app misbehaves, you have no way to find out why. Thre
 
 ### Structured logs with a request ID
 
-The app configures **no logging at all** today. In production you want JSON log lines (Cloud Logging parses them into queryable fields) and a **request ID on every line**, generated at the edge and returned in a response header.
+**✅ Already built.** `app/observability.py`'s `configure_logging()` installs a JSON formatter (one object per line) on the `app` logger with a `LOG_LEVEL` knob, called from `app/main.py`. Original reasoning kept below. ~~The app configures no logging at all today.~~ In production you want JSON log lines (Cloud Logging parses them into queryable fields) and a **request ID on every line**, generated at the edge and returned in a response header.
 
 Why the request ID matters: a user says "it broke around 2pm." Without correlation you are grepping timestamps. With it, they quote the ID from the error, and you get every log line for exactly that request.
 
@@ -303,7 +307,7 @@ Attention's API contract already specifies exactly this (a `trace_id` in every r
 
 ### Error tracking
 
-`sentry-sdk==2.51.0` is **already in `requirements.txt` and never imported**. You have the tool and it is not plugged in. Three lines in `main.py` and unhandled exceptions arrive with a stack trace, the request path, and the user, instead of vanishing into a 500.
+**✅ Already built.** `init_sentry()` in `app/observability.py` is DSN-gated and tags every event with the request id. ~~`sentry-sdk==2.51.0` is already in `requirements.txt` and never imported.~~ You have the tool and it is not plugged in. Three lines in `main.py` and unhandled exceptions arrive with a stack trace, the request path, and the user, instead of vanishing into a 500.
 
 Note the interaction with [`CODE-REVIEW.md`](CODE-REVIEW.md) finding 2: the catch-all `ValueError`/`TypeError` handlers turn real bugs into 400s. Error tracking will not report them, because as far as the app is concerned nothing failed. **Fix that finding first, or you will wire up monitoring that reports nothing.**
 

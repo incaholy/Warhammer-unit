@@ -57,7 +57,7 @@ admin-curated.
 ## Feature checklist
 
 ### Built ✅
-- [x] Schema (11 tables) + Alembic migrations
+- [x] Schema (26 tables: 11 for the 40k builder, 15 `kt_*` for Kill Team) + Alembic migrations
 - [x] Auth: register, login, JWT (`SECRET_KEY`, HS256), `GET /me`
 - [x] Own-data routing (`/me/*`) — identity from token, not path
 - [x] Army ownership check (`get_owned_army`) — stranger's `army_id` → 404
@@ -76,7 +76,7 @@ admin-curated.
 - [x] Typed service errors (`NotFoundError` 404 / `ConflictError` 409 / `*ValidationError` 400 with `field`)
 - [x] Containerization: `Dockerfile` (non-root user) + `docker-compose` (API + Postgres), migrations on start
 - [x] CORS (env `ALLOWED_ORIGINS`), first-admin helper (`make create-admin`), seed script (`make seed`)
-- [x] Test suite (202 tests) + Makefile + `.env.example`
+- [x] Test suite (689 tests) + Makefile + `.env.example`
 - [x] Quality pass: whole-roadmap review + Improvements (should-fix / robustness / consistency / coverage) — see SPEC.md "Improvements"
 
 ### To build 🔨 (backlog)
@@ -123,10 +123,10 @@ None started yet.
 - [ ] **M5**: wire the installed `sentry-sdk` + basic logging + sanitized catch-all 500 handler (top ops gap). (S/M)
 
 ### Tier 3 — Small hardening wins ⚙️
-- [ ] **M3**: `Register_Create.email` → `EmailStr` (`email-validator` already installed). (S)
+- [x] **M3**: `Register_Create.email` → `EmailStr` — *done* (`app/api/auth.py`).
 - [ ] **M4**: replace `passlib` with direct `bcrypt` (unblock Python 3.13, drop the `crypt` `DeprecationWarning`). (S/M)
 - [ ] **L2**: scraper "fail loud" — validate assembled JSON against the seed schema before writing. (S/M)
-- [ ] **L7**: last-admin-lockout guard in `set_admin`. (S)
+- [x] **L7**: last-admin-lockout guard in `set_admin` — *done* (`service_user.py`, with a test).
 - [ ] **L3**: deep readiness probe (`/health/ready` runs `SELECT 1`). (S)
 
 ### Tier 4 — Deferred / deploy-time / cleanup
@@ -137,7 +137,8 @@ None started yet.
 ## Out of scope (not MVP)
 - Datasheet **versioning** ("stats as of when I added it").
 - **Wargear/loadout** modelling and points that scale with model count.
-- List **sharing/export**, game/match tracking, multiplayer.
+- List **sharing/export** and multiplayer. (Game tracking is NO LONGER out of scope:
+  the Kill Team half ships a full turn-by-turn tracker — see KILLTEAM.md and ROADMAP K5.)
 - **Validation Tier 3** (per-datasheet count limits) and **Tier 4** (detachments /
   force-org) — deferred; not yet needed. (Plans remain in SPEC.md's `validate`
   discussion if revived.)

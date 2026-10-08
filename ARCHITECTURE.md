@@ -1,6 +1,6 @@
 # Architecture: Warhammer Unit
 
-The target architecture for `Warhammer-unit` (FastAPI backend) and `warhammer_unit_web` (React
+The target architecture for `Warhammer-unit` (FastAPI backend) and `warhammer_web` (React
 frontend). This document is **normative**: it states how the system is meant to be built and why,
 not how it happens to be built today. [`ROADMAP.md`](ROADMAP.md) carries the delta between the two.
 
@@ -62,7 +62,7 @@ you add a second entry point (a CLI, a scheduled job, a queue consumer), busines
   `lint-imports` alongside `pytest`: a `layers` contract (`app.api` > `app.core.services` >
   `app.core.db`, so a lower layer may not import a higher one) and a `forbidden` contract
   (`app.core` may not import `fastapi` or `starlette`, directly or transitively). A service that
-  imports from `app/api/` tomorrow fails the build rather than passing 245 green tests.
+  imports from `app/api/` tomorrow fails the build rather than passing 689 green tests.
 - **The one real violation is split.** `app/core/security.py` kept the domain half (hashing, token
   encode and decode) and `app/api/deps.py` took the transport half (`get_current_user` /
   `get_current_admin`, turning a decode failure into a 401 with a `WWW-Authenticate` header).
@@ -76,10 +76,10 @@ Two details worth keeping deliberately:
   incrementally instead of as one breaking change, and it is better factored than the reference's
   *service* errors, which hardcode a status code per class. The second base, `CodedError`, is a
   marker that carries no behaviour and exists so the API layer registers one handler for the family
-  rather than a per-class tuple a new error can fall off. Scope that credit,
-  though: the reference's *API* layer has something this codebase does not, a central `ErrorCode`
+  rather than a per-class tuple a new error can fall off.
+  The reference's *API* layer pairs it with a central `ErrorCode`
   enum plus a code-to-status lookup table so the two can never disagree
-  (`attention-api/app/api/errors.py`). That is the piece §2.2 asks you to build, and it is worth
+  (`attention-api/app/api/errors.py`). This codebase has both now — `app/core/errors.py` and `app/api/errors.py`, which §2.2 records as done — and the pattern is worth
   reading first.
 - **Object-level authorization returns 404, not 403**, when a resource is not the caller's
   (`get_owned_army`, `app/api/army.py:91`). That hides whether the id exists at all. The vulnerability
@@ -151,7 +151,7 @@ table gets linearly slower and can skip or repeat rows when data changes between
 keyset is stable but cannot jump to an arbitrary page. For a mostly-static catalog, offset is
 defensible. Decide once, write it down, apply everywhere.
 
-**Status: ✅ Done (R4).** All three rules hold. Every one of the seven collections returns
+**Status: ✅ Done (R4).** All three rules hold. Every one of the twelve collections returns
 `Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
 `app/api/pagination.py`, with a documented offset-based choice and a `limit` capped at 200. The total
 travels in the body and `X-Total-Count` is gone, which fixes SPEC.md BUG1 structurally rather than by
@@ -202,11 +202,14 @@ unhandled-exception handler still returns a sanitized body.
   exposes it, addressing entries as `/me/inventory/{unit_id}` instead. Exposing the surrogate would
   give clients two ways to name one thing.
 
-**Status: Partial.** The verb semantics, plural nouns, status codes, and the natural-key decision are
-right across the board, and the link endpoints are idempotent in practice
-(`UnitService.link_weapon` no-ops when the link exists). Three exceptions: the two quantity endpoints
-accumulate on `POST`, `GET /factions/taxonomy` is a static enum inside the faction id namespace, and
-CRUD coverage is uneven across the catalog resources. See
+**Status: ✅ Holds (R12).** The verb semantics, plural nouns, status codes, and the natural-key
+decision are right across the board, and the link endpoints are idempotent in practice
+(`UnitService.link_weapon` no-ops when the link exists). All three exceptions that kept this
+Partial are closed: the two quantity endpoints are **create-only** now, answering 409 when the
+row exists and taking an absolute amount through `PATCH`; the taxonomy route moved OUT of the
+faction id namespace to `GET /taxonomy`, deliberately, so it cannot collide with a future
+faction resource; and admin catalog CRUD is complete for units, weapons and abilities, with
+subfactions deletable. Factions stay create-and-list by decision, not by omission. See
 [ROADMAP R12](ROADMAP.md#r12-make-quantity-mutations-retry-safe-and-even-out-resource-semantics).
 
 ### 2.6 Response envelope
@@ -276,7 +279,7 @@ model/migration drift is caught in CI, not at deploy time. The fast SQLite tier 
 Two tiers, both of which are needed, because they prove different things.
 
 **Fast tier (default).** In-memory SQLite, one fresh schema per test, foreign keys enforced with
-`PRAGMA foreign_keys=ON`. Optimized for iteration: the current suite runs in about four seconds and
+`PRAGMA foreign_keys=ON`. Optimized for iteration: the current suite runs in about eleven seconds and
 needs no services. This is what runs on every keystroke and every push.
 
 **Parity tier.** Real Postgres, schema built by running the migrations. This is what proves the
@@ -321,7 +324,7 @@ remains the one open piece.
 **Status: Mostly done (R8, R10).** `openapi.json` is checked in and now **CI-verified fresh**; the
 frontend's types are **generated from it** (`npm run gen:api` → `src/api/schema.d.ts`, re-exported by
 `types.ts`), not hand-maintained; `docs/api/conventions.md` is the cross-repo contract; and `README.md`
-is a real front door (R10). One piece remains: `SPEC.md` is still an 89KB monolith — splitting it into
+is a real front door (R10). One piece remains: `SPEC.md` is still a 97KB monolith — splitting it into
 audience-scoped docs is the outstanding work. See
 [ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
 

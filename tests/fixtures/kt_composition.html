@@ -1,0 +1,157 @@
+<!--
+  Synthetic fixture for the composition parser — NOT scraped content (invented names).
+  It carries its own minimal datacards, because a composition entry is resolved against
+  them, plus the composition section itself.
+
+  Structure is real: each ul.redTriangle holds selection lists, each list's operatives sit
+  in a nested ul.redCircle2, and each operative's weapon variants in a further nested
+  ul.redCircle2 or ul.redEmptyCircle2 -- both of which the real pages use.
+  A restriction sentence is a loose text node after its list. There are THREE such trees --
+  the composition, and one per requisition group -- and three restriction sentences.
+
+  Deliberately included, in the composition: a line naming its own operative with no
+  entries (shape C), a numbered list (shape A), an operative repeated with two loadouts
+  (must collapse into ONE option), an entry whose leading count is models with "still
+  counts as one selection", an entry costing two selections, an "equipped with" phrasing,
+  a loadout line that must not be read as an operative, a `span.ast` marker inside a line
+  and a `<sup>` footnote reference inside a label (neither may reach the stored text), a
+  Corner25 callout that is a note of its own, and a nested list wrapped in a div so it is
+  neither a direct child of the ul nor a descendant of another line.
+
+  And in the "Hollow Requisition" section: one group whose ally is NOT a kill team, so its
+  entries resolve here and its sentence mints a cap; and one whose ally IS a kill team, so
+  nothing here may be resolved against it and its sentence caps a keyword no datacard on
+  this page carries -- which must be stored without minting a cap (decision #40).
+-->
+<html><body><div id="wahMainContent">
+
+<!-- datacards, trimmed to what resolution needs -->
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Warden</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">7"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">5<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">19</div></td>
+</tr></table>
+  <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span>, <span class="tt kwbu">WARDEN</span> <span class="dsModelBase2">&#8960;32mm</span></td></tr></table>
+  </div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Sentinel</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">2</div></td><td class="pCell">MOVE<div class="dsStat">6"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">12</div></td>
+</tr></table>
+  <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span>, <span class="tt kwbu">SENTINEL</span> <span class="dsModelBase2">&#8960;32mm</span></td></tr></table>
+  </div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Ember Wisp</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">2</div></td><td class="pCell">MOVE<div class="dsStat">8"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">5<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">7</div></td>
+</tr></table>
+  <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span>, <span class="tt kwbu">EMBER</span> <span class="dsModelBase2">&#8960;32mm</span></td></tr></table>
+  </div></div>
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>Hollow Ash Prophet</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">6"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">4<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">14</div></td>
+</tr></table>
+  <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span>, <span class="tt kwbu">PROPHET</span> <span class="dsModelBase2">&#8960;32mm</span></td></tr></table>
+  </div></div>
+
+<div class="dsOuterFrame"><div><table><tr class="pHeaderRow">
+  <td class="pDisplayHeaderCell"><div class="dsUnitHeader"><h3 class="pTable_h3"><div>XV9 Ember Suit</div></h3></div></td>
+  <td class="pCell">APL<div class="dsStat">3</div></td><td class="pCell">MOVE<div class="dsStat">7"</div></td>
+  <td class="pCell">SAVE<div class="dsStat">3<span class="dsPlus">+</span></div></td>
+  <td class="pCell pCellRightmost">WOUNDS<div class="dsStat">18</div></td>
+</tr></table>
+  <table class="dsKeywords"><tr><td><span class="tt kwbu">HOLLOW</span>, <span class="tt kwbu">EMBER</span>, <span class="tt kwbu">SUIT</span> <span class="dsModelBase2">&#8960;32mm</span></td></tr></table>
+  </div></div>
+
+<div class="BreakInsideAvoid">
+<h2>Operatives</h2>
+<ul class="redTriangle">
+  <li>1 <span class="kwb kwbo">HOLLOW WARDEN</span> operative</li>
+  <!-- A `span.ast` marker inside the line itself, as Death Korps print
+       "4 TROOPER operatives *". The `<sup>` form is on the nested list below. -->
+  <li>4 <span class="kwb">HOLLOW</span> operatives <span class="ast">*</span> selected from the following list:
+    <ul class="redCircle2">
+      <li><span class="kwb kwbo">SENTINEL</span> with ash lash and rusted glaive</li>
+      <li><span class="kwb kwbo">SENTINEL</span> with cinder bolt and rusted glaive</li>
+      <li>2 <span class="kwb kwbo">EMBER WISP</span> operatives (still counts as one selection)</li>
+      <li><span class="kwb kwbo">ASH PROPHET</span> (counts as two selections)</li>
+      <li><span class="kwb kwbo">WARDEN</span> equipped with one of the following options:
+        <!-- The two classes the real pages use for a loadout list: Kommandos print
+             "one of the following options:" with a redCircle2, Angel of Death print
+             "one option from each of the following:" with a redEmptyCircle2. -->
+        <ul class="redCircle2"><li>Ash lash; rusted glaive</li><li>Cinder bolt; rusted glaive</li></ul>
+        Or one option from each of the following:
+        <ul class="redEmptyCircle2"><li>Ember charm or ash token</li></ul>
+      </li>
+    </ul>
+  </li>
+  <li><span class="kwb kwbo">XV9 EMBER SUIT</span> operative</li>
+  <!-- A nested list, wrapped in a div inside the ul exactly as Hunter Clade prints it,
+       so it is neither a direct child of the ul nor a descendant of another line.
+       Folding its operatives into the line above would offer a one-operative team. -->
+  <div><ul class="redCircle2">
+    <!-- A `<sup>` footnote REFERENCE inside the label. Brood Brother print one, and it
+         rendered into the stored label as "… the following list 3 :". -->
+    <li>3 <span class="kwb">HOLLOW</span> operatives selected from the following list<sup>1</sup>:
+      <ul class="redCircle2">
+        <li><span class="kwb kwbo">ASH PROPHET</span></li>
+        <li><span class="kwb kwbo">EMBER WISP</span></li>
+        <!-- carries the SENTINEL keyword, which the restriction sentence exempts from
+             the "each operative once" rule -->
+        <li><span class="kwb kwbo">SENTINEL</span></li>
+      </ul>
+    </li>
+  </ul></div>
+</ul>
+Other than SENTINEL operatives, your kill team can only include each operative on this list once, and can only include up to one EMBER operative.
+<!-- Everything after a marker is that marker's note, and a Corner25 callout is a note of
+     its own. Kasrkin stored all three in one field: the clause, the footnote and a
+     glossary box. -->
+<span class="ast">*</span>
+You cannot select more than two of these operatives combined.
+<div class="Corner25">Designer's Note: the page prints this in a box beside the composition.</div>
+</div>
+
+<!-- A requisition section, as Inquisitorial Agent prints one: an h2 per ally, each with a
+     composition tree of the ordinary shape. "Ember Wardens" is not a kill team of its own,
+     so this page carries its datacards and its entries resolve here. "Ashen Choir" IS a kill
+     team, so its operatives live on its own page and nothing here may be resolved against
+     this one -- the resolver's looser rules would mis-assign them. -->
+<h2 class="outline_header2">Hollow Requisition</h2>
+
+<h2 class="outline_header2">Ember Wardens</h2>
+<div class="BreakInsideAvoid">
+<ul class="redTriangle"><li>3 EMBER WARDEN operatives selected from the following list:
+  <ul class="redCircle2">
+    <li><span class="kwb kwbo">ASH PROPHET</span></li>
+    <li><span class="kwb kwbo">EMBER WISP</span></li>
+  </ul>
+</li></ul>
+<!-- A group prints its own restriction sentence, exactly as the composition above does.
+     Five of Inquisitorial Agent's six groups print one and it was read nowhere. -->
+Other than PROPHET operatives, your kill team can only include each operative on this list once, and can only include up to two EMBER operatives.
+</div>
+
+<h2 class="outline_header2">Ashen Choir</h2>
+<div class="BreakInsideAvoid">
+<ul class="redTriangle"><li>5 ASHEN CHOIR operatives selected from the following list:
+  <ul class="redCircle2">
+    <li><span class="kwb kwbo">WARDEN</span></li>
+    <li><span class="kwb kwbo">SENTINEL</span></li>
+  </ul>
+</li></ul>
+<!-- This ally IS a kill team, so it caps a keyword no datacard on THIS page carries --
+     as Exaction Squad cap SUBDUCTOR on the Inquisitorial Agent page. Minting that cap
+     would trip the "matches no operative" check and lose the whole team, so the sentence
+     is stored and no cap row is made. The footnote still belongs to the team. -->
+Other than WARDEN operatives, your kill team can only include each operative on this list once, and can only include up to two CHOIRMASTER operatives.
+<span class="ast">*</span>
+These operatives count as half a selection each.
+</div>
+
+</div></body></html>

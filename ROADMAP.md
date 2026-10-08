@@ -526,3 +526,278 @@ worth its own change.
 
 **Deferred (by its own guidance).** Left as-is; fold into the next catalog-routes pass (R8 territory)
 rather than churning the route now.
+
+---
+
+# Kill Team
+
+The design lives in [KILLTEAM.md](KILLTEAM.md); this is the build order. Built as a
+thin slice: K1–K5 for one or two kill teams first, then K6 widens to the rest.
+Frontend views (warhammer_web) follow each step.
+
+Kill Team is kept separate from the 40k army list builder: `/kill-team` vs
+`/army-list` (see KILLTEAM.md → "Separation from the 40k army list builder").
+
+Models come first: the design has already been checked against a real team
+(Raveners), so the tables are known well enough to build, and the migration stays
+changeable until `fire-team` merges, since nothing is deployed against it.
+
+## K1. Catalog models
+
+**Status: ✅ Done.**
+
+The nine `kt_*` catalog tables from KILLTEAM.md and their migration, with test
+factories and model tests. Fifteen `kt_*` tables exist now: those nine, K4's two roster
+tables and K5's four game tables. Still treated as a draft: the migration has been
+regenerated repeatedly -- most recently for decision #54's owner column, K5's game
+tables, #64's roster-name unique and K7's `withdrawn` flag. The count is deliberately not
+stated: a regeneration REPLACES the file, so git cannot be asked for it and two audits
+disagreed (ten versus twenty-four). `alembic heads` is the answer. It stays regenerable
+until `fire-team` merges.
+
+## K2. Data pipeline
+
+**Status: ✅ Done.**
+
+Kill Team scraper and seed, same two-stage shape as the 40k pipeline, filling the K1
+tables — `make scrape-kt` (or `scrape-kt-fresh`) then `make seed-kt`. all 48 of the site's
+teams parse and seed. Composition is stored as the page's own words — 897
+`KTSelectionRule` rows, nothing derived (KILLTEAM.md decision #44) — which is why there
+is no longer a warning channel for it: the checks all read a structure that is gone.
+Tested against **synthetic** fixtures, so no scraped content is committed.
+
+## K3. Catalog routes
+
+**Status: ✅ Done.** Read-only routes under `/api/v1/kill-team`, over
+`KillTeamService`: public read and **no write route at all**, unlike the 40k catalog's
+admin write — an admin edit would be silently undone by the next `make seed-kt`
+(KILLTEAM.md decision #21). One assertion over the published OpenAPI document proves it
+(#49), so a route added later cannot slip a write past it.
+
+Six routes:
+
+| Route | Serves |
+|---|---|
+| `GET /kill-team/factions` | the 22 factions, paged |
+| `GET /kill-team/teams` | the 48 teams, paged, `?faction_id=` |
+| `GET /kill-team/teams/{id}` | one team whole — 16–46 KB, median 24, in nine queries flat |
+| `GET /kill-team/teams/{id}/composition` | its printed rules alone, unpaginated |
+| `GET /kill-team/operatives` | operatives across teams, paged, `?kill_team_id=` and `?keyword=` |
+| `GET /kill-team/universal` | the ploy and equipment list no team owns, unpaginated (#48) |
+
+A read names a parent by id and never copies its name (#46). The detail carries
+everything nested (#47), because operatives are reachable only that way — and no schema
+carries `created_at`/`updated_at` or a nested row's parent FK. `openapi.json` is checked
+in and CI fails if it drifts, so a route is not finished until `make openapi` has run.
+
+The last two answer what the nested form cannot. The keyword filter is
+`keywords @> '["LEADER"]'` against a GIN index on Postgres and a `json_each` scan on
+SQLite, so the default test tier exercises it too — the index is what decision #26 chose
+JSONB for.
+
+**Still deferred:** no reader for a single selection rule. A composition line has no
+identity a client would hold onto — it is one bullet of a page, and its id changes
+whenever the composition is replaced.
+
+## K4. Roster
+
+**Status: ✅ Done** — except that the seed's withdrawn-row question was deferred here
+and is not answered by it; it is K7 now, with a condition instead of a slice name. Kill
+team rosters under `/api/v1/me/kill-team/rosters`, mirroring `Army`.
+
+Audit finding 12 is fixed here: the five write routes take `get_owned_roster_shallow`,
+which answers "does the caller own this?" without loading the bundle, and only
+`GET /{id}` keeps the full read. Measured on a six-operative roster with a furnished
+team: a 204 DELETE went 13 → 6 queries, a one-row PATCH 14 → 8, an append 18 → 9, and
+the rename 30 → 17 (it had been loading the detail three times). `GET` is unchanged at
+13, which is the point. The shape came from K5's games router, which was built with it
+from the start. Eight routes: CRUD on a roster, then append, move and remove on the operatives
+in it. The catalog half of the API takes no writes at all (#21) and this is the half a
+player writes — one assertion over the published document holds that line now that both
+are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
+the listing carries a name, a kill team and a faction and the detail carries #52's
+whole bundle.
+A row's composite foreign key names its roster through `owner_user_id` as well as
+`kill_team_id` (#54), so neither a stranger's roster nor another team's operative is a
+state the table can hold — the ownership rule is the schema's, not just the router's.
+Equipment is **not** part of a roster — KILLTEAM.md decision #17 puts it on the game,
+since the rules pick it per battle. A roster offers **every operative of its kill team**
+and nothing narrows that: composition is the page's words shown beside the roster, never
+a rule the catalog applies (decisions #28, #44), which is what lets a custom game be
+built. So there is no `validate` and nothing to report — if legality checking is ever
+wanted it is a feature of its own, decided then, not a column inherited from the
+catalog.
+
+## K5. Game tracker
+
+**Status: ✅ Done.** Four tables, a service and fifteen routes under
+`/api/v1/me/kill-team/games`. The migration was regenerated again (one of
+several times since; `alembic heads` names the current one). Four decisions were settled while building it: **#60** deleting a
+roster a game was played from is refused (409), **#61** activation is stored as the
+turning point rather than a flag so `advance` clears nothing, **#62** `initiative` is
+nullable because a turning point before its roll-off holds nobody, and **#63**
+activating and transforming are their own routes rather than fields on a PATCH.
+
+The ownership dependency loads the game **shallow** rather than eager-loading decision
+#52's bundle to answer a yes/no. That was audit finding 12, which K5 did not inherit and
+which the rosters router has since been fixed to match — see K4.
+
+A latent bug shipped in K4 turned up here: `get_roster` returned a stale collection
+after a write in the same session. It never bit through the roster API, which does not
+read a detail back after touching a collection — the game router's shape does, on six
+routes. Both services now pass `populate_existing=True`.
+
+Games created from a roster: turning points, CP, VP, and each
+operative's wounds, order and activation, with undo. Each game copies the whole
+datacard it plays with (decision #22), so the screen can show what a unit can do beside
+what is true of it now, and a re-scrape cannot change a battle in progress. Also this
+battle's equipment, the actions each operative has used, and the operatives that
+equipment or a team rule adds or transforms mid-battle (KILLTEAM.md decisions #17–#24).
+The game screen doubles as the reference sheet: any operative opens to its full datacard,
+and the team's rules and ploys travel with the game, so a battle needs no catalog call.
+**Tac Ops do NOT land here** — decision #59 withdraws that. Neither they nor the
+archetypes that gate them are scraped (`archetype` appears 0 times in the payload, and
+the scraper fetches only the nav and the per-team pages, so the Tac Ops are on a page it
+has never visited). A Tac Op a player takes is a per-game pick in `KTGame.choices`,
+beside the Accursed Gift, which is #1's line: the tracker records that things exist and
+the players apply what they do.
+
+Three things the design left open are settled before the models:
+
+- **#57** — the equipment allowance is REPORTED, not enforced. A game read carries
+  `equipment_limit` (4) the way `Army_Read` carries `points_limit`, and the fifth piece
+  is accepted. Narrows #17. The per-team override the old deferral waited on does not
+  exist in the pages at all.
+- **#58** — an event's payload names the fields touched with their `before` and `after`,
+  and `undo` writes the `before` back, appends a compensating event and marks the
+  original `undone_by`. Field-scoped rather than whole-row: 40 bytes against 1,129 for a
+  datacard copy, on the most frequent event in a game.
+- **#59** — Tac Ops and archetypes are out of v1, as above.
+
+Two mechanisms here are new to this codebase, which is why K5 is larger than K4: the
+append-only event log with `undo` (#8), and `version` for optimistic concurrency with a
+stale write answering 409 (#9).
+
+One sizing note. A game's snapshot is the roster detail turned into stored JSON, and a
+roster detail measures 24–42 KB (#52), so each game carries roughly that much at rest,
+forever. So `GET /games` is lean the way `GET /rosters` is — 287 bytes a row — and the
+detail is the only route that carries the bundle.
+
+## K6. Widen to every kill team
+
+**Status: ✅ Done in substance.** All 48 teams parse and seed. The three pages that used
+to need a human decision needed it because the catalog was trying to structure their
+composition; storing the printed words instead (decision #44) removed the question rather
+than answering it — an entry the parser could not name is not a problem when no entry is
+named. Gellerpox Infected's equipment-conditional datacards still carry
+`availability = in_battle` (#20), which is the one thing in a composition that is still
+read structurally.
+
+Gellerpox's second block is read now — every top-level block under the Operatives
+heading is, so its condition and the three vermin it grants are stored as printed text
+with the condition between the two blocks.
+
+The word-splitting in `weapon_rules` is fixed: text is taken with the SOURCE's own
+spacing rather than joining inline elements with a space, which is what split
+`Conceal</span></span>ed Position` into "Conceal ed Position". 671 stored strings
+changed, none in any way but whitespace, and the distinct rule count fell from 103 to
+101 as the artefacts merged with their correct spellings.
+
+Two pairs are still spelled two ways, and neither is ours: `Torrent 0"` / `Torrent 0"*`,
+where the asterisk is a footnote marker 46 of the 101 rules carry, and
+`Heavy (Dash Only)` / `Heavy (Dash only)`, where the source itself disagrees about the
+capital. **Settled by decision #56: both are kept verbatim.** `#30` strips markers from
+composition bullets only because the note BODY is stored there as a row, which makes the
+marker redundant; a weapon rule's note body is not scraped at all, so the marker is the
+only surviving record that a footnote applies. Grouping two chips that differ by a marker
+is the frontend's call. Capturing the note bodies is a K7 item below, and keeping the
+marker is what leaves it possible.
+
+## K7. Withdrawn catalog rows
+
+**Status: ✅ Done.** The seed is an append-and-rewrite superset: outside
+the composition, a row the source REMOVED or RENAMED stays behind and nothing marks it
+stale, so a withdrawn ploy keeps being served and a renamed team leaves its old subtree
+beside the new one. The seed said so from the start and deferred the answer to K4; K4
+shipped without it, which is what this entry exists to stop happening twice.
+
+Decision #55: a `withdrawn` flag on every `kt_*` table the seed upserts, set when the
+source drops a row and cleared when it reappears. Catalog reads filter it out; a roster
+or game read still resolves it, so a datacard built last month still renders. Uniform
+across the tables rather than only the ones a roster points at today, because #25 made
+the same call for `position`; `KTSelectionRule` carries over as its exception, since a
+composition is replaced as a whole and so already loses what the source dropped.
+
+The sweep is scoped to the PARENTS the payload contains, so a partial scrape cannot
+mass-flag a catalog it simply did not mention.
+
+Built ahead of its condition (*before a client consumes the catalog as a picker*), which
+had not been reached — the frontend does not read the Kill Team API yet.
+
+Three decisions were settled while building it. **Where the filter lives:** in the catalog
+service's own queries, not on the relationships, because a roster read reaches the same
+rules, ploys and equipment through them and must not filter — so `get_kill_team` assembles
+the detail from one query per collection instead of `selectinload`. Still nine queries,
+which is what it promised before. **What a roster read shows:** everything it references,
+withdrawn or not; the catalog read is the picker and the roster read is "what I have".
+**What a write does:** a NEW pick of a withdrawn row is refused with a 404, while rows
+already on a roster or in a game are untouched — and `transform_operative` is deliberately
+not refused, since a model already on the table changing into something the catalog has
+since dropped is the case the flag exists to survive.
+
+Also here, and independent: capturing the footnote bodies a weapon rule's marker points
+at (#56), which is a scraper job across 48 pages rather than a schema one.
+
+## Condition-gated: a deep readiness probe
+
+**Status: Not needed yet. Build it when a load balancer or an orchestrator is put in
+front of this service.**
+
+`/health` today is a LIVENESS check and says so: it returns `{"status": "ok"}` without
+touching anything, so it answers "is this process serving HTTP?" and nothing more. That
+is the right answer to the right question, and it is the only question a platform can
+currently ask.
+
+The gap is readiness, which is a different question with the opposite remedy. Liveness
+failing means *restart the container*; readiness failing means *stop routing traffic
+here, do not restart* — because if the database is unreachable a fresh instance will be
+just as unable to serve. Nothing reads a readiness answer until something is deciding
+where to route, which is why this is gated rather than scheduled.
+
+What it would miss in the meantime, and the reason this is written down rather than
+dropped: the database is **Neon**, which suspends an idle compute instance. So a wrong
+DSN, a rotated password the environment did not learn about, or a suspended compute all
+produce the same shape —
+
+    GET /health                      -> 200 {"status": "ok"}     the platform is happy
+    GET /api/v1/kill-team/factions   -> 500                      every real request fails
+
+— and the platform keeps the instance in rotation, because the check it was given never
+looks at the database.
+
+**The condition:** before pointing Render's "Health Check Path" (DEPLOY.md) or a Cloud
+Run / Kubernetes probe (DEPLOY-GCP.md) at this service. Both are configured with a path
+today, and whichever path they get is the one that decides whether a broken instance
+keeps taking traffic.
+
+**What to build** (SPEC.md item L3, sized S): `GET /health/ready` running `SELECT 1`,
+200 when it succeeds and **503** when it does not — `Service Unavailable` is the status
+that means "try again elsewhere", where a 500 reads as a bug in the handler. `/health`
+stays exactly as it is, for liveness. Three details that matter more than the fifteen
+lines:
+
+- **Do not leak the reason.** `{"status": "unavailable"}`, never the driver's message —
+  a probe endpoint is usually unauthenticated, and the `IntegrityError` handler in
+  `app/main.py` already holds that line ("never the raw driver message, which can
+  expose column/constraint internals").
+- **Fail fast rather than hang.** A hung connection is the failure mode that matters; a
+  probe that blocks for thirty seconds is worse than one that answers 503 immediately.
+  `pool_pre_ping=True` is already set on the engine, which helps.
+- **Do not point liveness at it.** A readiness probe wired as a liveness probe turns a
+  database blip into a restart loop, which is the one outcome worse than no probe.
+
+Note what already deep-checks the database and why that is not a substitute:
+`docker-compose.yml` probes Postgres with `pg_isready` and the API waits on
+`condition: service_healthy`, and CI does the same with `--health-cmd pg_isready`. Both
+are startup checks against the SERVER. Only a probe inside the application can say that
+*this app's* credentials and connection pool still work.

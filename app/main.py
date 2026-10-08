@@ -17,12 +17,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.army import router as army_router
 from app.api.auth import router as auth_router
 from app.api.errors import CODE_STATUS
 from app.api.faction import router as faction_router
 from app.api.inventory import router as inventory_router
+from app.api.killteam import router as killteam_router
+from app.api.killteam_game import router as killteam_game_router
+from app.api.killteam_roster import router as killteam_roster_router
 from app.api.unit import router as unit_router
 from app.api.user import router as user_router
 from app.core.errors import CodedError, ErrorCode
@@ -161,6 +165,31 @@ def _integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
     )
 
 
+# Backstop for the optimistic-version race, the sibling of the one above. `KTGame`
+# maps `version` as SQLAlchemy's `version_id_col` (KILLTEAM.md decision #9), so every
+# UPDATE of a game row carries `WHERE version = <the value the writer read>`. A writer
+# whose row has moved on matches zero rows, and SQLAlchemy raises `StaleDataError`.
+#
+# Handled here rather than converted in the service for the same reason `IntegrityError`
+# is: it surfaces at FLUSH, which can be the service's own flush or an autoflush from
+# any query that follows the write, so there is no single service-level statement to
+# wrap. One handler covers every write path, including ones added later.
+#
+# The service's own `expected_version` check still runs first and still produces the
+# more specific message naming both versions; this catches the genuine race that a
+# Python-level comparison cannot, and the write a caller sent with no version at all.
+@app.exception_handler(StaleDataError)
+def _stale_data_error(request: Request, exc: StaleDataError) -> JSONResponse:
+    logger.info("stale write on %s %s", request.method, request.url.path)
+    return _error_response(
+        request,
+        status=CODE_STATUS[ErrorCode.CONFLICT],
+        detail="this game has moved on since it was read — read it again and retry",
+        code=ErrorCode.CONFLICT,
+        field="version",
+    )
+
+
 # Catch-all for anything not handled above — an unexpected server fault. Log the
 # full traceback for diagnosis, but return a generic body so no internal detail
 # (stack frames, values, library messages) ever reaches the client. Deliberately
@@ -201,4 +230,9 @@ api_v1.include_router(unit_router)
 api_v1.include_router(faction_router)
 api_v1.include_router(inventory_router)
 api_v1.include_router(army_router)
+# Read-only, and the only router with no write path at all (KILLTEAM.md decision #21).
+api_v1.include_router(killteam_router)
+# The other half: a player's own rosters, which is the only Kill Team data they write.
+api_v1.include_router(killteam_roster_router)
+api_v1.include_router(killteam_game_router)
 app.include_router(api_v1)

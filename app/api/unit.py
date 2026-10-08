@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlmodel import Session, SQLModel
 
 from app.api.deps import get_current_admin, get_owned_by
+from app.api.fields import Name, Stat, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
 from app.core.services.service_unit import UnitService
@@ -54,33 +55,33 @@ class Unit_Read(SQLModel):
     abilities: list[Ability_Read] = []
 
 
-class Unit_Create(SQLModel):
+class Unit_Create(WriteSchema):
     faction_id: UUID
-    unit_name: str
-    movement: int
-    toughness: int
-    armor_save: int
-    wounds: int
-    leadership: int
-    objective_control: int
-    points: int
-    invulnerable_save: int | None = None
+    unit_name: Name
+    movement: Stat
+    toughness: Stat
+    armor_save: Stat
+    wounds: Stat
+    leadership: Stat
+    objective_control: Stat
+    points: Stat
+    invulnerable_save: Stat | None = None
     subfaction_id: UUID | None = None
     keywords: list[str] | None = None
 
 
-class Unit_Update(SQLModel):
-    unit_name: str | None = None
+class Unit_Update(WriteSchema):
+    unit_name: Name | None = None
     faction_id: UUID | None = None
     subfaction_id: UUID | None = None
-    movement: int | None = None
-    toughness: int | None = None
-    armor_save: int | None = None
-    wounds: int | None = None
-    invulnerable_save: int | None = None
-    leadership: int | None = None
-    objective_control: int | None = None
-    points: int | None = None
+    movement: Stat | None = None
+    toughness: Stat | None = None
+    armor_save: Stat | None = None
+    wounds: Stat | None = None
+    invulnerable_save: Stat | None = None
+    leadership: Stat | None = None
+    objective_control: Stat | None = None
+    points: Stat | None = None
     keywords: list[str] | None = None
 
 
@@ -92,11 +93,11 @@ class UnitFacets(SQLModel):
     by_faction: dict[UUID, int]
 
 
-class WeaponLink(SQLModel):
+class WeaponLink(WriteSchema):
     weapon_id: UUID
 
 
-class AbilityLink(SQLModel):
+class AbilityLink(WriteSchema):
     ability_id: UUID
 
 

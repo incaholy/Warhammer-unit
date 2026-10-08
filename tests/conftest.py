@@ -12,14 +12,31 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, text
+from sqlalchemy import event, func, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 # Importing the models registers every table on SQLModel.metadata.
 from app.core.db.connection import get_session
 from app.core.db.models import Army, Faction, Subfaction, Unit, User
+from app.core.db.models_killteam import (
+    KillTeam,
+    KillTeamRule,
+    KTAbility,
+    KTEquipment,
+    KTFaction,
+    KTGame,
+    KTGameEquipment,
+    KTGameEvent,
+    KTGameOperative,
+    KTOperative,
+    KTPloy,
+    KTRoster,
+    KTRosterOperative,
+    KTSelectionRule,
+    KTWeapon,
+)
 from app.core.security import create_access_token
 from app.main import app
 
@@ -276,5 +293,319 @@ def make_army(session, make_user, make_faction):
         session.commit()
         session.refresh(army)
         return army
+
+    return _make
+
+
+# ---- Kill Team catalog (KILLTEAM.md) ----
+
+
+@pytest.fixture
+def make_kt_faction(session):
+    def _make(name=None):
+        faction = KTFaction(name=name or f"KT Faction {next(_counter)}")
+        session.add(faction)
+        session.commit()
+        session.refresh(faction)
+        return faction
+
+    return _make
+
+
+@pytest.fixture
+def make_kill_team(session, make_kt_faction):
+    def _make(faction=None, **overrides):
+        faction = faction or make_kt_faction()
+        data = dict(name=f"Kill Team {next(_counter)}")
+        data.update(overrides)
+        kill_team = KillTeam(faction_id=faction.id, **data)
+        session.add(kill_team)
+        session.commit()
+        session.refresh(kill_team)
+        return kill_team
+
+    return _make
+
+
+@pytest.fixture
+def make_kill_team_rule(session, make_kill_team):
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
+        data = dict(name=f"Rule {next(_counter)}", description="A team-wide rule.")
+        data.update(overrides)
+        rule = KillTeamRule(kill_team_id=kill_team.id, **data)
+        session.add(rule)
+        session.commit()
+        session.refresh(rule)
+        return rule
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_operative(session, make_kill_team):
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
+        data = dict(
+            name=f"Operative {next(_counter)}",
+            apl=2,
+            move=6,
+            save=4,
+            wounds=9,
+            keywords=["RAVENER", "TYRANID"],
+        )
+        data.update(overrides)
+        operative = KTOperative(kill_team_id=kill_team.id, **data)
+        session.add(operative)
+        session.commit()
+        session.refresh(operative)
+        return operative
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_weapon(session, make_kt_operative):
+    def _make(operative=None, **overrides):
+        operative = operative or make_kt_operative()
+        data = dict(
+            name=f"Weapon {next(_counter)}",
+            category="melee",
+            attacks=4,
+            hit=3,
+            normal_damage=4,
+            crit_damage=5,
+            weapon_rules=[],
+        )
+        data.update(overrides)
+        weapon = KTWeapon(operative_id=operative.id, **data)
+        session.add(weapon)
+        session.commit()
+        session.refresh(weapon)
+        return weapon
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_ability(session, make_kt_operative):
+    def _make(operative=None, **overrides):
+        operative = operative or make_kt_operative()
+        data = dict(name=f"Ability {next(_counter)}", description="Does something.")
+        data.update(overrides)
+        ability = KTAbility(operative_id=operative.id, **data)
+        session.add(ability)
+        session.commit()
+        session.refresh(ability)
+        return ability
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_ploy(session, make_kill_team):
+    """A ploy. Pass `kill_team=None` explicitly for a universal one (Command Re-roll)."""
+
+    def _make(kill_team=..., **overrides):
+        if kill_team is ...:
+            kill_team = make_kill_team()
+        data = dict(
+            name=f"Ploy {next(_counter)}",
+            kind="strategy",
+            cp_cost=1,
+            description="Does something, for a cost.",
+        )
+        data.update(overrides)
+        ploy = KTPloy(kill_team_id=kill_team.id if kill_team else None, **data)
+        session.add(ploy)
+        session.commit()
+        session.refresh(ploy)
+        return ploy
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_equipment(session, make_kill_team):
+    """Equipment. Pass `kill_team=None` explicitly for a universal entry."""
+
+    def _make(kill_team=..., **overrides):
+        if kill_team is ...:
+            kill_team = make_kill_team()
+        data = dict(name=f"Equipment {next(_counter)}", description="Grants something.")
+        data.update(overrides)
+        item = KTEquipment(kill_team_id=kill_team.id if kill_team else None, **data)
+        session.add(item)
+        session.commit()
+        session.refresh(item)
+        return item
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_roster(session, make_user, make_kill_team):
+    def _make(owner=None, kill_team=None, **overrides):
+        owner = owner or make_user()
+        kill_team = kill_team or make_kill_team()
+        data = dict(name=f"Roster {next(_counter)}")
+        data.update(overrides)
+        roster = KTRoster(owner_user_id=owner.id, kill_team_id=kill_team.id, **data)
+        session.add(roster)
+        session.commit()
+        session.refresh(roster)
+        return roster
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game(session, make_kt_roster):
+    """One game played from a roster. Pass `roster=` to play an existing one.
+
+    The game's owner and kill team come FROM the roster, because its composite foreign
+    key ties all three (`fk_kt_game_roster`) -- passing them separately would only ever
+    produce a row the database refuses.
+    """
+
+    def _make(roster=None, **overrides):
+        roster = roster or make_kt_roster()
+        data = dict(opponent_name=f"Opponent {next(_counter)}")
+        data.update(overrides)
+        game = KTGame(
+            owner_user_id=roster.owner_user_id,
+            kill_team_id=roster.kill_team_id,
+            roster_id=roster.id,
+            **data,
+        )
+        session.add(game)
+        session.commit()
+        session.refresh(game)
+        return game
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_operative(session, make_kt_game, make_kt_operative):
+    """One operative in a game, snapshotted off a catalog datacard.
+
+    The snapshot columns are filled FROM the catalog row, which is what the service's
+    `create_game` does -- a factory that invented its own stats would let a test pass
+    against a snapshot the catalog never produced.
+    """
+
+    def _make(game=None, operative=None, **overrides):
+        game = game or make_kt_game()
+        # Must be a datacard of the GAME's kill team, or `fk_kt_game_operative_operative`
+        # refuses the row -- the same tie a roster row has.
+        operative = operative or make_kt_operative(kill_team=game.kill_team)
+        data = dict(
+            name=operative.name,
+            apl=operative.apl,
+            move=operative.move,
+            save=operative.save,
+            wounds=operative.wounds,
+            keywords=list(operative.keywords),
+            current_wounds=operative.wounds,
+        )
+        data.update(overrides)
+        row = KTGameOperative(
+            game_id=game.id,
+            operative_id=operative.id,
+            # Both reached by the composite legs, so they must match the game's.
+            kill_team_id=game.kill_team_id,
+            owner_user_id=game.owner_user_id,
+            **data,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_equipment(session, make_kt_game, make_kt_equipment):
+    """A piece of equipment picked for a game, with its text snapshotted."""
+
+    def _make(game=None, equipment=None, **overrides):
+        game = game or make_kt_game()
+        equipment = equipment or make_kt_equipment()
+        data = dict(name=equipment.name, text=equipment.description)
+        data.update(overrides)
+        row = KTGameEquipment(game_id=game.id, equipment_id=equipment.id, **data)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_event(session, make_kt_game):
+    """One event in a game's log. `sequence` defaults to one past the game's last."""
+
+    def _make(game=None, **overrides):
+        game = game or make_kt_game()
+        if "sequence" not in overrides:
+            highest = session.exec(
+                select(func.max(KTGameEvent.sequence)).where(KTGameEvent.game_id == game.id)
+            ).one()
+            overrides["sequence"] = 1 if highest is None else highest + 1
+        data = dict(type="operative_wounded", turning_point=game.turning_point, payload={})
+        data.update(overrides)
+        event = KTGameEvent(game_id=game.id, **data)
+        session.add(event)
+        session.commit()
+        session.refresh(event)
+        return event
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_roster_operative(session, make_kt_roster, make_kt_operative):
+    """One operative on a roster. Pass `operative=` to field one that already exists."""
+
+    def _make(roster=None, operative=None, **overrides):
+        roster = roster or make_kt_roster()
+        operative = operative or make_kt_operative(kill_team=roster.kill_team)
+        row = KTRosterOperative(
+            roster_id=roster.id,
+            operative_id=operative.id,
+            # Carried so both composite foreign keys can reach their parents through them.
+            kill_team_id=roster.kill_team_id,
+            owner_user_id=roster.owner_user_id,
+            **overrides,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_selection_rule(session, make_kill_team):
+    """One printed line, sentence or note of a team's composition (text, decision #28)."""
+
+    def _make(kill_team=None, **overrides):
+        kill_team = kill_team or make_kill_team()
+        data = dict(
+            kind="line",
+            text=f"{next(_counter)} operatives selected from the following list:",
+            position=0,
+            depth=0,
+        )
+        data.update(overrides)
+        rule = KTSelectionRule(kill_team_id=kill_team.id, **data)
+        session.add(rule)
+        session.commit()
+        session.refresh(rule)
+        return rule
 
     return _make

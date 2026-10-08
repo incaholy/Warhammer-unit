@@ -70,10 +70,12 @@ app/
   core/
     services/            # one <Thing>Service per file (business logic)
     db/
-      models.py          # SQLModel tables
+      models.py          # SQLModel tables (40k: 11 tables)
+      models_killteam.py # SQLModel tables (Kill Team: 15 kt_* tables, see KILLTEAM.md)
+      columns.py         # shared column types and helpers
       connection.py      # engine + session
       alembic/           # migrations (versions/ + env.py)
-tests/                   # pytest suite (service tests; API tests to come)
+tests/                   # pytest suite (service AND API tests)
 Makefile                 # dev/db commands (see Development)
 requirements.txt, requirements-dev.txt
 ```
@@ -103,6 +105,11 @@ SQLModel, SQLAlchemy, Alembic, psycopg2, Pydantic, python-dotenv.
 ## DB layer (`app/core/db/`)
 
 ### Models (`models.py`)
+
+This section covers `models.py` — the 40k catalog plus a player's armies and
+inventory, 11 tables. The Kill Team half lives in `models_killteam.py` (15 `kt_*`
+tables: 9 catalog, 2 roster, 4 game) and is specified in **KILLTEAM.md**, not here,
+because the two games share nothing but `TimestampMixin` (KILLTEAM.md #11).
 
 | Model | Table | Half | Purpose |
 |---|---|---|---|
@@ -253,6 +260,9 @@ exposes CRUD methods.
 | `UnitService` | implemented (+ tests) | units: `create_unit`, `get_unit`, `list_units`, `update_unit`, `delete_unit`, `create_weapon`, `create_ability`, `link_weapon`, `link_ability`; catalog reference: `list_factions`, `create_faction`, `create_subfaction` |
 | `ArmyService` | implemented (+ tests) | `create_army`, `get_army`, `list_armies`, `update_army`, `delete_army`, `add_unit`, `set_amount`, `remove_unit`, `list_army_units`, `shortfall`, `points_total`, `validate` |
 | `InventoryService` | implemented (+ tests) | `add_unit`, `set_amount`, `remove_unit`, `list_inventory` |
+| `KillTeamService` | implemented (+ tests) | the Kill Team CATALOG, read-only (KILLTEAM.md #21): `list_kt_factions`, `list_kill_teams`, `get_kill_team`, `list_selection_rules`, `list_operatives`, `list_universal_ploys`, `list_universal_equipment` and their counts |
+| `KTRosterService` | implemented (+ tests) | `create_roster`, `get_roster`, `get_roster_shallow`, `list_rosters`, `update_roster`, `delete_roster`, `add_operative`, `move_operative`, `remove_operative`, `list_roster_operatives` |
+| `KTGameService` | implemented (+ tests) | `create_game`, `get_game`, `get_game_shallow`, `list_games`, `update_game`, `delete_game`, `add_operative`, `transform_operative`, `update_operative`, `activate_operative`, `add_equipment`, `reveal_equipment`, `remove_equipment`, `use_ploy` (#65), `advance`, `undo` |
 
 `UserService`:
 - `create_user(username, email, password_hash)` — `ValueError` if the username
@@ -344,6 +354,31 @@ One router module per resource; each is backed by one service and defines its
 own request/response schemas (`*_Create`, `*_Read`) so internal model fields
 aren't exposed accidentally. All ids in paths and schemas are UUIDs.
 
+**Every write schema inherits `WriteSchema` from `app/api/fields.py`, and every
+string and int in one is bounded.** Both halves of that exist because the default
+behaviour is wrong in a way nothing catches:
+
+- `WriteSchema` sets `extra="forbid"`, so an unknown key is a **422** naming the
+  field. Pydantic ignores unknown keys by default, so `PATCH {"nmae": "x"}` used to
+  validate clean, reach the service as `{}`, change nothing and answer **200** — a
+  typo indistinguishable from success. Set via `model_config`: the class-keyword form
+  `class X(SQLModel, extra="forbid")` is accepted by SQLModel's metaclass and silently
+  does nothing.
+- A SQLModel `Field(max_length=128)` constrains the generated DDL, **not** the
+  Pydantic schema the router validates against. So an over-long string or an
+  out-of-range int passed validation and came back from Postgres as an unhandled
+  **500** (`StringDataRightTruncation`, `NumericValueOutOfRange` — neither is a
+  `CodedError`, so neither is mapped). SQLite accepts both, so the default test tier
+  is blind to it. `fields.py` restates each column's own limit — `Name`, `Username`,
+  `Stat`, `DiceValue`, `WeaponCategory`, `INT32_MAX` — and the rule is that the schema
+  always bounds the top and bounds the bottom only where nothing else already does, so
+  a tested service-raised 400 is not quietly replaced by a 422.
+
+`tests/test_api_write_bounds.py` asserts both over the published `openapi.json`
+rather than per schema, and asserts the set of deliberately unbounded fields
+*exactly* — six `description` columns, which are genuinely `TEXT` — so a new router
+with a bare `str` fails there rather than in production.
+
 Every resource router mounts under a versioned `/api/v1` parent (ROADMAP R5), so
 the paths below are served at `/api/v1/…`; `GET /health` stays unversioned at the
 root. A future breaking change ships as `/api/v2` without breaking existing clients.
@@ -358,6 +393,9 @@ Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 | `app/api/user.py` | — (current user via JWT) | `GET /me` |
 | `app/api/inventory.py` | `InventoryService` | the current user's inventory (`/me/inventory`) |
 | `app/api/army.py` | `ArmyService` | the current user's armies (`/me/armies`) |
+| `app/api/killteam.py` | `KillTeamService` | the Kill Team catalog (`/kill-team`), read-only — see KILLTEAM.md |
+| `app/api/killteam_roster.py` | `KTRosterService` | the current user's kill team rosters (`/me/kill-team/rosters`) — see KILLTEAM.md |
+| `app/api/killteam_game.py` | `KTGameService` | the current user's kill team games (`/me/kill-team/games`) — see KILLTEAM.md |
 
 Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
 → **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,
@@ -476,8 +514,9 @@ arbitrary builtin:
 | `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
 | any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
 
-Handlers are registered **per concrete service-error class** (there is no shared
-base to catch through), and there are deliberately **no** catch-all
+**One** handler is registered, against the `CodedError` marker base that every
+service error inherits (`app/main.py`), so a new error class is mapped by its own
+`code` with no registry to update. There are deliberately **no** catch-all
 `ValueError`/`TypeError`/`LookupError` handlers: those builtins are raised
 throughout the stdlib and third-party libs, so returning their raw message would
 leak internals, and a `TypeError` (almost always a bug) would be mislabelled a
@@ -503,7 +542,8 @@ need. **Effort: all S** unless noted.
   `select(...)`), then `GET /weapons` / `GET /abilities` routes returning
   `list[Weapon_Read]` / `list[Ability_Read]` (public reads, like the rest of the
   catalog). Mirrors the existing `list_factions` / `GET /factions`.
-- **`GET /factions/taxonomy`** — the allowed **faction names** are already in the
+- **`GET /taxonomy`** — deliberately NOT under `/factions/`, which would collide with
+  a future faction resource. The allowed **faction names** are already in the
   OpenAPI schema (the `FactionName` enum on `Faction_Create`), but the allowed
   **subfactions per faction** live only in the service-side `FACTION_SUBFACTIONS`
   map, so an admin UI has no way to render a subfaction dropdown.
@@ -560,8 +600,8 @@ their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
 **Implemented.** Services raise typed exceptions instead of bare builtins, so
 errors carry the offending **field**, a **duplicate** gets its own **409**, and
-every service error comes back in one shape — `{"detail", "code", "field"?,
-"errors"[]}` — with a stable, machine-readable **`code`** the frontend branches on
+every service error comes back in one shape — `{detail, code, field?, request_id,
+errors: [{code, field, detail}, ...]}` — with a stable, machine-readable **`code`** the frontend branches on
 (instead of parsing status or message text). The uniform **`errors`** array lists
 every failure at once — all bad fields of a `422` in one response — with the top
 level mirroring `errors[0]` (ROADMAP R9, option C).
@@ -582,9 +622,10 @@ catching a builtin.
   **409**.
 
 (Ownership on `/me/armies/{id}` intentionally stays a **404** through
-`get_owned_army` to hide existence rather than a 403, so there's no
-`ForbiddenError` in the hierarchy today — add one if a case ever needs to reveal
-"exists but not yours.")
+`get_owned_army` to hide existence rather than a 403, so no
+`ForbiddenError` is needed in the SERVICE hierarchy. One does exist for AUTH, in
+`app/core/security.py`, raised by `get_current_admin` — the Improvements note about
+having deleted it refers to the unused copy in `app/core/services/errors.py`.)
 
 **Per-service validation errors** — each service defines its own
 `*ValidationError(ValueError)` **in its own module** (not in `errors.py`), each
@@ -610,7 +651,7 @@ rule.
 ### The `code` vocabulary and its HTTP mapping
 
 - **`ErrorCode`** (`app/core/errors.py`) — a `StrEnum` of stable codes
-  (`NOT_FOUND`, `CONFLICT`, `VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL`).
+  (`NOT_FOUND`, `CONFLICT`, `VALIDATION`, `REQUEST_VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL`).
   It lives *below* both the service and API layers so each can reference it
   without importing the other. The `code` is a *semantic* label, independent of
   HTTP.
@@ -626,7 +667,7 @@ This split keeps the service layer HTTP-agnostic: a service raises
 One handler function is registered **once**, against the `CodedError` marker base.
 Starlette resolves a handler by walking the raised exception's MRO, so every coded
 error lands there — including one added tomorrow. It builds the body
-`{"detail": message, "code": code, "field"?: field}` and sets the status from
+`{detail, code, field?, request_id, errors: [{code, field, detail}, ...]}` and sets the status from
 `CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
 `{data, meta}` envelope** (intentionally deferred; see roadmap R9).
 
@@ -897,6 +938,13 @@ XSS surface.
 
 ## Frontend integration
 
+> **Built, in a sibling repo.** `warhammer_web` exists and is live — React 19, react-query,
+> types generated from this repo's `openapi.json` via `openapi-typescript`. CORS is
+> installed in `app/main.py` behind an `ALLOWED_ORIGINS` allow-list. The section below
+> was written when none of that existed and describes a `frontend/` monorepo subfolder
+> that never happened; the items marked *(Effort: S)* in it are all done. Kept for the
+> reasoning about what a frontend would need from this API.
+
 **Planned — not yet built.** How the "Muster" browser UI (Vite/React) will talk
 to this API. The connection choice is **Option B: relative URLs + a proxy**, so
 CORS is a fallback, not the primary mechanism. Auth is a **Bearer JWT in the
@@ -1072,7 +1120,7 @@ non-breaking; do them to reach "frontend-ready," then the **M**/**L** items.
 15. ✓ **`GET /weapons` + `GET /abilities`** — list routes so the admin UI can
     pick weapons/abilities to link (`list_weapons`/`list_abilities` on
     `UnitService`). See "API layer → Planned additions."
-16. ✓ **`GET /factions/taxonomy`** — exposes `FACTION_SUBFACTIONS` for subfaction
+16. ✓ **`GET /taxonomy`** — exposes `FACTION_SUBFACTIONS` for subfaction
     dropdowns. See "API layer → Planned additions."
 17. ✓ **Pagination convention (R4)** — every list endpoint returns a `Page`
     envelope `{items, total, limit, offset}` with the total in the body (an
