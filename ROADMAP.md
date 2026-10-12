@@ -896,7 +896,7 @@ migration with a backfill.
 **Status: Not started.** Decisions #71, #72, and #70's undo contract.
 
 With K8 done, this is smaller than it looks. The authorization change is **one function**:
-all thirteen nested game routes reach the game through `get_owned_game`, which does a
+all thirteen nested game operations reach the game through `get_owned_game`, which does a
 primary-key fetch and one Python equality test, and `get_game` — the detail read — has no
 owner clause of its own. Widening that test to "owner or participant" covers every route
 at once, and the 404-rather-than-403 existence hiding comes along unchanged.

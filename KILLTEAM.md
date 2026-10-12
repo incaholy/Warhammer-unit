@@ -546,6 +546,13 @@ on the table.
 
 ## Branching
 
+**Resolved — nothing here is outstanding.** PR #4 (`roadmap`) merged on 2026-08-20 as a
+merge commit, which is what this section asked for, and `fire-team` followed as PR #5 on
+2026-10-08 (`366f918`). The contingency below never fired and cannot now; it is kept
+because the reasoning is the reusable part — a squash or rebase of the base branch
+rewrites the commits a stacked branch was cut from, so the stacked branch has to be
+moved onto the new base rather than merged into it.
+
 `fire-team` was cut from `roadmap`. Merge PR #4 with **"Create a merge commit"** and
 nothing further is needed. If it is squashed or rebased instead, move this branch
 before opening its PR:
