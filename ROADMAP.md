@@ -748,6 +748,83 @@ since dropped is the case the flag exists to survive.
 Also here, and independent: capturing the footnote bodies a weapon rule's marker points
 at (#56), which is a scraper job across 48 pages rather than a schema one.
 
+## K8. Two sides in one game
+
+**Status: Not started.** Decisions #67, #68, #69, #70, #73.
+
+A game today holds one kill team, one owner and one set of numbers. The opponent exists
+as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
+was never a second side so much as a placeholder where one would go.
+
+This slice makes the second side real and stops there. **No second user, no invite, no
+sync** — one person still operates the app, and that is the point: `side` must not be
+derived from a user id, because the common case is an opponent with no account whose side
+is filled in at the table. Build that case first and the shared-session slice becomes an
+authorization change on a model that already fits. Build it second and the obvious
+shortcut — key the operatives off `user_id` — makes the common case unrepresentable.
+
+The migration is the slice. `kt_game_sides` arrives carrying what moves off `kt_games`:
+`kill_team_id`, `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`,
+`choices` and a display name. `kt_game_operatives` and `kt_game_equipment` gain `side`,
+and their ownership leg widens from three columns to four so it names the SIDE rather than
+the game (#67) — which is why this cannot be a widened where-clause: `kill_team_id` sits
+inside the current triple and `kt_games` holds exactly one, so a second team's operative
+fails the insert rather than slipping past a missing check.
+
+Two smaller things land here because both halves of the slice need them. `kt_game_events`
+gains `actor_user_id` (#70), nullable, since an event log that cannot say who wrote a row
+makes undo a button with an invisible target — needed whichever undo semantics K9 settles
+on, so it is not deferred with them. And `use_ploy` becomes side-scoped
+(`POST .../sides/{side}/ploys`), because #65's whole argument is that spending a ploy is
+one operation against one CP pool, and there are now two.
+
+Watch `ck_kt_game_operative_current_wounds`, which couples `current_wounds` to the
+snapshot's `wounds`, and `UNIQUE(game_id, equipment_id)`, which has to become
+`UNIQUE(game_id, side, equipment_id)` or the two sides cannot take the same piece.
+
+Unlike K1–K7 this is the first Kill Team slice whose migration is **stacked rather than
+redrafted** — the Kill Team tables are on `main` and seeded, so #54's and #64's "free
+because the migration was still a draft" no longer applies. A column here costs a
+migration with a backfill.
+
+## K9. A second user occupies a side
+
+**Status: Not started.** Decisions #71, #72, and #70's undo contract.
+
+With K8 done, this is smaller than it looks. The authorization change is **one function**:
+all thirteen nested game routes reach the game through `get_owned_game`, which does a
+primary-key fetch and one Python equality test, and `get_game` — the detail read — has no
+owner clause of its own. Widening that test to "owner or participant" covers every route
+at once, and the 404-rather-than-403 existence hiding comes along unchanged.
+
+The invite code is a capability and is treated as one (#71): generated with `secrets`,
+redeemed in a POST body so it never reaches an access log, one slot so regeneration
+revokes, cleared on use so a screenshot cannot replay it. **Prerequisite, stated rather
+than assumed:** there is no rate limiting anywhere in this service, so the code's own
+entropy is the only thing standing between it and a brute force.
+
+Convergence is polling, not a socket (#72). The event log is already the game's source of
+truth and `sequence` is already monotonic per game, so
+`GET .../games/{id}/events?since={sequence}` is a cursor read over a mechanism that
+exists. The reasoning is in #72 and the short version is that the reconnect path is
+mandatory — Cloud Run caps a request at 60 minutes and a game runs longer — and the
+reconnect path is this endpoint, so a socket would be an addition to it rather than an
+alternative.
+
+The real work is not the transport. It is that **409 stops being an edge case.** #9's
+reasoning is explicitly about one user in two tabs; two people writing the same game
+concurrently makes a stale `version` an ordinary event, and every mutation bumps the one
+`kt_games.version` however deep it sits. Note the coupling this creates, because it is
+easy to break: `KTGameEvent.sequence` is assigned in Python as `max(sequence) + 1` and its
+`UNIQUE(game_id, sequence)` is the only guard — two concurrent writers cannot collide on
+it only because both must also `UPDATE kt_games ... WHERE version = N` in the same
+transaction, so the loser rolls back first. A side-scoped write that bumped nothing on
+`kt_games` would take no lock and could duplicate a sequence. "Every mutation goes through
+`_write`" is a correctness requirement here, not a convention.
+
+Frontend consequence: this lands on KF4, whose 409 handling was planned as defensive.
+It becomes the slice's core loop.
+
 ## Condition-gated: a deep readiness probe
 
 **Status: Not needed yet. Build it when a load balancer or an orchestrator is put in
