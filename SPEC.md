@@ -299,9 +299,12 @@ exposes CRUD methods.
   `LookupError` if the army doesn't exist; delete cascades to the army's
   `army_units`.
 - `add_unit(army_id, unit_id, amount=1)` — validates the army and unit exist
-  (else `LookupError`), then **upserts**: increment `amount` if the unit is
-  already in the army, otherwise create the row. Does **not** check inventory —
-  armies are aspirational.
+  (else `LookupError`), then **create-only**: a unit already in the army raises
+  `ConflictError` (→ 409) rather than incrementing, and the quantity is changed
+  through the idempotent `set_amount`. An incrementing add is not retry-safe,
+  because a timeout is indistinguishable from a slow success and the retry would
+  double-apply (R12, done 2026-08). Does **not** check inventory — armies are
+  aspirational.
 - `set_amount(army_id, unit_id, amount)` — absolute set; `amount < 1` raises
   `ValueError` (use `remove_unit`).
 - `remove_unit(army_id, unit_id)` — delete the entry.
@@ -325,7 +328,9 @@ exposes CRUD methods.
 `InventoryService` manages the units a user owns (the flat inventory), keyed on
 `user_id`:
 - `add_unit(user_id, unit_id, amount=1)` — validates the user and unit exist
-  (else `LookupError`), then **upserts** the owned amount.
+  (else `LookupError`), then **create-only**: a unit already owned raises
+  `ConflictError` (→ 409), and the amount is changed through `set_amount`. Same
+  retry-safety reasoning as `ArmyService.add_unit` (R12).
 - `set_amount(user_id, unit_id, amount)` — absolute set; `amount < 1` raises
   `ValueError` (use `remove_unit`).
 - `remove_unit(user_id, unit_id)` — delete the inventory entry.
@@ -398,9 +403,10 @@ Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 | `app/api/killteam_game.py` | `KTGameService` | the current user's kill team games (`/me/kill-team/games`) — see KILLTEAM.md |
 
 Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
-→ **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,
-so they return **201** when they create the row and **200** when they increment
-an existing one.
+→ **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s are
+create-only, so they return **201** or **409** and never **200** — `openapi.json`
+declares exactly `201` and `422` for both (R12 replaced the upsert, which did
+return 200 on an increment).
 
 Routes below are implemented. The **Backing method** column names the service
 call each route makes.
@@ -438,7 +444,7 @@ requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
 | POST | `/auth/login` | login (public, OAuth2 form) — returns a `Token` | `AuthService.authenticate` | done |
 | GET | `/me` | the current user | `get_current_user` | done |
 | GET | `/me/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | done |
-| POST | `/me/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | done |
+| POST | `/me/inventory` | add an owned unit — body `InventoryAdd`, create-only (409 if owned) | `InventoryService.add_unit` | done |
 | PATCH | `/me/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | done |
 | DELETE | `/me/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | done |
 | POST | `/me/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | done |
@@ -448,7 +454,7 @@ requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
 | DELETE | `/me/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
 | GET | `/me/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
 | GET | `/me/armies/{army_id}/validate` | check the list's legality (points vs limit, faction/subfaction) | `ArmyService.validate` | done |
-| POST | `/me/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
+| POST | `/me/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, create-only (409 if present) | `ArmyService.add_unit` | done |
 | PATCH | `/me/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
 | DELETE | `/me/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
 
@@ -991,8 +997,8 @@ The **service tests are implemented and green.** They cover: create a user
 (duplicate username/email → `ValueError`, missing → `LookupError`); create a
 catalog unit (unknown faction → `LookupError`), get/list units; create an army
 (unknown user → `LookupError`), list and delete armies; add a unit to an army or
-to inventory, add the same unit twice increments the amount, set the amount to a
-new value, remove a unit; `set_amount < 1` → `ValueError`; adding a unit to a
+to inventory, add the same unit twice → `ConflictError` (R12 made the add
+create-only), set the amount to a new value, remove a unit; `set_amount < 1` → `ValueError`; adding a unit to a
 nonexistent army/user or a nonexistent unit → `LookupError`; an army may
 reference a unit the user doesn't own (no rejection); deleting an army cascades
 its `army_units`; deleting an inventory entry leaves armies untouched;
@@ -1083,8 +1089,9 @@ Cross-cutting concerns:
 6. ✓ API tests with FastAPI's `TestClient` (dependency-overridden session), one
    file per router.
 7. ✓ `POST /weapons` and `POST /abilities` routes (the catalog is fully
-   enterable over HTTP), and the upsert `POST`s return 201 on create / 200 on
-   increment.
+   enterable over HTTP). The add-unit `POST`s returned 201 on create / 200 on
+   increment at the time; R12 made them create-only, so they now answer 201 or
+   409.
 8. Seed script to bulk-load the datasheet catalog — deferred; now tracked in
    "Remaining work" below (it's the top frontend prerequisite). See "Seeding the
    catalog."

@@ -613,9 +613,11 @@ Four consequences, all of them real work:
 - The scraper, `seed_datasheets.py`, `Unit_Create`/`Unit_Update` and
   `UnitService._UPDATABLE` all carry `points` as a single `Stat` today.
 
-**This answers R12's open question.** R12 asks whether the incrementing endpoint needs to
-exist at all; with one row per squad there is no `amount` to accumulate, so the question
-dissolves rather than being decided.
+**This finishes what R12 started.** R12 already answered its own question — the
+incrementing add is gone, and both add-unit `POST`s are create-only with an idempotent
+`PATCH` for the quantity. What it left standing is `amount` itself, which R13 retires:
+with one row per squad the count is the row multiplicity, so `set_amount` has nothing
+left to set and `UNIQUE(army_id, unit_id)` goes with it.
 
 ### What stays the players'
 

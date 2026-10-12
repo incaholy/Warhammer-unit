@@ -8,9 +8,14 @@ Branch: `fire-team` (cut from `roadmap`). See "Branching" at the end.
 
 ## Goal
 
-Let a user play a game of **Kill Team (2024 edition)** with the app as the table's
+Let players play a game of **Kill Team (2024 edition)** with the app as the table's
 bookkeeper: pick a kill team, build a roster, then track a game turn by turn —
 turning points, CP, VP, each operative's wounds, order and activation.
+
+A game has **two sides** and both are tracked, each with its own kill team, operatives,
+CP and VP (#67). One person may keep both — an opponent with no account is the ordinary
+case — or a second player may be invited in to keep their own side from their own device
+(#71, #72). Decision #5 originally scoped this to one player per game and is retired.
 
 The app **tracks**; the players **resolve**. Dice are physical and rules are applied
 by the players. Encoding the rules themselves (a rules engine) is out of scope.
