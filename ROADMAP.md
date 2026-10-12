@@ -527,6 +527,110 @@ worth its own change.
 **Deferred (by its own guidance).** Left as-is; fold into the next catalog-routes pass (R8 territory)
 rather than churning the route now.
 
+## R13. Unit composition, and points that follow model count
+
+**Status: Not started.**
+
+Two changes that belong in one slice, because the second is only defensible once the
+first has made clear what a datasheet actually prints.
+
+### Composition is TEXT — the Kill Team answer, copied rather than re-derived
+
+A new table on the 40k side, `UnitComposition` = {`position`, `depth`, `kind`, `text`},
+mirroring `KTSelectionRule` column for column: the page's own words in the page's own
+order, with the indent kept. Exposed on `Unit_Read`, so the catalog screen and the army
+list both get it from the read they already make. Nothing is derived from it and nothing
+is enforced.
+
+This is not a fresh design decision. The other half of the app settled it, expensively:
+decision #44 deleted three tables (`KTSelectionList`, `KTSelectionOption`,
+`KTSelectionRestriction`) and retired eleven decisions, after structured composition
+produced a budget summing to 43 selections for a team that fields 7, a keyword cap
+matching none of the seven operatives carrying it, and four rows that read identically
+while meaning four different things. #28's verdict is the one to keep in view: *"We never
+had correct legality, only numbers that looked authoritative, which is worse than none."*
+40k composition is the same kind of thing — prose with conditionals — so it gets the same
+treatment, and #45's argument for `depth` over nesting applies unchanged.
+
+The scraper already **locates** the block it is discarding:
+
+```python
+if el.select_one(".dsUl") or el.select_one(".PriceTag") or el.find("table"):
+    return None  # composition / points, not an ability
+```
+
+`.dsUl` is the composition list. So this is parsing a block already identified, not
+finding a new thing on a page.
+
+### Points tiers are DATA, not enforcement machinery
+
+`parse_points` builds the pair and throws half of it away:
+
+```python
+best: tuple[int, int] | None = None  # (model_count, points)
+...
+return best[1] if best else 0
+```
+
+So `Unit.points` is the **minimum-size** price, and `points_total` is
+`SUM(army_units.amount * units.points)` — which bills every squad at its cheapest legal
+size. A ten-model Intercessor squad is reported at the five-model cost. That is a wrong
+number rather than a missing one, which is why this slice is worth its cost.
+
+The objection to answer first, because it looks like reversing #44: that decision
+explicitly removed *"no budget, no cost, **no models**, no repeat cap"*. The distinction
+is where the number lives. #44's `models` sat on the CATALOG's composition option — how
+many models an option fields, an input to deciding legality, and an approximation of
+prose. This `models` sits on the PLAYER's army-list row: how many models they chose,
+which is a fact about their list, priced by lookup in a table the page prints. #44's
+columns failed because composition is prose and a column must approximate it; a price
+table is a table, with no interpretation step. Tiers are therefore data, and
+`UnitPoints` = {`models`, `points`} per unit is the shape.
+
+### The blocking constraint
+
+```python
+__table_args__ = (UniqueConstraint("army_id", "unit_id"), ...)
+amount: int   # counts SQUADS, not models
+```
+
+One row per datasheet per army, so a list holding one five-model squad and one ten-model
+squad of the same unit is **unrepresentable** — not merely unpriced. Kill Team hit the
+identical problem and answered it in #50: one row per operative, no count, because *"a
+count could not say which of them is wounded."* The 40k version is that a count cannot
+say which squad is which size, so `ArmyUnit` becomes one row per squad.
+
+Four consequences, all of them real work:
+
+- `PATCH` and `DELETE /me/armies/{army_id}/units/{unit_id}` rekey to `{row_id}`, since
+  `unit_id` no longer identifies one row. Kill Team's roster operatives already use that
+  shape, so the precedent is there to copy.
+- `shortfall` must aggregate by `unit_id` BEFORE subtracting. It currently iterates
+  `ArmyUnit` rows and compares each to the owner's whole inventory, which with several
+  rows per unit would understate the need on every one of them.
+- The points arithmetic exists **twice** — a SQL aggregate in `points_total` and a Python
+  loop in `validate` — and the two must stay in agreement.
+- The scraper, `seed_datasheets.py`, `Unit_Create`/`Unit_Update` and
+  `UnitService._UPDATABLE` all carry `points` as a single `Stat` today.
+
+**This answers R12's open question.** R12 asks whether the incrementing endpoint needs to
+exist at all; with one row per squad there is no `amount` to accumulate, so the question
+dissolves rather than being decided.
+
+### What stays the players'
+
+Report, never refuse — and #57 names this half's `points_limit` / `over_points` as the
+house pattern it was following, so this is keeping a standard rather than setting one. A
+seven-model squad that matches no printed tier is **saved**; the list may say the size is
+not one the page prints, and must not refuse it. No composition line is enforced, and
+`validate` gains no issue kind that blocks a write.
+
+### Cost note
+
+The 23 cached 40k faction pages are on disk in `scripts/data/cache`, so both parsers can
+be written and re-run offline against the same HTML. No live re-scrape, and the
+Wahapedia dependency is not touched to do this.
+
 ---
 
 # Kill Team
