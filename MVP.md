@@ -546,26 +546,47 @@ longer only waiting on the client: three of the five remaining slices are its ow
 Both phones read the same game, and the game's own **event log** is what keeps them
 agreed — not a live connection (decision #72).
 
-Every mutation already appends exactly one event carrying a sequence number that is
-monotonic within the game. So a client never asks "what is the state now?"; it asks
-what happened after the last number it saw, which is a cursor read over a log that
-already exists and already drives undo:
+Nearly every mutation appends exactly one event, carrying a sequence number that is
+monotonic within the game. So a client never asks "what is the state now?"; it asks what
+happened after the last number it saw — a cursor read over a log that already exists and
+already drives undo:
 
 ```
 GET /me/kill-team/games/{id}/events?since=47
   →  { events: [ 48, 49, 50 ], version: 51 }
 ```
 
-Each client polls that while the battle screen is actually in front of someone, and
-backs off when it is not. The answer is usually empty; when it is not, it is two or
-three rows. Two players at a three-second cadence is well under one request a second.
+Each client polls that while the battle screen is actually in front of someone, and backs
+off when it is not. The answer is usually empty; when it is not, it is two or three rows.
 
-**Writes do not change.** They stay ordinary `PATCH` and `POST` calls carrying
-absolute values rather than deltas (#7), and each one bumps the game's `version`. A
-write built on a stale read is therefore refused with a **409** instead of being
-applied over the top of the other player's work (#9) — and the client's response to a
-409 is to re-read and retry, which is the same cursor read it was already making. One
-mechanism covers both staying current and recovering from a conflict.
+**"Nearly" is doing work in that first sentence.** Two mutations write no event at all —
+creating a game and deleting one — so #81 gives both one, because a log that is the only
+convergence channel makes anything missing from it invisible. Deletion was the harmful
+case: a guest's first notice would be a 404 on the next poll, with nothing to explain it.
+A write that sends a value already stored also records nothing, which stays deliberate
+(#58): an empty event would spend the next undo reverting nothing.
+
+**Writes stay ordinary `PATCH` and `POST` calls carrying absolute values** rather than
+deltas (#7). Every one bumps the game's `version` — but bumping is universal and refusing
+is not, which the earlier version of this section elided. Measured against the contract:
+of the twelve nested writes, **two** accept a `version` and it is optional on both,
+**four** answer 422 to an extra key, and **six** declare no request body, so a `version`
+sent to them is silently discarded with a 200. So #79 moves it into an `If-Match`-style
+header, required on all twelve, which reaches the bodiless ones without reshaping four
+schemas.
+
+**A 409 means re-read and re-decide, not re-read and retry** (#78). The difference is not
+stylistic. You read at version 12 with an operative on 5 wounds and tap 4; your opponent
+sets it to 1; your write is refused; you re-read and retry your 4, and their write is
+gone with neither of you told. A blind retry discards the conflict the version check just
+detected — the same defect #70 rejected per-player undo over. So the screen owes you the
+comparison and a person chooses.
+
+One thing this does not solve, named rather than hidden (#80): a single `version` on the
+game means two sides writing **disjoint** fields still collide — your wounds against
+their command points. A version per side would fix it and cannot be done without
+re-solving `KTGameEvent.sequence`, whose uniqueness holds only because every writer
+touches the shared row.
 
 **Why not WebSockets.** Mostly because the catch-up endpoint above is mandatory
 whatever the transport: Cloud Run caps a single request at 60 minutes and a Kill Team

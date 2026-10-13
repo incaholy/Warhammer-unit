@@ -978,7 +978,8 @@ migration with a backfill.
 
 ## K9. A second user occupies a side
 
-**Status: Not started.** Decisions #71, #72, #74, #75, and #70's undo contract.
+**Status: Not started.** Decisions #71, #72, #74, #75, #78, #79, #80, #81, and #70's
+undo contract.
 
 The authorization change is **two** predicates, not one function. All thirteen nested game
 operations reach the game through `get_owned_game`, which does a primary-key fetch and one
@@ -1007,10 +1008,14 @@ mandatory — Cloud Run caps a request at 60 minutes and a game runs longer — 
 reconnect path is this endpoint, so a socket would be an addition to it rather than an
 alternative.
 
-The real work is not the transport. It is that **409 stops being an edge case.** #9's
-reasoning is explicitly about one user in two tabs; two people writing the same game
-concurrently makes a stale `version` an ordinary event, and every mutation bumps the one
-`kt_games.version` however deep it sits. Note the coupling this creates, because it is
+The real work is not the transport. It is that **409 stops being an edge case**, and the
+earlier version of this entry assumed a safety net that is not strung. #9's reasoning is
+explicitly about one user in two tabs. Two people writing the same game makes a stale
+`version` ordinary — and the measured coverage is two of the twelve nested writes, with
+the field optional on both, four answering 422 to an extra key and six declaring no body
+at all so a sent `version` is discarded with a 200. #79 moves it to a header on all
+twelve. #78 settles what the client does with the refusal, which is re-decide rather than
+retry, because a blind retry discards exactly the conflict the check detected. Note the coupling this creates, because it is
 easy to break: `KTGameEvent.sequence` is assigned in Python as `max(sequence) + 1` and its
 `UNIQUE(game_id, sequence)` is the only guard — two concurrent writers cannot collide on
 it only because both must also `UPDATE kt_games ... WHERE version = N` in the same
