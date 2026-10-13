@@ -490,9 +490,15 @@ whether the list fits, and the *shortfall* — which units the list needs that y
 inventory does not have. It never refuses a list; it tells you what is true about it.
 
 Each entry also shows the datasheet's **printed composition** — the models the unit is
-made of, worded as the page words it — and prices the size you actually chose rather
-than the cheapest one. The composition is shown and never applied: a squad at a size
-the page does not print is still saved, and the list says so instead of refusing it.
+made of, worded as the page words it — and prices the size you actually chose rather than
+the cheapest one. The composition is shown and never applied: a squad at a size the page
+does not print is still saved, and the list says so instead of refusing it.
+
+It is also reported **unpriced**, rather than rounded to a size the page does print. The
+page prints no cost for seven models, so neither does Muster — the total sums what it can
+price and says how many entries it could not, instead of quietly inventing a number. And
+when anything is unpriced the total itself is **null** rather than merely accompanied by a
+caveat, so a client cannot show a figure that is short by a whole squad.
 
 **Kill Team.** Browse the kill teams and their datacards, with each team's printed
 composition shown as printed. Build a roster: one row per operative, so two identical
@@ -550,7 +556,7 @@ longer only waiting on the client: three of the five remaining slices are its ow
 | The battle screen's reference half | `warhammer_web` KF5 | the team tab, equipment reveal, ploys, transform, the undo log |
 | The second side of the table | this repo, **K8** | `kt_game_sides`, so a game holds two kill teams with their own operatives, equipment, CP and VP. No second user yet — one person still operates the app, which is what makes an account-less opponent representable |
 | A second player in the session | this repo, **K9** | an invite code valid 15 minutes, two authorization predicates widened from owner to participant, and both clients converging by polling the event log. The column that says who occupies a side lands in K8 (#74), because adding it later is a migration with a backfill |
-| Unit composition and honest points | this repo, **R13** | the datasheet's printed composition stored as its own words, and points that follow the model count instead of billing every squad at its cheapest legal size |
+| Unit composition and honest points | this repo, **R13** | the datasheet's printed composition stored as its own words, and points that follow the model count instead of billing every squad at its cheapest legal size. Carries the inventory with it, since an army row counted in models cannot be subtracted from an inventory counted in squads |
 
 ### How two players stay in sync
 
@@ -651,7 +657,7 @@ cannot tell you when to stop. Each of these is checkable, and all of them must h
 
 | | |
 |---|---|
-| **The 40k loop closes** | A new user registers, records the models they own, and builds an army list — start to finish in a browser. Each entry MUST show the datasheet's printed composition. The list MUST price the squad size chosen, not the cheapest. It MUST report the total, whether the list fits its limit, and which units are still to buy. |
+| **The 40k loop closes** | A new user registers, records the models they own, and builds an army list — start to finish in a browser. Each entry MUST show the datasheet's printed composition. The list MUST price the squad size chosen, not the cheapest. An off-tier size MUST be reported unpriced, never rounded. The total MUST be null while anything is unpriced. It MUST report the total, whether the list fits its limit, and which units are still to buy. |
 | **The Kill Team loop closes** | A player MUST be able to go catalog → roster → battle for any of the 48 teams. A full four-turning-point game MUST track wounds, order, tokens, activations, CP, VP, equipment revealed mid-game and ploys spent. |
 | **Two players, two devices, one game** | Both sides MUST be tracked, each player holding their own. Each client MUST pick up the other's changes within **one poll interval — 3 seconds** — without a reload. |
 | **The game is reconstructable** | The event log MUST account for every change and name who made it. Undo MUST reverse changes one step at a time. |
@@ -715,7 +721,12 @@ Stated plainly because a reviewer should not have to find them:
   `(model count, points)` pairs and keeps only the cheapest — so a ten-model squad is
   billed at the five-model cost. R13 fixes it. The fix is blocked by a uniqueness
   constraint that makes two differently-sized squads of one datasheet unrepresentable,
-  which is why it is a slice rather than a column.
+  which is why it is a slice rather than a column. R13 also stops `points_total` being a
+  single sufficient number: an off-tier squad is reported unpriced rather than guessed
+  at, so the total is **null** when anything could not be priced, with a count beside it.
+  Null rather than a caveat because the field keeps its name and its integer type, so no
+  gate here — not the `openapi.json` check, not the generated client types — would catch
+  a client that kept reading it and showed a total missing a squad.
 - **The 40k catalog holds no composition at all.** The scraper locates the composition
   block on each page specifically in order to skip it, so the thing a list builder most
   obviously needs is the one thing not captured.

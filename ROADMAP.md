@@ -634,6 +634,71 @@ seven-model squad that matches no printed tier is **saved**; the list may say th
 not one the page prints, and must not refuse it. No composition line is enforced, and
 `validate` gains no issue kind that blocks a write.
 
+**Refusing to refuse means owing a defined report for every case allowed**, and the
+seven-model squad is the case this section promises will happen. It is reported
+**unpriced**, not rounded up, nearest-matched or billed at the highest tier. The page
+prints no price for seven models, so the app does not know one, and inventing one is the
+app asserting something the source never said — which is the mistake #28 describes as
+"numbers that looked authoritative, which is worse than none".
+
+The consequence is stated rather than hidden: `points_total` stops being a single
+sufficient number. It sums what it can price, and `Army_Read` and `Validation_Read` carry
+a count of what it could not, so a client shows "1,840 pts + 1 unpriced entry" instead of
+a total that quietly omits a squad.
+
+**And the incompleteness is made unreadable rather than advertised.** `points_total`
+becomes `int | None`, null whenever any entry is unpriced — `0` still means an empty army.
+A sibling count alone would have been ignorable by construction, and that is the trap
+worth naming: the field keeps its name and its integer type, so the `openapi.json`
+freshness gate sees nothing, the generated client types see nothing, and a client compiles
+and renders a total short by whole squads. A semantic change under an unchanged signature
+is the one kind of break every gate here is blind to.
+
+Nullable closes it the way #54 and #31 say to — unrepresentable rather than merely
+checked. The generated type becomes `number | null`, and TypeScript `strict` (R1) then
+refuses to render it without handling the null, so a client that ignores the gap fails to
+compile instead of failing to be correct. `points_limit` is already `int | None` in both
+models, so the pattern has precedent in the same schema.
+
+The irony is worth recording, because it was nearly shipped: "unpriced" beat "round up"
+precisely because inventing a number means asserting something the page never said. A
+sibling count would have left the honest answer looking identical on the wire to the
+dishonest one.
+
+The warning is **owned by `validate`**, as a fourth issue kind (`off_tier_size`) beside
+`over_points`, `wrong_faction` and `wrong_subfaction`. Leaving it to the client is #57's
+mistake with a different number: the point of the backend holding the figure is that a
+client never has to hold a rule.
+
+### `Unit.points` is computed, not stored
+
+The stored column goes. `UnitPoints` is the only place a price lives, so nothing can
+drift; `Unit_Read` keeps a `points` field, computed as the minimum tier, so the client's
+catalog view does not break. `Unit_Create`, `Unit_Update` and `UnitService._UPDATABLE`
+take tiers rather than a scalar, and the seed and scraper write them.
+
+Keeping the column would store a value derived from the tier table beside it — the
+denormalisation this slice exists to remove. Dropping the read field would break a
+catalog view over an implementation detail. Computing it does neither.
+
+### The inventory moves to models too
+
+`shortfall` is `max(0, entry.amount - have)`. R13 retires `amount` on an army row in
+favour of a model count, so without this the subtraction compares **models with whole
+units** — and no compiler sees it, because both are `int`.
+
+So `user_unit.amount` becomes a model count as well, backfilled as
+`amount × minimum tier size`, the same assumption the army backfill makes, so the two
+stay consistent. This is more truthful anyway: you own models, not squads. A box is ten
+Intercessors, and "I own 3 Intercessor squads" was always an approximation of "I own 30
+Intercessors".
+
+**This widens the slice into the inventory**, stated here rather than discovered while
+building it: `POST /me/inventory` and `PATCH /me/inventory/{unit_id}` change units, and so
+does `UserUnit_Read`. That is a second user-facing surface in a slice that is already a
+migration with a backfill. The alternative is leaving `shortfall` subtracting
+incompatible units, which is the one option with no defence.
+
 ### The rows that already exist
 
 An existing `army_units` row with `amount = 3` becomes three rows, and the migration has
