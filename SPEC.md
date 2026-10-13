@@ -935,7 +935,7 @@ XSS surface.
   includes `is_admin`). Last-admin-lockout protection was left out for now.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
-  keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
+  keyed-by-IP limit (e.g. 5/min) on login and register, and a 429 handler. Deferred
   — it's a hardening step, not a core-loop blocker; revisit before public deploy.
 - **Real `SECRET_KEY` in production** *(Effort: S)* — a dev default is in place;
   production must set a random `SECRET_KEY` (`python -c "import secrets;

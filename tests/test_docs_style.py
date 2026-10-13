@@ -23,26 +23,18 @@ import pytest
 
 DOCS = Path(__file__).resolve().parent.parent
 
-# Scoped to the files that are clean today. A gate that starts red teaches people to
-# skip it, so widening is a deliberate act: clean a file, then add its name here.
+# Every design document the style governs. This started at three files with the other
+# three held in a comment, which was the defect this file is about: a worklist nothing
+# reads is a convention. The seven sites it listed were checked against the contract and
+# substituted, so the list is gone and the gate covers all six.
 GOVERNED = (
     "MVP-2026.md",
     "KILLTEAM.md",
+    "ROADMAP.md",
+    "SPEC.md",
+    "ARCHITECTURE.md",
     "CLAUDE.md",
 )
-
-# Not yet governed, with the reason. Each of these counts something, and whether the
-# count is of paths or of operations has to be checked per site before the word can be
-# substituted -- which is the work this list is holding, not a reason to loosen the rule.
-#
-#   ROADMAP.md:208   'five list endpoints'
-#   ROADMAP.md:683   'Six routes'
-#   ROADMAP.md:714   'five write routes'
-#   ROADMAP.md:720   'Eight routes'
-#   ROADMAP.md:739   'fifteen routes'
-#   SPEC.md:938      'two auth routes'
-#   ARCHITECTURE.md:208  'two quantity endpoints'
-PENDING = ("ROADMAP.md", "SPEC.md", "ARCHITECTURE.md")
 
 NUMBER_WORDS = (
     "two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen"

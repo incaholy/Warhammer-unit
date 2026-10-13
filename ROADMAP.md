@@ -205,7 +205,7 @@ made `/units` need a cap, which the frontend review measured at roughly 1,331 un
 database.
 
 **The reference is a cautionary tale here, not a model.** Its `conventions.md` documents page-based
-pagination as a cross-cutting rule, but only one of its five list endpoints implements it; the other
+pagination as a cross-cutting rule, but only one of its five collection reads implements it; the other
 four use `offset`/`limit` and return no pagination metadata. It has the same inconsistency plus a
 document asserting otherwise, which is strictly worse than no document. It has not been bitten only
 because its frontend happens to call just the compliant endpoint. **A convention that lives only in
@@ -680,9 +680,9 @@ admin write — an admin edit would be silently undone by the next `make seed-kt
 (KILLTEAM.md decision #21). One assertion over the published OpenAPI document proves it
 (#49), so a route added later cannot slip a write past it.
 
-Six routes:
+Six paths, one `GET` each:
 
-| Route | Serves |
+| Path | Serves |
 |---|---|
 | `GET /kill-team/factions` | the 22 factions, paged |
 | `GET /kill-team/teams` | the 48 teams, paged, `?faction_id=` |
@@ -711,13 +711,13 @@ whenever the composition is replaced.
 and is not answered by it; it is K7 now, with a condition instead of a slice name. Kill
 team rosters under `/api/v1/me/kill-team/rosters`, mirroring `Army`.
 
-Audit finding 12 is fixed here: the five write routes take `get_owned_roster_shallow`,
+Audit finding 12 is fixed here: the five write operations take `get_owned_roster_shallow`,
 which answers "does the caller own this?" without loading the bundle, and only
 `GET /{id}` keeps the full read. Measured on a six-operative roster with a furnished
 team: a 204 DELETE went 13 → 6 queries, a one-row PATCH 14 → 8, an append 18 → 9, and
 the rename 30 → 17 (it had been loading the detail three times). `GET` is unchanged at
 13, which is the point. The shape came from K5's games router, which was built with it
-from the start. Eight routes: CRUD on a roster, then append, move and remove on the operatives
+from the start. Eight operations: CRUD on a roster, then append, move and remove on the operatives
 in it. The catalog half of the API takes no writes at all (#21) and this is the half a
 player writes — one assertion over the published document holds that line now that both
 are mounted. A roster listing is 287 bytes a row where its detail is 24-42 KB, median 31, because
@@ -736,7 +736,7 @@ catalog.
 
 ## K5. Game tracker
 
-**Status: ✅ Done.** Four tables, a service and fifteen routes under
+**Status: ✅ Done.** Four tables, a service and fifteen operations under
 `/api/v1/me/kill-team/games`. The migration was regenerated again (one of
 several times since; `alembic heads` names the current one). Four decisions were settled while building it: **#60** deleting a
 roster a game was played from is refused (409), **#61** activation is stored as the
