@@ -28,7 +28,7 @@ DOCS = Path(__file__).resolve().parent.parent
 # reads is a convention. The seven sites it listed were checked against the contract and
 # substituted, so the list is gone and the gate covers all six.
 GOVERNED = (
-    "MVP-2026.md",
+    "MVP.md",
     "KILLTEAM.md",
     "ROADMAP.md",
     "SPEC.md",
@@ -57,7 +57,7 @@ MAX_WORDS = 25
 # conditional sentences where ambiguity concentrates, so it is applied per section at
 # full strength instead.
 REFERENCE_SECTIONS = {
-    "MVP-2026.md": (
+    "MVP.md": (
         "## API surface",
         "### Every table, and what it holds",
         "## What success looks like",
