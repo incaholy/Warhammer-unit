@@ -1076,14 +1076,21 @@ migration with a backfill.
 
 ## K9. A second user occupies a side
 
-**Status: Not started.** Decisions #71, #72, #74, #75, #78, #79, #80, #81, and #70's
-undo contract.
+**Status: Not started.** Decisions #71, #72, #74, #75, #78, #79, #80, #81, #82, #83,
+and #70's undo contract.
 
 The authorization change is **two** predicates, not one function. All thirteen nested game
 operations reach the game through `get_owned_game`, which does a primary-key fetch and one
 Python equality test, and `get_game` — the detail read — has no owner clause of its own.
-Widening that test to "owner or participant" covers those thirteen, and the
-404-rather-than-403 existence hiding comes along unchanged. But `GET /me/kill-team/games`
+Widening that test to "owner or participant" covers those thirteen — but **not
+uniformly**, which the earlier draft of this entry treated as the slice's cheapness.
+Two operations stay host-only behind a second loader (#82): deleting a game, which
+cascades the event log with no undelete, and minting an invite, which revokes the
+outstanding code because #71 keeps one slot. #73's "either side may finish" rests on
+#66 making a finish reversible, and those two are not. A participant refused one gets
+403 rather than the house 404, because #31 hides existence from a stranger and a
+participant already has the game on screen (#82). A guest's way out is vacating their
+side rather than deleting the game (#83). But `GET /me/kill-team/games`
 filters `owner_user_id` inside `list_games` and never calls the dependency (#75), so a
 game a user occupies but did not create would be absent from the list of their games.
 

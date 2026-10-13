@@ -435,7 +435,16 @@ separate route — is **not yet decided**.
 |---|---|
 | `GET /me/kill-team/games/{game_id}/events?since={sequence}` | the events after that sequence, with the game's current `version`. How both clients converge. **Named by #72** |
 | `POST /me/kill-team/games/join` | redeem an invite code, sent in the **body** so it never reaches an access log. **Named by #71** |
-| `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. *Follows from #71; not named by it* |
+| `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. **Host only** (#82). *Follows from #71; not named by it* |
+| `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
+
+**Two operations stay host-only.** Deleting a game cascades the event log and cannot be
+undone, and minting an invite revokes the outstanding code, so neither inherits the
+shared predicate (#82) — `#73`'s "either side may finish" rests on a finish being
+reversible, which these are not. A participant refused one gets **403**, not the 404 the
+rest of the API answers, because that rule hides existence from a stranger and a
+participant is looking at the game. A guest leaves by vacating their side, which keeps
+the game and its record intact (#83).
 
 No route widens who may read a game, but **two** predicates change, not one (#75).
 Thirteen nested operations reach the game through one dependency, where "owner" becomes
