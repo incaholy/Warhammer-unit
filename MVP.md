@@ -409,8 +409,14 @@ nothing from the catalog.
 | `POST /me/kill-team/games/{game_id}/sides/{side}/operatives` | field a datacard on that side. *Follows from #67.* The row-keyed operative routes above need no change, since a row id already identifies one operative |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/equipment` | take a piece for that side. *Follows from #67* |
 
-How the opponent's side is established at creation — a second roster in the `POST`
-body, a hand-filled side, or a separate route — is **not yet decided**.
+A side row carries `occupant_user_id`, nullable (#74), written in K8 and unread until
+K9. NULL means no account holds that side, which is the ordinary case: an opponent
+across the table who has not installed anything. The row is created once that side's
+kill team is known, not at game creation, so a game can be in a state where one side
+exists and the other has not been described yet.
+
+How the opponent's side is established — a second roster, a hand-filled side, or a
+separate route — is **not yet decided**.
 
 **Planned — K9, a second player.**
 
@@ -420,9 +426,12 @@ body, a hand-filled side, or a separate route — is **not yet decided**.
 | `POST /me/kill-team/games/join` | redeem an invite code, sent in the **body** so it never reaches an access log. **Named by #71** |
 | `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. *Follows from #71; not named by it* |
 
-No route widens who may read a game. Authorization changes inside the existing
-dependency every nested game operation already calls — "owner" becomes "owner or
-participant" in one function, and the 404-rather-than-403 behaviour is unchanged.
+No route widens who may read a game, but **two** predicates change, not one (#75).
+Thirteen nested operations reach the game through one dependency, where "owner" becomes
+"owner or participant" and the 404-rather-than-403 behaviour is unchanged. The listing
+is the second: `GET /me/kill-team/games` filters the owner inside `list_games` and never
+calls that dependency, so without widening it too, a game you are playing would be
+missing from the list of your games.
 
 ## Current state
 
@@ -529,7 +538,7 @@ longer only waiting on the client: three of the five remaining slices are its ow
 | The battle screen's state half | `warhammer_web` KF4 | create a game, activations, wounds, order, tokens, turning point, CP/VP. Carries the only genuinely new problem left: the game's `version` can 409 on any write, and a phone and a laptop at the same table is the normal case |
 | The battle screen's reference half | `warhammer_web` KF5 | the team tab, equipment reveal, ploys, transform, the undo log |
 | The second side of the table | this repo, **K8** | `kt_game_sides`, so a game holds two kill teams with their own operatives, equipment, CP and VP. No second user yet — one person still operates the app, which is what makes an account-less opponent representable |
-| A second player in the session | this repo, **K9** | a time-limited invite code, authorization widened from owner to participant, and both clients converging by polling the event log |
+| A second player in the session | this repo, **K9** | a time-limited invite code, two authorization predicates widened from owner to participant, and both clients converging by polling the event log. The column that says who occupies a side lands in K8 (#74), because adding it later is a migration with a backfill |
 | Unit composition and honest points | this repo, **R13** | the datasheet's printed composition stored as its own words, and points that follow the model count instead of billing every squad at its cheapest legal size |
 
 ### How two players stay in sync

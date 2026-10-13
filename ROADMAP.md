@@ -867,7 +867,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: Not started.** Decisions #67, #68, #69, #70, #73.
+**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -888,10 +888,20 @@ the game (#67) — which is why this cannot be a widened where-clause: `kill_tea
 inside the current triple and `kt_games` holds exactly one, so a second team's operative
 fails the insert rather than slipping past a missing check.
 
-Two smaller things land here because both halves of the slice need them. `kt_game_events`
-gains `actor_user_id` (#70), nullable, since an event log that cannot say who wrote a row
-makes undo a button with an invisible target — needed whichever undo semantics K9 settles
-on, so it is not deferred with them. And `use_ploy` becomes side-scoped
+Three smaller things land here because both halves of the slice need them.
+`kt_game_events` gains `actor_user_id` (#70), nullable, since an event log that cannot say
+who wrote a row makes undo a button with an invisible target — needed whichever undo
+semantics K9 settles on, so it is not deferred with them. `KTGameEvent_Read` carries the
+actor's display name beside it, because no user route exists to resolve a UUID.
+
+And `kt_game_sides` carries `occupant_user_id` (#74), nullable, **written here and
+deliberately unread until K9**. A nullable column on a table this migration creates is
+free; adding it in K9 is a migration with a backfill against a schema that is by then
+shipped and seeded, which is the cost this slice's last paragraph warns about. The side
+row is created once that side's kill team is known rather than at game creation, so
+`kill_team_id` can stay NOT NULL for rows that have children — a composite leg under
+MATCH SIMPLE skips its whole check when any column is NULL, which is the hazard
+`fk_kt_game_roster`'s comment already records. And `use_ploy` becomes side-scoped
 (`POST .../sides/{side}/ploys`), because #65's whole argument is that spending a ploy is
 one operation against one CP pool, and there are now two.
 
@@ -906,13 +916,20 @@ migration with a backfill.
 
 ## K9. A second user occupies a side
 
-**Status: Not started.** Decisions #71, #72, and #70's undo contract.
+**Status: Not started.** Decisions #71, #72, #74, #75, and #70's undo contract.
 
-With K8 done, this is smaller than it looks. The authorization change is **one function**:
-all thirteen nested game operations reach the game through `get_owned_game`, which does a
-primary-key fetch and one Python equality test, and `get_game` — the detail read — has no
-owner clause of its own. Widening that test to "owner or participant" covers every route
-at once, and the 404-rather-than-403 existence hiding comes along unchanged.
+The authorization change is **two** predicates, not one function. All thirteen nested game
+operations reach the game through `get_owned_game`, which does a primary-key fetch and one
+Python equality test, and `get_game` — the detail read — has no owner clause of its own.
+Widening that test to "owner or participant" covers those thirteen, and the
+404-rather-than-403 existence hiding comes along unchanged. But `GET /me/kill-team/games`
+filters `owner_user_id` inside `list_games` and never calls the dependency (#75), so a
+game a user occupies but did not create would be absent from the list of their games.
+
+The earlier draft of this entry priced the whole change as one function. That was wrong in
+both directions: the dependency **reads nothing** that identifies a participant until #74's
+column exists, and it does not reach every path that needs widening. The column is K8's
+work; what lands here is the predicate, the listing, and the invite flow.
 
 The invite code is a capability and is treated as one (#71): generated with `secrets`,
 redeemed in a POST body so it never reaches an access log, one slot so regeneration
