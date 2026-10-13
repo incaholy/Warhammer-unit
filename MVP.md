@@ -492,7 +492,7 @@ revealed mid-game, ploys spent. Every change is one event in an append-only log,
 **undo** walks it back one step at a time.
 
 Both sides of the table are tracked, not just yours. You can fill the opponent's side
-in by hand, or send them a time-limited invite code and let them keep their own side
+in by hand, or send them an invite code good for 15 minutes and let them keep their own side
 from their own phone — the same game, each side picking up the other's changes
 within a few seconds (the mechanism is [below](#how-two-players-stay-in-sync)).
 
@@ -538,7 +538,7 @@ longer only waiting on the client: three of the five remaining slices are its ow
 | The battle screen's state half | `warhammer_web` KF4 | create a game, activations, wounds, order, tokens, turning point, CP/VP. Carries the only genuinely new problem left: the game's `version` can 409 on any write, and a phone and a laptop at the same table is the normal case |
 | The battle screen's reference half | `warhammer_web` KF5 | the team tab, equipment reveal, ploys, transform, the undo log |
 | The second side of the table | this repo, **K8** | `kt_game_sides`, so a game holds two kill teams with their own operatives, equipment, CP and VP. No second user yet — one person still operates the app, which is what makes an account-less opponent representable |
-| A second player in the session | this repo, **K9** | a time-limited invite code, two authorization predicates widened from owner to participant, and both clients converging by polling the event log. The column that says who occupies a side lands in K8 (#74), because adding it later is a migration with a backfill |
+| A second player in the session | this repo, **K9** | an invite code valid 15 minutes, two authorization predicates widened from owner to participant, and both clients converging by polling the event log. The column that says who occupies a side lands in K8 (#74), because adding it later is a migration with a backfill |
 | Unit composition and honest points | this repo, **R13** | the datasheet's printed composition stored as its own words, and points that follow the model count instead of billing every squad at its cheapest legal size |
 
 ### How two players stay in sync
@@ -556,8 +556,14 @@ GET /me/kill-team/games/{id}/events?since=47
   →  { events: [ 48, 49, 50 ], version: 51 }
 ```
 
-Each client polls that while the battle screen is actually in front of someone, and backs
-off when it is not. The answer is usually empty; when it is not, it is two or three rows.
+Each client polls that **every 3 seconds** while the battle screen is in front of
+someone, and **stops** while it is hidden, doing one catch-up read on return (#72). On a
+network error it backs off 3s, 6s, 12s, 24s, capping at 30s and resetting on success; on a
+404 it stops and shows the tombstone (#81). The answer is usually empty; when it is not,
+it is two or three rows. Two clients at that cadence is 0.67 requests a second.
+
+Those are obligations on a **client**, and nothing on the server enforces them — there is
+no rate limiting anywhere (L1), so a buggy client can poll as fast as it likes.
 
 **"Nearly" is doing work in that first sentence.** Two mutations write no event at all —
 creating a game and deleting one — so #81 gives both one, because a log that is the only
@@ -636,7 +642,7 @@ cannot tell you when to stop. Each of these is checkable, and all of them must h
 |---|---|
 | **The 40k loop closes** | A new user registers, records the models they own, and builds an army list — start to finish in a browser. Each entry MUST show the datasheet's printed composition. The list MUST price the squad size chosen, not the cheapest. It MUST report the total, whether the list fits its limit, and which units are still to buy. |
 | **The Kill Team loop closes** | A player MUST be able to go catalog → roster → battle for any of the 48 teams. A full four-turning-point game MUST track wounds, order, tokens, activations, CP, VP, equipment revealed mid-game and ploys spent. |
-| **Two players, two devices, one game** | Both sides MUST be tracked, each player holding their own. Each client MUST pick up the other's changes within seconds, without a reload. |
+| **Two players, two devices, one game** | Both sides MUST be tracked, each player holding their own. Each client MUST pick up the other's changes within **one poll interval — 3 seconds** — without a reload. |
 | **The game is reconstructable** | The event log MUST account for every change and name who made it. Undo MUST reverse changes one step at a time. |
 | **A mistake is cheap** | A premature finish MUST cost one undo. It MUST NOT need a reopen path, a support request or a database edit. |
 | **A re-scrape is safe** | Updating the catalog MUST NOT change a game in progress. A finished game MUST still show the datacards as they were played. |
