@@ -52,3 +52,51 @@ pytest                               # run tests
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `armor_save`, `wounds`, `leadership`,
   `objective_control`).
+
+## Documentation style
+
+Applies to **new and edited** prose in this repo's markdown, not as a mandate to
+rewrite what is already written. Two classes of content take different rules:
+
+- **Reference** — tables, endpoint lists, the data model, the glossary, success
+  criteria. One statement per cell or bullet, active voice, sentences under 25 words,
+  no noun cluster longer than three. Conditions become a vertical list rather than a
+  sentence with commas.
+- **Argument** — reasoning, rejected alternatives, known gaps, anything answering
+  *why*. Only the fixed terms below and active voice apply. Subordinate clauses are
+  the content here; do not flatten them.
+
+**One term, one meaning.** Each of these has already produced a wrong count:
+
+| Use | Means | Not |
+|---|---|---|
+| `path` | one URL template | `endpoint`, `route` |
+| `operation` | one method + path pair | `endpoint`, `route` |
+| `table` | a database table | `model` (a model is the SQLModel class) |
+| `built` | merged and tested on `main` | `done`, `complete`, `finished` |
+| `planned` | designed, not built | `upcoming`, `pending`, `TODO` |
+
+`endpoint` and `route` stay usable as informal collectives ("the Kill Team
+endpoints") and with a count of one. They are refused **beside a count of two or
+more**, which is the only place the ambiguity misleads: that is where a reader
+re-derives the number and gets a different one, because the games router has 10
+nested paths carrying 13 nested operations.
+
+**Normative statements use RFC 2119 keywords**, capitalised: `MUST`, `MUST NOT`,
+`SHOULD`, `MAY`. Those four only — `SHALL`, `REQUIRED`, `RECOMMENDED` and `OPTIONAL`
+are synonyms and the rule above refuses them. Use them where a statement carries
+obligation: success criteria, a convention a client must honour, a decision's Choice
+cell. Not in descriptive text — a data model row states what is, not what is required.
+
+**Not adopted: ASD-STE100's approved dictionary.** A controlled vocabulary earns its
+cost only at full compliance, because partial compliance means a reader can no longer
+assume any word is approved — so 80% of a dictionary buys close to none of its benefit
+at most of its cost. The fixed-term table does the part that pays: it constrains the
+words this project actually equivocates on, not all nine hundred.
+
+**Every count in prose names its source.** A number that cannot be re-derived from a
+file, a query or `openapi.json` does not belong in prose, and where a count is measured
+at a commit, say which commit.
+
+`tests/test_docs_style.py` enforces the two rules a test can hold. The rest are
+habits, and this file says which is which deliberately.
