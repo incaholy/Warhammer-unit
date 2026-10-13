@@ -405,9 +405,20 @@ nothing from the catalog.
 | | |
 |---|---|
 | `POST /me/kill-team/games/{game_id}/sides/{side}/ploys` | *replaces* `POST .../ploys` — deducts that side's command points. **Named by #67** |
-| `PATCH /me/kill-team/games/{game_id}/sides/{side}` | that side's CP, VP, ploys used and per-game choices, which move off the game onto the side. *Shape follows from #67; not named by it* |
+| `PATCH /me/kill-team/games/{game_id}/sides/{side}` | the six fields that move off the game: `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`, `choices`. *Shape follows from #67; not named by it* |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/operatives` | field a datacard on that side. *Follows from #67.* The row-keyed operative routes above need no change, since a row id already identifies one operative |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/equipment` | take a piece for that side. *Follows from #67* |
+
+**The reads reshape, and that is the part a client meets.** `KTGame_Read` keeps 16 of
+its 24 fields: six move onto their side, `opponent_name` and `opponent_victory_points`
+are removed with their data backfilled onto the opponent side, and the game gains named
+`player` and `opponent` objects. `equipment_limit` moves inside each side.
+`KTGame_ListRead` names both teams and gains `your_side`, so a row reads as a matchup
+and says which half is yours (#75). The operative and equipment reads gain `side`, and
+the event read gains the actor. `PATCH .../games/{game_id}` **narrows** from nine
+settable fields to three — `status`, `initiative`, `markers` — with the other six moving
+to `PATCH .../sides/{side}`. That is a breaking change to a contract the client consumes,
+landing in lockstep rather than behind an `/api/v2`.
 
 A side row carries `occupant_user_id`, nullable (#74), written in K8 and unread until
 K9. NULL means no account holds that side, which is the ordinary case: an opponent

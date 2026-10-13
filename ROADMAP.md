@@ -959,6 +959,39 @@ is another decision:
 Two more things read `kt_games.kill_team_id` and would break with it: `KTGame.kill_team`,
 which feeds `kill_team_name` and `faction_name` in both read models, and `_new_operative`.
 
+### What the reads become
+
+Measured against `openapi.json`, not transcribed. The earlier draft of this entry said
+nothing about the read models, which is where a client meets the change.
+
+**`KTGame_Read`** — 24 fields today, 16 of them unchanged.
+
+| | |
+|---|---|
+| Moves to its side (6) | `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`, `choices` |
+| Removed (2) | `opponent_name`, `opponent_victory_points` — backfilled onto the opponent side (#77) |
+| Added (1) | `player` and `opponent` objects, named rather than a `sides` array, because #68 already fixed that vocabulary and an array makes every client write a lookup the schema could name |
+| Relocated | `equipment_limit` moves inside each side. It is the constant `EQUIPMENT_LIMIT = 4`, so both carry 4 — but #57's argument is that the number lives in the backend precisely so a client does not hold a rule, and a client reading one number and applying it twice is one step from hard-coding it |
+| Unchanged by #76 | `kill_team_id`, `kill_team_name`, `faction_name`, `roster_id` — these would all have gone if the column had moved |
+
+**`KTGame_ListRead`** — loses `opponent_name`, `opponent_victory_points` and
+`victory_points`. Names **both** teams and gains `your_side` (#75).
+
+**`KTGameOperative_Read`** and **`KTGameEquipment_Read`** — each gains `side`.
+
+**`KTGameEvent_Read`** — gains `actor_user_id` and the actor's display name, or #70 means
+nothing.
+
+**`PATCH /me/kill-team/games/{game_id}`** narrows rather than disappears. `_UPDATABLE`
+holds nine fields; six move to `PATCH .../sides/{side}`, leaving `status`, `initiative`
+and `markers` on the game. The router's docstring lists four of the nine and is wrong
+today, independently of this slice.
+
+**This is a breaking change to a contract the other repo consumes**, and it lands as a
+lockstep change rather than an `/api/v2`. The client is pre-release on an unmerged
+branch, and a second version for a product with one consumer is ceremony. Recorded with
+that reasoning so the next breaking change is not waved through on this precedent.
+
 ### The rows that already exist
 
 Every existing game gets a player side row carrying its CP, VP, rules, ploys, ploys_used
