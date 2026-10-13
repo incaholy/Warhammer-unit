@@ -30,6 +30,10 @@ worth reading for the reasoning, not as a live bug list.
 | 10 | [R7](#r7-land-observability-request-id-structured-logs-error-reporting) | Observability: request ID, structured logs, error reporting | §2.4 | Small |
 | 11 | [R8](#r8-split-the-docs-and-generate-the-frontend-types) | Split the docs, generate frontend types | §6, §7 | Moderate, incremental |
 | 12 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.6 | Decision first |
+| 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
+
+R1–R12 are done. R13 is not started, and unlike its predecessors it changes a shipped
+schema rather than a draft one.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
 of each together, or the gap becomes a mismatch you introduced on purpose.
@@ -591,8 +595,11 @@ table is a table, with no interpretation step. Tiers are therefore data, and
 
 ```python
 __table_args__ = (UniqueConstraint("army_id", "unit_id"), ...)
-amount: int   # counts SQUADS, not models
+amount: int
 ```
+
+The class comment reads "A unit in an army list, and how many are in it", and the
+quantity is of whole units -- squads -- not of models.
 
 One row per datasheet per army, so a list holding one five-model squad and one ten-model
 squad of the same unit is **unrepresentable** — not merely unpriced. Kill Team hit the
@@ -629,16 +636,18 @@ not one the page prints, and must not refuse it. No composition line is enforced
 
 ### Cost note
 
-The 23 cached 40k faction pages are on disk in `scripts/data/cache`, so both parsers can
-be written and re-run offline against the same HTML. No live re-scrape, and the
-Wahapedia dependency is not touched to do this.
+There are 23 cached 40k faction pages in `scripts/data/cache`, so both parsers can be
+written and re-run offline against the same HTML -- **for whoever has that directory**.
+It is gitignored and absent from a fresh clone, so a second person re-scrapes before
+they can start. Cheap for one machine, not cheap for the repository.
 
 ---
 
 # Kill Team
 
 The design lives in [KILLTEAM.md](KILLTEAM.md); this is the build order. Built as a
-thin slice: K1–K5 for one or two kill teams first, then K6 widens to the rest.
+thin slice: K1–K5 for one or two kill teams first, then K6 widens to the rest. K1–K7
+are done; K8 and K9 are not started.
 Frontend views (warhammer_web) follow each step.
 
 Kill Team is kept separate from the 40k army list builder: `/kill-team` vs
@@ -647,6 +656,8 @@ Kill Team is kept separate from the 40k army list builder: `/kill-team` vs
 Models come first: the design has already been checked against a real team
 (Raveners), so the tables are known well enough to build, and the migration stays
 changeable until `fire-team` merges, since nothing is deployed against it.
+*(`fire-team` merged as PR #5 on 2026-10-08. The tables are on `main` and seeded, so
+a column now costs a migration with a backfill -- see K8.)*
 
 ## K1. Catalog models
 
@@ -659,7 +670,7 @@ regenerated repeatedly -- most recently for decision #54's owner column, K5's ga
 tables, #64's roster-name unique and K7's `withdrawn` flag. The count is deliberately not
 stated: a regeneration REPLACES the file, so git cannot be asked for it and two audits
 disagreed (ten versus twenty-four). `alembic heads` is the answer. It stays regenerable
-until `fire-team` merges.
+until `fire-team` merged, which it did as PR #5.
 
 ## K2. Data pipeline
 

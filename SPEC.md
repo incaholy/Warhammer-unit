@@ -1204,9 +1204,10 @@ parsing in the Makefile.)
   (`docker-entrypoint.sh` is committed `100755`, and `COPY` preserves the bit). Not
   live-verified (Docker daemon down).
 - [x] **Upsert 201-vs-200 scan** — *fixed:* `InventoryService`/`ArmyService.add_unit`
-  now return `(entry, created)`, so the routes pick 201 vs 200 from the flag instead
+  now return `(entry, created)`, so the routes picked 201 vs 200 from the flag instead
   of scanning a full `list_*` (one fewer query, no read-then-write race). Callers +
-  tests updated to unpack (and assert the flag).
+  tests updated to unpack (and assert the flag). **True at the time.** R12 later made
+  both add-unit `POST`s create-only, so they answer 201 or 409 and never 200.
 
 ### Consistency / cleanup 🧹
 - [x] **Remove dead `ForbiddenError`** — *fixed:* dropped the unused class from

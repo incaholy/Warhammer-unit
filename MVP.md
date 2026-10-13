@@ -216,8 +216,8 @@ Deleting would leave anything already rostered permanently broken.
 
 | Table | Holds | Notable |
 |---|---|---|
-| `kt_games` | the battle: status, turning point, phase, initiative, CP, VP, and the snapshotted team reference | 18 columns, **8 check constraints**, and the `version` that locks every write in the whole subtree |
-| `kt_game_operatives` | a **snapshot** of a datacard plus what is true of it now | 22 columns and **10 checks** — the most constrained table in the schema. Snapshot and live state side by side |
+| `kt_games` | the battle: status, turning point, phase, initiative, CP, VP, and the snapshotted team reference | 20 columns, **8 check constraints**, and the `version` that locks every write in the whole subtree |
+| `kt_game_operatives` | a **snapshot** of a datacard plus what is true of it now | 24 columns and **10 checks** — the most constrained table in the schema. Snapshot and live state side by side |
 | `kt_game_equipment` | equipment taken for this battle, text copied | plain single-column FKs, because universal equipment has a NULL team and offers no unique pair to point at |
 | `kt_game_events` | one row per thing that happened, append-only | `UNIQUE(game_id, sequence)` is the only ordering guarantee; `undone_by` is a self-reference |
 
@@ -264,8 +264,10 @@ game side (K8). Those are the three tables the MVP still adds.
 
 ## API surface
 
-**49 paths, 72 operations today**, every one of them below. Everything but the Kill
-Team catalog and `/health` requires a JWT; a user sees only their own rows.
+**49 paths, 72 operations today**, every one of them below. **Fifteen need no token**:
+`/health`, register and login, the six Kill Team catalog reads, and six 40k catalog
+reads — factions, subfactions, `/taxonomy`, weapons, abilities and a unit by id. The
+other 57 require a JWT, and a user sees only their own rows.
 
 | Area | Operations | |
 |---|---|---|
@@ -308,8 +310,8 @@ from the source, not user content.
 |---|---|
 | `GET /factions` · `POST /factions` | the top-level armies |
 | `GET /subfactions` · `POST /subfactions` · `DELETE /subfactions/{subfaction_id}` | narrower groupings inside a faction |
-| `GET /taxonomy` | factions with their subfactions nested, in one read |
-| `GET /units` | paged, filterable by faction, subfaction, free text, and whether you own it |
+| `GET /taxonomy` | the subfaction **names** allowed under each faction, from a module constant rather than the database. No ids, so a picker built on it cannot reference a row |
+| `GET /units` | paged, filterable by faction, subfaction, free text, and whether you own it. Serves anonymous callers, but `openapi.json` declares the bearer scheme because the `owned` dependency pulls it in — so a generated client treats it as authenticated |
 | `GET /units/facets` | per-faction counts for a filter sidebar, without fetching the units |
 | `GET /units/{unit_id}` · `POST /units` · `PATCH /units/{unit_id}` · `DELETE /units/{unit_id}` | one datasheet; delete answers 409 if an army or inventory references it |
 | `POST /units/{unit_id}/weapons` · `DELETE /units/{unit_id}/weapons/{weapon_id}` | link and unlink a weapon profile |
@@ -385,7 +387,7 @@ nothing from the catalog.
 | `GET /me/kill-team/games` | your games, newest first, lean — no snapshots |
 | `POST /me/kill-team/games` | start a battle from one of your rosters, copying every datacard, the team's rules and both ploy lists |
 | `GET /me/kill-team/games/{game_id}` | the battle whole: operatives, equipment, reference and the event log, in one request |
-| `PATCH /me/kill-team/games/{game_id}` | the game's own fields — status, initiative, CP, VP, markers, choices. Takes `version`, and answers 409 if the game has moved on |
+| `PATCH /me/kill-team/games/{game_id}` | the nine fields `_UPDATABLE` holds: `opponent_name`, `status`, `initiative`, `command_points`, `victory_points`, `opponent_victory_points`, `markers`, `ploys_used`, `choices`. Takes an **optional** `version`, and answers 409 when one is sent and the game has moved on |
 | `DELETE /me/kill-team/games/{game_id}` | delete the game and its rows; the roster and catalog are untouched |
 | `POST /me/kill-team/games/{game_id}/operatives` | field a datacard a rule or a piece of equipment granted mid-battle |
 | `PATCH /me/kill-team/games/{game_id}/operatives/{row_id}` | wounds, order, tokens, actions used. Zero wounds incapacitates |
@@ -453,7 +455,10 @@ with `create_all` from the models, which is fast but means those tests validate 
 against Postgres, so the two together catch a class of bug — an unbounded column, a
 dialect-specific query — that neither catches alone.
 
-**The client is three slices of five.** On [`warhammer_web`][web]: the two-section
+**The client is three slices of five — on the `kill-team-ui` branch, not `main`.**
+That branch is 70 commits ahead of the client's `main`, which carries no Kill Team UI
+at all: no route, view, query or type. A reader who clones `main` sees the 40k half
+only. On [`warhammer_web`][web]'s `kill-team-ui`: the two-section
 shell, the public Kill Team catalog, and the roster builder are done; the battle
 screen is not. So the API can do things no screen can yet reach.
 
@@ -581,8 +586,9 @@ above, and none of it blocking a feature:
 - **L1** — no rate limiting exists anywhere. A prerequisite for K9's invite code.
 - **L3** — a **deep readiness probe** is deliberately condition-gated. Build it when a
   load balancer or an orchestrator arrives, not before.
-- ~20 places where a test exists but cannot fail — found by mutation testing, listed
-  in [`ROADMAP.md`](ROADMAP.md).
+- Roughly 20 places where a test exists but cannot fail, found by mutation testing
+  and **not yet written down anywhere**. The count is a recollection, not a record,
+  which makes it the least trustworthy figure in this document.
 
 **Closed since the earlier backlog**, named because `SPEC.md` and `CODE-REVIEW.md` still
 cite the IDs: **FE1–FE3** (frontend unblockers), **H2** (`IntegrityError` → 409 is
@@ -643,9 +649,12 @@ Absent on purpose. Each is a decision with reasoning recorded in
 Stated plainly because a reviewer should not have to find them:
 
 - **The 40k catalog's provenance is unresolved.** `datasheets.json` is scraped
-  third-party data, kept out of the repository. Whether that data stays in the
-  project at all is an open question, and the create-only seed above is downstream
-  of it.
+  third-party data and it **is committed** — 2,112,565 bytes, tracked on every
+  branch. `.gitignore` records the state rather than the intent: it excludes the Kill
+  Team scrape because it is "a copy of someone else's content", and notes that "the
+  40k equivalent (`scripts/data/datasheets.json`) ended up committed". So the open
+  question is not whether that data stays in the project; it is already published.
+  The create-only seed above is downstream of it.
 - **The two test tiers are asymmetric.** Only one of the 713 tests is tier-gated, so
   on SQLite 712 of them validate the models rather than the shipped schema. The
   parity tier exists precisely for that, and it runs in CI — but a developer running

@@ -4,7 +4,7 @@ The design reference for the Kill Team part of the backend: what it is, the
 decisions behind it, and the order it is built in. Check new Kill Team work against
 this document, and update it when a decision changes.
 
-Branch: `fire-team` (cut from `roadmap`). See "Branching" at the end.
+Branch: merged. `fire-team` landed as PR #5 on 2026-10-08; see "Branching" at the end.
 
 ## Goal
 
@@ -221,7 +221,9 @@ reader of the tables would not guess them:
 
 ## Catalog
 
-Provisional tables — the migration is a **draft until `fire-team` merges**: a column
+**No longer provisional — `fire-team` merged as PR #5 and these tables are seeded on
+`main`, so a column now costs a migration with a backfill.** What follows describes how
+they were built. The migration was a **draft until `fire-team` merged**: a column
 the pages show is wrong is fixed and the migration regenerated, which has happened
 repeatedly — most recently for decision #54's owner column, K5's game tables, #64's
 roster-name unique and K7's `withdrawn` flag. The count is deliberately not stated: each
