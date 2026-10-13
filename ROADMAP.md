@@ -634,12 +634,44 @@ seven-model squad that matches no printed tier is **saved**; the list may say th
 not one the page prints, and must not refuse it. No composition line is enforced, and
 `validate` gains no issue kind that blocks a write.
 
+### The rows that already exist
+
+An existing `army_units` row with `amount = 3` becomes three rows, and the migration has
+to choose a model count for each. The only size the catalog knows is the minimum, which
+is the same figure today's understated `points_total` is built on — so **the backfill
+preserves the price the list already showed** rather than silently re-pricing somebody's
+saved army. A note on the list says the size was assumed and can be corrected, which
+turns a wrong number into a prompt instead of leaving it wrong or changing it without
+asking.
+
+Re-pricing was the alternative and it is worse in the way that matters: a player opens a
+list they built last month and the total has moved, with no action of theirs to explain
+it. The number was wrong before and after; only one version of being wrong is also a
+surprise.
+
 ### Cost note
 
 There are 23 cached 40k faction pages in `scripts/data/cache`, so both parsers can be
 written and re-run offline against the same HTML -- **for whoever has that directory**.
 It is gitignored and absent from a fresh clone, so a second person re-scrapes before
 they can start. Cheap for one machine, not cheap for the repository.
+
+## A slice states what it breaks, and what happens to rows that already exist
+
+Added because K8 did neither and the gap was found in review rather than in building.
+K8 named two of the four constraints its migration touches, and one of the two it missed
+was another decision (#60) reached through a column the slice was dropping. R13 had the
+same hole from the other end: its DDL was right and it never said what happens to an
+existing `army_units` row.
+
+So every slice from here states both. **What this breaks**: every constraint,
+relationship, read model and service read that names a column or table the slice moves or
+drops — found by searching for the name, not by reasoning about the data, because a
+column participates in constraints that sit nowhere near its declaration. **The rows that
+already exist**: what the backfill writes, and where it has to choose, that choice named
+as a decision rather than left to whoever writes the migration.
+
+A schema change is not specified when the DDL is right.
 
 ---
 
@@ -867,7 +899,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74.
+**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -905,9 +937,39 @@ MATCH SIMPLE skips its whole check when any column is NULL, which is the hazard
 (`POST .../sides/{side}/ploys`), because #65's whole argument is that spending a ploy is
 one operation against one CP pool, and there are now two.
 
-Watch `ck_kt_game_operative_current_wounds`, which couples `current_wounds` to the
-snapshot's `wounds`, and `UNIQUE(game_id, equipment_id)`, which has to become
-`UNIQUE(game_id, side, equipment_id)` or the two sides cannot take the same piece.
+### What this breaks
+
+The earlier version of this entry named two constraints. There are four, and one of them
+is another decision:
+
+- `uq_kt_game_owner_team_id` is the provably-unique parent every composite leg into
+  `kt_games` targets. The child leg moves to the side, so the target moves with it — a
+  new unique on `kt_game_sides(owner_user_id, game_id, side, kill_team_id)`.
+- `UNIQUE(game_id, equipment_id)` becomes `UNIQUE(game_id, side, equipment_id)`, or the
+  two sides cannot take the same piece.
+- `ck_kt_game_operative_current_wounds` still couples `current_wounds` to the snapshot's
+  `wounds`, so a transform to a lower-wound card stays the service's problem.
+- **`fk_kt_game_roster` is decision #60.** Its comment says so: no `ondelete`,
+  deliberately, because "NO ACTION means deleting a roster a game was played from is
+  REFUSED". That is the 409 protecting a played-from roster, and it is tested. It is
+  built on `kt_games.kill_team_id`, which is why #76 keeps that column rather than
+  moving it: dropping it would not fail loudly, it would start letting roster deletions
+  succeed and strand finished battle records.
+
+Two more things read `kt_games.kill_team_id` and would break with it: `KTGame.kill_team`,
+which feeds `kill_team_name` and `faction_name` in both read models, and `_new_operative`.
+
+### The rows that already exist
+
+Every existing game gets a player side row carrying its CP, VP, rules, ploys, ploys_used
+and choices. An opponent side row is created **only** where `opponent_name` or
+`opponent_victory_points` holds something, because that is hand-entered data about a game
+somebody played and discarding it is not a migration detail.
+
+That forces `kt_game_sides.kill_team_id` to be nullable (#77): a historical game never
+recorded the opponent's team. It is safe for a reason rather than by luck — a backfilled
+opponent side has no operatives and no equipment, so there are no children for a
+half-NULL composite leg to stop protecting.
 
 Unlike K1–K7 this is the first Kill Team slice whose migration is **stacked rather than
 redrafted** — the Kill Team tables are on `main` and seeded, so #54's and #64's "free
