@@ -6,6 +6,12 @@ this document, and update it when a decision changes.
 
 Branch: merged. `fire-team` landed as PR #5 on 2026-10-08; see "Branching" at the end.
 
+**What this document covers.** The Kill Team half — its design, and every decision with
+the reasoning that produced it. The 40k half and the engineering both share are in
+[SPEC.md](SPEC.md); build order and status are in [ROADMAP.md](ROADMAP.md); scope and
+current state are in [MVP.md](MVP.md). Where any disagree, the one whose subject it is
+wins — Kill Team design here, and MVP.md cites rather than overrides.
+
 ## Goal
 
 Let players play a game of **Kill Team (2024 edition)** with the app as the table's

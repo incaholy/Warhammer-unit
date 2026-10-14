@@ -779,7 +779,9 @@ sufficient.
 
 ## Deliberate non-features
 
-Absent on purpose. Each is a decision with reasoning recorded in
+**Decided against.** Every entry carries a **decision number**, which is what tells it
+apart from the two sections below: a numbered decision means somebody argued it and
+wrote down why. Absent on purpose. Each is a decision with reasoning recorded in
 [`KILLTEAM.md`](KILLTEAM.md) or [`SPEC.md`](SPEC.md), not a gap:
 
 - **No rules engine.** The app never decides whether a play is legal. Dice are
@@ -825,7 +827,10 @@ from something that crept in.
 
 ## Known gaps and accepted trade-offs
 
-Stated plainly because a reviewer should not have to find them:
+**Not reached.** Every entry carries a **roadmap id** where one exists, and says so
+plainly where none does — an unrecorded gap is worse than a deferred one, and the
+difference should be visible. Stated here because a reviewer should not have to find
+them:
 
 - **The 40k catalog's provenance is unresolved.** `datasheets.json` is scraped
   third-party data and it **is committed** — 2,112,565 bytes, tracked on every
@@ -910,7 +915,8 @@ in advance.
 
 ## Out of scope
 
-Not planned, as distinct from not finished:
+**Not planned.** No decision number and no roadmap id, because there is nothing to
+point at — that absence is the marker. Distinct from not finished:
 
 - **Leagues, tournaments, a public profile, a shared collection.** Two players share
   a *battle* (K8, K9) and nothing else: a collection, an army list and a roster stay
@@ -953,7 +959,7 @@ Workshop's; these are plain-language definitions, not rules.
 | | |
 |---|---|
 | [`README.md`](README.md) | how to run it |
-| [`SPEC.md`](SPEC.md) | the full architecture and every route |
+| [`SPEC.md`](SPEC.md) | the 40k architecture and every 40k route, plus the engineering both halves share |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | the structural rules, each with a status |
 | [`KILLTEAM.md`](KILLTEAM.md) | the Kill Team design — 73 numbered decisions |
 | [`ROADMAP.md`](ROADMAP.md) | build order and the remaining backlog |

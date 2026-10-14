@@ -1,6 +1,16 @@
 # Warhammer Unit Backend — Specification
 
-A backend for storing Warhammer 40k unit datasheets in PostgreSQL, exposed through a FastAPI REST API.
+A backend for **Muster**, a collection and game manager for two Warhammer games, in
+PostgreSQL behind a FastAPI REST API.
+
+**What this document covers.** The 40k half — the datasheet catalog, inventories and
+army lists — and the engineering both halves share: layering, errors, pagination,
+migrations, testing, deployment. The Kill Team half is specified in
+[KILLTEAM.md](KILLTEAM.md) and not here — the two games share nothing but
+`TimestampMixin`, as "Models" below records — and scope and current state are in
+[MVP.md](MVP.md). Where any of the three disagree, the
+one whose subject it is wins: routes and architecture here, Kill Team design there,
+scope in MVP.md — which cites both and overrides neither.
 
 The data divides into two halves:
 
