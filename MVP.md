@@ -870,6 +870,16 @@ them:
   own abilities, and no universal action is stored anywhere — so Dash, Reposition, Fall
   Back and Pick Up Marker are refused on every operative. A check that refuses legal play
   is worse than no check, so #84 either stores them or drops the check.
+- **R14** — two catalog reads whose contract does not match what they serve. `GET /units`
+  and `/units/facets` declare the bearer scheme and accept anonymous callers, so a
+  generated client believes they need a token. And `GET /taxonomy` returns names without
+  ids, so a picker built on it cannot reference the row a user chose.
+- **The client's Kill Team half is on a branch, and there is no backend id for that.**
+  `kill-team-ui` is 70 commits ahead of the client's `main` and 0 behind, and `main`
+  carries no Kill Team UI at all. Merging it is work in the other repository, so no
+  entry here covers it — stated rather than given an id it would not deserve. Its own
+  PR #2 has to land first, as a merge commit rather than a squash, or the branch has to
+  be moved onto a rewritten base.
 - **No deploy automation.** Deployment is documented and manual.
 - **Mutation testing is manual.** It has found real defects — tests that passed for
   the wrong reason, in both repos — but it is run by hand rather than in CI.

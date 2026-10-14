@@ -31,9 +31,10 @@ worth reading for the reasoning, not as a live bug list.
 | 11 | [R8](#r8-split-the-docs-and-generate-the-frontend-types) | Split the docs, generate frontend types | §6, §7 | Moderate, incremental |
 | 12 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.6 | Decision first |
 | 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
+| 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
 
-R1–R12 are done. R13 is not started, and unlike its predecessors it changes a shipped
-schema rather than a draft one.
+R1–R12 are done. R13 and R14 are not started, and unlike their predecessors R13 changes
+a shipped schema rather than a draft one.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
 of each together, or the gap becomes a mismatch you introduced on purpose.
@@ -720,6 +721,39 @@ There are 23 cached 40k faction pages in `scripts/data/cache`, so both parsers c
 written and re-run offline against the same HTML -- **for whoever has that directory**.
 It is gitignored and absent from a fresh clone, so a second person re-scrapes before
 they can start. Cheap for one machine, not cheap for the repository.
+
+## R14. Two catalog reads whose contract does not match what they serve
+
+**Status: Not started.** Both found in the October 2026 review of the MVP document, and
+both corrected in the prose there while the behaviour stayed as it was.
+
+### `GET /units` and `GET /units/facets` declare authentication they do not require
+
+`openapi.json` gives both the bearer scheme, so a generated client treats them as
+authenticated. At runtime they serve anonymous callers. The cause is the `owned`
+dependency: `get_owned_by` declares the query parameter **and** resolves the caller, so
+it pulls the OAuth2 scheme into the contract even on a path where a token is optional.
+
+This is the one small finding with a consequence in the other repository, because the
+generated types are what the client is built from — a client that believes these need a
+token will either send one it does not have or hide a view it could show. The fix is to
+split the dependency: one that declares `?owned=`, one that resolves an optional caller,
+so the scheme is attached only where it is required.
+
+### `GET /taxonomy` serves names, and a picker needs ids
+
+It returns `dict[str, list[str]]` from the `FACTION_SUBFACTIONS` module constant — the
+subfaction names allowed under each faction, with no database read and no ids. The shape
+is right for validating a value and wrong for the thing it is named for: a client
+building a dropdown from it cannot then reference the row the user picked.
+
+**The decision this needs is what the endpoint is for.** If it is a picker, it returns
+ids and reads the database. If it is the enum of accepted values — which is what the
+docstring says, "the values `create_subfaction` will accept, whether or not any have been
+created yet" — then it is correct as it stands and the name is what misleads. Those are
+different endpoints and the current one is halfway between.
+
+---
 
 ## A slice states what it breaks, and what happens to rows that already exist
 
