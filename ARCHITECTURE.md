@@ -151,6 +151,16 @@ table gets linearly slower and can skip or repeat rows when data changes between
 keyset is stable but cannot jump to an arbitrary page. For a mostly-static catalog, offset is
 defensible. Decide once, write it down, apply everywhere.
 
+**An append-only collection is read by `offset` like the rest, and gets no cursor envelope.**
+The objection to offset above — skipping or repeating when data changes between requests —
+only happens to rows BEFORE the offset, and a log that only appends never has any. Where the
+ordering key is gapless, `offset` may be implemented as a keyset seek (`WHERE key > :offset`),
+so stability and index use cost nothing and the envelope stays uniform. `total` minus `offset`
+is how far behind a caller is, which is what a `has_more` flag would have said. Anything such a
+read needs that the envelope lacks belongs on the row, not on the response and not in a header
+— for the reason stated above about headers. Written down because the first one (K9's event
+read, KILLTEAM.md #91) invented `{events, version}` with no cap before this said anything.
+
 **Status: ✅ Done (R4).** All three rules hold. Every one of the twelve collections returns
 `Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
 `app/api/pagination.py`, with a documented offset-based choice and a `limit` capped at 200. The total

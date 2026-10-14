@@ -1107,8 +1107,9 @@ entropy is the only thing standing between it and a brute force.
 
 Convergence is polling, not a socket (#72). The event log is already the game's source of
 truth and `sequence` is already monotonic per game, so
-`GET .../games/{id}/events?since={sequence}` is a cursor read over a mechanism that
-exists. The reasoning is in #72 and the short version is that the reconnect path is
+`GET .../games/{game_id}/events` is an ordinary paged read over a mechanism that exists
+— no cursor envelope, because the sequence is gapless so `offset` and "since" are the same
+number (#91, and ARCHITECTURE §2.3). The reasoning is in #72 and the short version is that the reconnect path is
 mandatory — Cloud Run caps a request at 60 minutes and a game runs longer — and the
 reconnect path is this endpoint, so a socket would be an addition to it rather than an
 alternative.

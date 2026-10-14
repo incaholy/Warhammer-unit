@@ -437,7 +437,7 @@ as well as a code, because that is what makes the joining side's kill team known
 
 | | |
 |---|---|
-| `GET /me/kill-team/games/{game_id}/events?since={sequence}` | the events after that sequence, with the game's current `version`. How both clients converge. **Named by #72** |
+| `GET /me/kill-team/games/{game_id}/events` | the event log, paged by `?offset=&limit=` like every other collection and capped at 200 (#91). How both clients converge. **Named by #72** |
 | `POST /me/kill-team/joins` | redeem an invite code with the roster you are playing, both in the **body** so the code never reaches an access log. Outside the `games` id namespace, because a join has no game id and `ARCHITECTURE.md` §2.5 forbids a non-resource sitting beside one (#90). **Named by #71, #86 and #90** |
 | `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. **Host only** (#82). *Follows from #71; not named by it* |
 | `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
@@ -672,9 +672,14 @@ happened after the last number it saw — a cursor read over a log that already 
 already drives undo:
 
 ```
-GET /me/kill-team/games/{id}/events?since=47
-  →  { events: [ 48, 49, 50 ], version: 51 }
+GET /me/kill-team/games/{game_id}/events?offset=47&limit=200
+  →  { items: [ 48, 49, 50 ], total: 50, limit: 200, offset: 47 }
 ```
+
+It is an ordinary paged collection, not a special one (#91). The sequence is gapless, so
+`offset` and "since" are the same number — and `total` minus `offset` is how far behind a
+client is, so nothing has to be added for that either. The `version` a client needs for
+its next write rides on each event, as the version that event produced.
 
 Each client polls that **every 3 seconds** while the battle screen is in front of
 someone, and **stops** while it is hidden, doing one catch-up read on return (#72). On a
