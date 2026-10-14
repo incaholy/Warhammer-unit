@@ -53,7 +53,10 @@ the table.
 
 That is a scope decision, not an unfinished feature, and it is why several things a
 reviewer might expect are absent on purpose — see
-[Deliberate non-features](#deliberate-non-features).
+[Deliberate non-features](#deliberate-non-features). It is also not absolute: the service
+enforces seven things, listed under
+[Where the app does decide](#where-the-app-does-decide), five of them bookkeeping and two
+of them rules the app has taken on.
 
 ## Tech stack
 
@@ -706,6 +709,29 @@ Absent on purpose. Each is a decision with reasoning recorded in
   all — every path under it declares only `get`. An admin edit would be undone by the
   next seed anyway. (#21, #49)
 
+### Where the app does decide
+
+The constraint above says the app never applies a rule, and that is true of the game's
+rules. It is not true of nothing. The Kill Team service enforces seven things, and
+`service_killteam_game.py` has enumerated them in its own docstring since it was
+written — this list is lifted from there rather than compiled, and each entry says
+whether it is bookkeeping or a rule the app has taken on.
+
+| | | |
+|---|---|---|
+| Wounds stay within the card's own maximum | **bookkeeping** | a `CHECK` couples `current_wounds` to the snapshot. A number outside the card is a typo, not a play |
+| An operative activates once per turning point | **bookkeeping** | stamped from the game's own turning point, so a caller cannot record an activation in one that is not happening (#61) |
+| Command points never go negative | **bookkeeping** | a `CHECK`. How often a ploy may be used stays the players' (#65) |
+| A game has four turning points | **bookkeeping** | a `CHECK`, and `advance` is the only way they move (#85) |
+| A new pick of a withdrawn catalog row is refused | **bookkeeping** | the row is gone from the source; rows already in a game are untouched (#55) |
+| An action must be on the operative's own datacard | **a rule the app took on** | it refuses a write based on what a card lists — and today it refuses **legal** play, because no universal action is stored, so Dash, Reposition, Fall Back and Pick Up Marker cannot be recorded at all. #84 stores them, or removes the check |
+| A ploy must be one the game's snapshot lists | **a rule the app took on** | same shape, defensible: #65 pays the CP from the snapshot, so a ploy the team does not have has no cost to charge |
+
+Two of the seven refuse a write based on card contents. Both are defensible and neither
+is the game's rules — but calling them bookkeeping would be a stretch, and a reader who
+found the constraint stated absolutely would have no way to tell a considered exception
+from something that crept in.
+
 ## Known gaps and accepted trade-offs
 
 Stated plainly because a reviewer should not have to find them:
@@ -739,6 +765,10 @@ Stated plainly because a reviewer should not have to find them:
 - **The 40k catalog holds no composition at all.** The scraper locates the composition
   block on each page specifically in order to skip it, so the thing a list builder most
   obviously needs is the one thing not captured.
+- **The tracker cannot record a Dash.** `actions_used` is checked against the operative's
+  own abilities, and no universal action is stored anywhere — so Dash, Reposition, Fall
+  Back and Pick Up Marker are refused on every operative. A check that refuses legal play
+  is worse than no check, so #84 either stores them or drops the check.
 - **No deploy automation.** Deployment is documented and manual.
 - **Mutation testing is manual.** It has found real defects — tests that passed for
   the wrong reason, in both repos — but it is run by hand rather than in CI.
