@@ -438,7 +438,7 @@ as well as a code, because that is what makes the joining side's kill team known
 | | |
 |---|---|
 | `GET /me/kill-team/games/{game_id}/events?since={sequence}` | the events after that sequence, with the game's current `version`. How both clients converge. **Named by #72** |
-| `POST /me/kill-team/games/join` | redeem an invite code with the roster you are playing, both in the **body** so the code never reaches an access log. **Named by #71 and #86** |
+| `POST /me/kill-team/joins` | redeem an invite code with the roster you are playing, both in the **body** so the code never reaches an access log. Outside the `games` id namespace, because a join has no game id and `ARCHITECTURE.md` §2.5 forbids a non-resource sitting beside one (#90). **Named by #71, #86 and #90** |
 | `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. **Host only** (#82). *Follows from #71; not named by it* |
 | `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
 
@@ -547,7 +547,7 @@ characters from `secrets`, `invite_expires_at` 15 minutes out (#71). Event 2,
 `invite_minted` — and the payload carries **no code**. #71 keeps the code out of access
 logs; the event log is a log too, and it is readable by whoever joins.
 
-**3. Vex joins.** `POST /me/kill-team/games/join` with `{code, roster_id}` in the body.
+**3. Vex joins.** `POST /me/kill-team/joins` with `{code, roster_id}` in the body.
 The code is the only handle Vex has — he does not know the game id — and **the roster is
 required**, because joining is what makes the opponent's kill team known, and #74 will
 not create a side row without it. The server creates `side='opponent'`,
