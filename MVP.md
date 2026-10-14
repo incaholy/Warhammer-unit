@@ -429,15 +429,16 @@ across the table who has not installed anything. The row is created once that si
 kill team is known, not at game creation, so a game can be in a state where one side
 exists and the other has not been described yet.
 
-How the opponent's side is established — a second roster, a hand-filled side, or a
-separate route — is **not yet decided**.
+How the opponent's side is established is **settled** (#86): joining carries a roster
+as well as a code, because that is what makes the joining side's kill team known, and
+#74 will not create a side row without one.
 
 **Planned — K9, a second player.**
 
 | | |
 |---|---|
 | `GET /me/kill-team/games/{game_id}/events?since={sequence}` | the events after that sequence, with the game's current `version`. How both clients converge. **Named by #72** |
-| `POST /me/kill-team/games/join` | redeem an invite code, sent in the **body** so it never reaches an access log. **Named by #71** |
+| `POST /me/kill-team/games/join` | redeem an invite code with the roster you are playing, both in the **body** so the code never reaches an access log. **Named by #71 and #86** |
 | `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. **Host only** (#82). *Follows from #71; not named by it* |
 | `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
 
@@ -524,6 +525,72 @@ Both sides of the table are tracked, not just yours. You can fill the opponent's
 in by hand, or send them an invite code good for 15 minutes and let them keep their own side
 from their own phone — the same game, each side picking up the other's changes
 within a few seconds (the mechanism is [below](#how-two-players-stay-in-sync)).
+
+### One shared game, end to end
+
+Prose hides missing states, so here is one game with real values. Nel hosts with a
+Raveners roster of six operatives; Vex joins playing Gellerpox. Every step names what the
+request carries and what the other screen can see afterwards.
+
+**1. Nel starts the game.** `POST /me/kill-team/games` with her roster id. The server
+snapshots six datacards, the team's rules and both ploy lists, then creates **one** side
+row: `side='player'`, `kill_team_id=Raveners`, `occupant_user_id=Nel`. The opponent side
+does **not** exist yet, because no kill team is known for it (#74). Event 1,
+`game_created` (#81). `version=1`, `status=setup`, `turning_point=1`,
+`phase=strategy`, `initiative=NULL`.
+
+The read returns `player` populated and **`opponent: null`**. A client must render that
+third state, the way it already must for `initiative` (#62).
+
+**2. Nel mints an invite.** `POST .../games/{id}/invite`, host only (#82). Eight
+characters from `secrets`, `invite_expires_at` 15 minutes out (#71). Event 2,
+`invite_minted` — and the payload carries **no code**. #71 keeps the code out of access
+logs; the event log is a log too, and it is readable by whoever joins.
+
+**3. Vex joins.** `POST /me/kill-team/games/join` with `{code, roster_id}` in the body.
+The code is the only handle Vex has — he does not know the game id — and **the roster is
+required**, because joining is what makes the opponent's kill team known, and #74 will
+not create a side row without it. The server creates `side='opponent'`,
+`kill_team_id=Gellerpox`, `occupant_user_id=Vex`, snapshots his six datacards, then
+clears `invite_code` and `invite_expires_at`. Event 3, `guest_joined`.
+
+**4. Vex's first read.** `GET .../games/{id}` now resolves for him (#75). Both sides are
+populated, the log holds three events, `version=3`. The read carries `your_side`, so Vex
+does not compare user ids to learn which half of the screen is his.
+
+**5. Nel starts play.** `POST .../advance`: `phase` becomes `firefight` and `status`
+becomes `in_progress`. Event 4. Vex's next poll, within 3 seconds, returns event 4 and
+`version=4` (#72).
+
+**6. Either of them records anything.** Vex sets a Ravener's wounds, or Nel sets a
+Gellerpox's. **A write is not scoped to your own side.** One person often holds one phone
+at a real table, and #70 already makes undo global on the same reasoning — one shared
+truth, with the actor recorded so it is visible rather than silent.
+
+**7. Vex spends a ploy.** `POST .../sides/opponent/ploys` with its name. His side's CP
+drops by the snapshot's cost, and `ploys_used` gains an entry — one operation, one event,
+so one undo reverses both (#65). Event 7. Nel's screen shows it within a poll.
+
+**8. The conflict.** Both read at `version=7`, with Hormagaunt on 5 wounds.
+
+- Vex sends `PATCH .../operatives/{row}` with `If-Match: 7` and `current_wounds=4`. It
+  applies. `version=8`, event 8, actor Vex.
+- Nel sends the same route with `If-Match: 7` and `current_wounds=1`. Her write carries a
+  version the game has left, so it is refused **409** (#79).
+
+**9. Nel's screen does not retry.** It re-reads, finds `version=8`, Hormagaunt on 4, and
+event 8 naming Vex. It shows her what she sent, what is stored, and who changed it —
+then she chooses (#78). A blind retry here would delete Vex's 4 with nobody told, which
+is the defect #70 refused a feature over.
+
+**10. Vex leaves.** `DELETE .../games/{id}/sides/opponent/occupant` sets his
+`occupant_user_id` back to NULL (#83). The side keeps its team, its operatives and its
+score, and Nel plays on recording both halves by hand — which is the state a game against
+an account-less opponent is in from the start, not a special one. His events stay; the log
+is append-only and his actions happened.
+
+**What this does not cover**, and so is still open: the six ways a join can fail, and
+what either screen shows while polling itself is failing.
 
 ## How the project is operated
 
