@@ -32,9 +32,10 @@ worth reading for the reasoning, not as a live bug list.
 | 12 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.6 | Decision first |
 | 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
 | 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
+| 15 | [R15](#r15-four-reads-sit-outside-the-envelope-and-three-have-no-recorded-reason) | Four reads sit outside the envelope, and three have no recorded reason | §2.3 | Decision first; the shape is open |
 
-R1–R12 are done. R13 and R14 are not started, and unlike their predecessors R13 changes
-a shipped schema rather than a draft one.
+R1–R12 are done. R13, R14 and R15 are not started, and unlike their predecessors R13
+changes a shipped schema rather than a draft one.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
 of each together, or the gap becomes a mismatch you introduced on purpose.
@@ -752,6 +753,48 @@ ids and reads the database. If it is the enum of accepted values — which is wh
 docstring says, "the values `create_subfaction` will accept, whether or not any have been
 created yet" — then it is correct as it stands and the name is what misleads. Those are
 different endpoints and the current one is halfway between.
+
+---
+
+## R15. Four reads sit outside the envelope, and three have no recorded reason
+
+**Status: Not started. Recorded now, decided later — and the approach is deliberately
+open**, because the intent is a different shape for every read rather than retrofitting
+the current envelope onto four exceptions.
+
+§2.3's status says every one of the **twelve** collections returns `Page[T]`. That is
+true, and it is true because four reads are not counted as collections — and nothing
+anywhere says why they are not. The membership test lives in nobody's head:
+
+| Read | Shape | Recorded reason |
+|---|---|---|
+| `GET /kill-team/teams/{id}/composition` | bare array | only the word "unpaginated" in a route table |
+| `GET /me/armies/{army_id}/shortfall` | bare array | **none** |
+| `GET /kill-team/universal` | two arrays in one object | #48 justifies the route, never the shape |
+| `GET /taxonomy` | a `dict` map | §2.5 covers its path, not its shape |
+
+Each is individually defensible, which is the problem: from outside, a justified
+exception and an unexamined one look identical. Three observations for whoever takes
+this, so the work does not start from scratch:
+
+**The envelope provides two separable things.** Uniformity, so a client handles one
+shape — and a **cap**, which bounds a response regardless of what the data does. A read
+can legitimately not need paging while still needing a bound, and conflating them is what
+makes this look like a single question.
+
+**One of the four is a document, not a collection.** #44 and #45 make `position` plus
+`depth` reconstruct a printed page, so `/composition` is one document stored as rows.
+Paging it lets a client fetch half a section, which is worse than not paging it. But it
+has no bound either: roughly nineteen rows per team is an average, not a guarantee, and a
+composition far past that is a scraper failure rather than a long team.
+
+**One of the four has no bound at all.** `/shortfall` returns a row per army entry and an
+army has no size cap — and R13 makes it worse, since a list carrying `amount: 10` on five
+entries becomes fifty rows. This is the one whose exception rests on nothing.
+
+What this entry does **not** decide: whether the answer is a membership test in §2.3, a
+different envelope for every read, separating the cap from the paging, or something else.
+That is the point of recording it rather than fixing it piecemeal now.
 
 ---
 

@@ -161,7 +161,13 @@ read needs that the envelope lacks belongs on the row, not on the response and n
 — for the reason stated above about headers. Written down because the first one (K9's event
 read, KILLTEAM.md #91) invented `{events, version}` with no cap before this said anything.
 
-**Status: ✅ Done (R4).** All three rules hold. Every one of the twelve collections returns
+**Status: ✅ Done (R4), with four reads outside the count — see R15.** `/composition`,
+`/shortfall`, `/universal` and `/taxonomy` return a collection without the envelope, and
+three of the four have no recorded reason. The claim below is true of the twelve; what is
+missing is the test for what makes something one of them. Deferred deliberately, because
+the intent is a different shape for every read rather than retrofitting this one.
+
+All three rules hold. Every one of the twelve collections returns
 `Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
 `app/api/pagination.py`, with a documented offset-based choice and a `limit` capped at 200. The total
 travels in the body and `X-Total-Count` is gone, which fixes SPEC.md BUG1 structurally rather than by

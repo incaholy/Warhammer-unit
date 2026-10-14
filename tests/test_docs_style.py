@@ -44,8 +44,12 @@ NUMBER_WORDS = (
 # A count of TWO OR MORE beside `endpoint`/`route`. One is exempt on purpose: "one
 # route away" and "exactly one endpoint paginates" are ordinary English where no
 # tallying is implied, and a reader cannot re-derive 1 into a different number.
+# `(?<![#\w])` is load-bearing: these files reference decisions as `#48` and roadmap
+# entries as `R12` constantly, and a bare `\b` matches between `#` and `4`. Without it,
+# "#48 justifies the route" reads as a count of 48 routes -- which it did, on the first
+# document to put a decision reference within two words of the word.
 LOOSE_COUNT = re.compile(
-    rf"\b(?:[2-9]|[1-9][0-9,]*|{NUMBER_WORDS})\s+"
+    rf"(?<![#\w])(?:[2-9]|[1-9][0-9,]*|{NUMBER_WORDS})\s+"
     rf"(?:\w+\s+){{0,2}}?(endpoints?|routes?)\b",
     re.I,
 )
