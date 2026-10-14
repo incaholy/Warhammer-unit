@@ -589,8 +589,32 @@ score, and Nel plays on recording both halves by hand — which is the state a g
 an account-less opponent is in from the start, not a special one. His events stay; the log
 is append-only and his actions happened.
 
-**What this does not cover**, and so is still open: the six ways a join can fail, and
-what either screen shows while polling itself is failing.
+### When a join fails, and while nothing is happening
+
+Eight states, named to the standard `#62` already sets for `initiative` — because
+nobody can build a screen from "it fails".
+
+| Outcome | | |
+|---|---|---|
+| Wrong code | **404** | "no invitation matches that code" |
+| Expired code | **404** | the same message, deliberately. The server can tell, but saying so confirms a game exists to a stranger holding a code they should not have |
+| Already used | **404** | the same message, because the server genuinely **cannot** tell. `#71` clears the code on redemption, so the row holds NULL whether it was spent an hour ago or never existed |
+| Game finished | **409** | "that game is over". The caller holds a valid code, so there is nothing to hide |
+| Side occupied | **409** | "someone is already playing that side" |
+| Caller is the host | **409** | "you are already in this game" |
+
+A failed join leaves a live code alone: the failure is not the code's fault, and clearing
+it would make the host re-mint over the guest's timing.
+
+Two more states a client must render (#89):
+
+- **No opponent yet.** `opponent` is null, so the screen shows your side and an
+  invitation prompt — never an empty opponent panel, which implies a team that has been
+  described and holds nothing.
+- **Polling failing.** After the first failed retry the screen says it is out of date and
+  when it last succeeded: "last updated 14:32, reconnecting". One state covers a network
+  error and a server error, because a client cannot reliably tell them apart. A tracker
+  that silently stops updating looks exactly like a game where nothing is happening.
 
 ## How the project is operated
 
