@@ -556,12 +556,22 @@ screen is not. So the API can do things no screen can yet reach.
 
 ## How a player uses it
 
+**Two of the four passages below describe work that is not built.** The 40k and Kill Team
+loops are live today. The composition and pricing paragraph needs R13; everything about a
+second side, an invite code or two devices needs K8 and K9. Each is marked where it
+starts, because the alternative — hedging every sentence — makes the built half read as
+uncertain too.
+
+### Today
+
 **Army List.** Browse the catalog by faction. Record the models you own. Create an
 army with a points limit, add units to it, and the app reports the running total,
 whether the list fits, and the *shortfall* — which units the list needs that your
 inventory does not have. It never refuses a list; it tells you what is true about it.
 
-Each entry also shows the datasheet's **printed composition** — the models the unit is
+### Planned — R13
+
+Each entry will also show the datasheet's **printed composition** — the models the unit is
 made of, worded as the page words it — and prices the size you actually chose rather than
 the cheapest one. The composition is shown and never applied: a squad at a size the page
 does not print is still saved, and the list says so instead of refusing it.
@@ -580,10 +590,17 @@ wounds, order, tokens, activations, command points, victory points, equipment
 revealed mid-game, ploys spent. Every change is one event in an append-only log, and
 **undo** walks it back one step at a time.
 
-Both sides of the table are tracked, not just yours. You can fill the opponent's side
-in by hand, or send them an invite code good for 15 minutes and let them keep their own side
-from their own phone — the same game, each side picking up the other's changes
-within a few seconds (the mechanism is [below](#how-two-players-stay-in-sync)).
+### Planned — K8 and K9
+
+Both sides of the table will be tracked, not just yours. You will be able to fill the
+opponent's side in by hand, or send them an invite code good for 15 minutes and let them
+keep their own side from their own phone — the same game, each side picking up the other's
+changes within a poll interval (the mechanism is
+[below](#how-two-players-stay-in-sync)). **None of this exists yet**: today a game has one
+kill team, one CP pool, and an opponent who is a name and a score you type in.
+
+The walkthrough and the join-failure table that follow are written as the finished
+feature, so a client can be built from them — not as a description of today.
 
 ### One shared game, end to end
 
