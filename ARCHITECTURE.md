@@ -164,8 +164,8 @@ read, KILLTEAM.md #91) invented `{events, version}` with no cap before this said
 **Status: ✅ Done (R4), with five reads outside the count — see R15.** `/shortfall`,
 `/validate`, `/taxonomy`, `/composition` and `/universal` do not paginate, and
 `docs/api/conventions.md` records all five with a three-category test: a computed report
-about a single resource, a static map, or one document rather than a collection. That test
-belongs here too, beside the claim it qualifies. What is genuinely open is a **bound** on
+about a single resource, a static map, or one document rather than a collection. That test is
+restated here, beside the claim it qualifies. What is genuinely open is a **bound** on
 the two computed reports, which return a row per army entry and have no cap.
 
 All three rules hold. Every one of the twelve collections returns

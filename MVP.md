@@ -270,7 +270,10 @@ game side (K8). Those are the three tables the MVP still adds.
 **49 paths, 72 operations today**, every one of them below. **Fifteen need no token**:
 `/health`, register and login, the six Kill Team catalog reads, and six 40k catalog
 reads — factions, subfactions, `/taxonomy`, weapons, abilities and a unit by id. The
-other 57 require a JWT, and a user sees only their own rows.
+other 57 **declare** a JWT — but `GET /units` and `/units/facets` serve anonymous callers
+anyway, because `get_owned_by` resolves an optional caller and drags the scheme into the
+contract (R14). So fifteen declare no token and **seventeen work without one**. A signed-in
+user sees only their own rows.
 
 | Area | Operations | |
 |---|---|---|
@@ -294,9 +297,9 @@ cross-origin JS can read it), one error shape
 **Today** a successful response is the resource itself, with no wrapper:
 
 ```json
-// GET /api/v1/units?limit=2
+// GET /api/v1/units?limit=1
 { "items": [ { "id": "...", "unit_name": "Intercessor Squad", "points": 80 } ],
-  "total": 1331, "limit": 2, "offset": 0 }
+  "total": 1331, "limit": 1, "offset": 0 }
 ```
 
 An error is a separate shape, and the only one:
@@ -315,7 +318,7 @@ and is superseded; the facts in its refusal still hold, and what changed is that
 uniformity is now wanted as an end rather than weighed against the cost and dropped.
 
 ```json
-// GET /api/v1/units?limit=2, after R16 — the reference's shape
+// GET /api/v1/units?limit=1, after R16 — the reference's shape
 { "data": [ { "id": "…", "unit_name": "Intercessor Squad", "points": 80 } ],
   "errors": [],
   "meta": { "trace_id": "req_8f1c…" } }
@@ -335,7 +338,7 @@ them, and **no read is an exception** — the five that do not paginate stop bei
 because there is nothing left to be special about.
 
 It is a **breaking change with no gradual path**, and the cost is in R16 rather than here:
-every route, every response model, and the client's 4,880 generated lines. The client's
+every route, every response model, and the client's 5,300 generated lines. The client's
 parser ignores a field the backend adds but not a shape that moved, so both repositories
 land together. Whether R16 is inside this MVP or after it is **not yet decided** — R9's
 own advice was to do it before the API has more consumers, and there is one, pre-release.
@@ -461,19 +464,20 @@ nothing from the catalog.
 | | |
 |---|---|
 | `POST /me/kill-team/games/{game_id}/sides/{side}/ploys` | *replaces* `POST .../ploys` — deducts that side's command points. **Named by #67** |
-| `PATCH /me/kill-team/games/{game_id}/sides/{side}` | the six fields that move off the game: `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`, `choices`. *Shape follows from #67; not named by it* |
+| `PATCH /me/kill-team/games/{game_id}/sides/{side}` | the four settable fields that move off the game: `command_points`, `victory_points`, `ploys_used`, `choices`. `rules` and `ploys` move to the side row too, but are snapshots and were never settable. *Shape follows from #67; not named by it* |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/operatives` | field a datacard on that side. *Follows from #67.* The row-keyed operative routes above need no change, since a row id already identifies one operative |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/equipment` | take a piece for that side. *Follows from #67* |
 
-**The reads reshape, and that is the part a client meets.** `KTGame_Read` keeps 16 of
-its 24 fields: six move onto their side, `opponent_name` and `opponent_victory_points`
-are removed with their data backfilled onto the opponent side, and the game gains named
-`player` and `opponent` objects. `equipment_limit` moves inside each side.
+**The reads reshape, and that is the part a client meets.** `KTGame_Read` keeps **15** of
+its 24 fields. Nine leave: six move onto their side, `opponent_name` and
+`opponent_victory_points` are removed with their data backfilled onto the opponent side
+(#77), and `equipment_limit` moves inside each side. The game gains named `player` and
+`opponent` objects.
 `KTGame_ListRead` names both teams and gains `your_side`, so a row reads as a matchup
 and says which half is yours (#75). The operative and equipment reads gain `side`, and
 the event read gains the actor. `PATCH .../games/{game_id}` **narrows** from nine
-settable fields to three — `status`, `initiative`, `markers` — with the other six moving
-to `PATCH .../sides/{side}`. That is a breaking change to a contract the client consumes,
+settable fields to three — `status`, `initiative`, `markers`. Of the six that leave, four
+move to `PATCH .../sides/{side}` and two are removed outright. That is a breaking change to a contract the client consumes,
 landing in lockstep rather than behind an `/api/v2`.
 
 A side row carries `occupant_user_id`, nullable (#74), written in K8 and unread until
@@ -795,8 +799,11 @@ above, and none of it blocking a feature:
   3.12; blocks an interpreter upgrade. Moving to `bcrypt` directly is small.
 - **H1 + C** — the 40k seed is **create-only**, so editing a stat in `datasheets.json`
   and re-running does nothing. The Kill Team seed already upserts; porting it is small.
-  The same pass should rekey the seed on `(faction, subfaction, unit_name)`, which is
-  what collapses 1,558 scraped rows to roughly 1,331 stored ones.
+  The seed's current natural key is `(faction, unit_name)`, and **that** is what collapses
+  1,558 scraped rows to 1,331 stored ones. Rekeying on
+  `(faction, subfaction, unit_name)` would **raise** the stored count to 1,557 — which is
+  the point of doing it, since the collapse is losing 227 distinct datasheets, but it
+  means every points total and unit count in this document changes with it.
 - **L2** — the scraper **writes before it validates**, so a malformed parse reaches
   the JSON.
 - **L1** — no rate limiting exists anywhere. A prerequisite for K9's invite code.
@@ -870,10 +877,15 @@ wrote down why. Absent on purpose. Each is a decision with reasoning recorded in
 ### Where the app does decide
 
 The constraint above says the app never applies a rule, and that is true of the game's
-rules. It is not true of nothing. The Kill Team service enforces seven things, and
-`service_killteam_game.py` has enumerated them in its own docstring since it was
-written — this list is lifted from there rather than compiled, and each entry says
+rules. It is not true of nothing. Seven things are enforced, and each entry below says
 whether it is bookkeeping or a rule the app has taken on.
+
+**Five of the seven** are enumerated in `service_killteam_game.py`'s own module
+docstring. The ploy check arrived later with #65, and the withdrawn-row refusal is
+enforced in both the game service (`:272` for an operative, `:448` for equipment) and the
+roster service (`:90`, `:277`). So this list is **compiled**, which an earlier version of
+this section claimed it was not — a reader told it was lifted from one docstring would go
+looking for all seven in one place and find five.
 
 | | | |
 |---|---|---|
@@ -933,8 +945,8 @@ them:
 - **R15** — two unpaginated reads return complete results with no cap. `/shortfall` and
   `/validate` return a row per army entry and an army has no size limit, and R13 makes
   them longer. The other three unpaginated reads are bounded by what they are. All five
-  are documented with a membership test in `docs/api/conventions.md`; that test is not
-  in `ARCHITECTURE.md` §2.3, where the rule lives.
+  are documented with a membership test in `docs/api/conventions.md`, and §2.3 now
+  carries it too.
 - **R14** — two catalog reads whose contract does not match what they serve. `GET /units`
   and `/units/facets` declare the bearer scheme and accept anonymous callers, so a
   generated client believes they need a token. And `GET /taxonomy` returns names without
