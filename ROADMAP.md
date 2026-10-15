@@ -32,7 +32,7 @@ worth reading for the reasoning, not as a live bug list.
 | 12 | [R9](#r9-decide-on-the-response-envelope) | Decide on the response envelope | §2.6 | Decision first |
 | 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
 | 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
-| 15 | [R15](#r15-four-reads-sit-outside-the-envelope-and-three-have-no-recorded-reason) | Four reads sit outside the envelope, and three have no recorded reason | §2.3 | Decision first; the shape is open |
+| 15 | [R15](#r15-two-unpaginated-reads-return-complete-results-with-no-cap) | Two unpaginated reads return complete results with no cap | §2.3 | Small; a cap or a page on two reads |
 
 R1–R12 are done. R13, R14 and R15 are not started, and unlike their predecessors R13
 changes a shipped schema rather than a draft one.
@@ -756,45 +756,50 @@ different endpoints and the current one is halfway between.
 
 ---
 
-## R15. Four reads sit outside the envelope, and three have no recorded reason
+## R15. Two unpaginated reads return complete results with no cap
 
-**Status: Not started. Recorded now, decided later — and the approach is deliberately
-open**, because the intent is a different shape for every read rather than retrofitting
-the current envelope onto four exceptions.
+**Status: Not started. Narrower than the first draft of this entry claimed** — see the
+correction at the end, which is the useful part.
 
-§2.3's status says every one of the **twelve** collections returns `Page[T]`. That is
-true, and it is true because four reads are not counted as collections — and nothing
-anywhere says why they are not. The membership test lives in nobody's head:
+`docs/api/conventions.md` closes its Pagination section by naming every read that does
+not paginate, with a reason for each, and the reasons form a test:
 
-| Read | Shape | Recorded reason |
-|---|---|---|
-| `GET /kill-team/teams/{id}/composition` | bare array | only the word "unpaginated" in a route table |
-| `GET /me/armies/{army_id}/shortfall` | bare array | **none** |
-| `GET /kill-team/universal` | two arrays in one object | #48 justifies the route, never the shape |
-| `GET /taxonomy` | a `dict` map | §2.5 covers its path, not its shape |
+| Category | Reads |
+|---|---|
+| A computed report about a single resource | `/me/armies/{id}/shortfall`, `/me/armies/{id}/validate` |
+| A static map | `/taxonomy` |
+| One document rather than a collection | `/kill-team/teams/{id}/composition`, `/kill-team/universal` |
 
-Each is individually defensible, which is the problem: from outside, a justified
-exception and an unexamined one look identical. Three observations for whoever takes
-this, so the work does not start from scratch:
+That is a coherent membership test, published in the document a client author reads, and
+it says "those all return complete results".
 
-**The envelope provides two separable things.** Uniformity, so a client handles one
-shape — and a **cap**, which bounds a response regardless of what the data does. A read
-can legitimately not need paging while still needing a bound, and conflating them is what
-makes this look like a single question.
+**What is actually missing is a bound on two of them.** "Complete results" is a promise
+about correctness, not about size. `/taxonomy` is a constant, and both Kill Team reads
+are one printed page — all three are bounded by what they are. The two computed reports
+are not: they return a row per army entry, and an army has no size cap. R13 makes that
+longer rather than shorter, since a list carrying `amount: 10` on five entries becomes
+fifty rows.
 
-**One of the four is a document, not a collection.** #44 and #45 make `position` plus
-`depth` reconstruct a printed page, so `/composition` is one document stored as rows.
-Paging it lets a client fetch half a section, which is worse than not paging it. But it
-has no bound either: roughly nineteen rows per team is an average, not a guarantee, and a
-composition far past that is a scraper failure rather than a long team.
+So the work here is small and specific: decide whether the two computed reports get a cap
+or a page, and move the three categories into §2.3 as well, because the rule's home is
+the architecture document and a maintainer reading it finds the twelve-collection claim
+with no test beside it.
 
-**One of the four has no bound at all.** `/shortfall` returns a row per army entry and an
-army has no size cap — and R13 makes it worse, since a list carrying `amount: 10` on five
-entries becomes fifty rows. This is the one whose exception rests on nothing.
+### The correction, which is the reusable part
 
-What this entry does **not** decide: whether the answer is a membership test in §2.3, a
-different envelope for every read, separating the cap from the paging, or something else.
-That is the point of recording it rather than fixing it piecemeal now.
+The first version of this entry said four reads sat outside the envelope and three had
+no recorded reason anywhere. All five are recorded, with reasons and a test, in
+`docs/api/conventions.md` — and the entry missed `/validate` entirely, because an object
+carrying an array buckets like any detail read.
+
+The error was searching the files the work was happening in — ARCHITECTURE, ROADMAP,
+KILLTEAM — rather than the file whose job the question was. `conventions.md` exists to
+answer "what shape does this API return" and was the one not consulted. It is the same
+mistake as concluding SPEC.md claimed something it did not: an absence asserted from an
+incomplete search reads exactly like an absence.
+
+"Nothing documents this" is a claim about every file, and it is only ever as good as the
+list of files checked.
 
 ---
 

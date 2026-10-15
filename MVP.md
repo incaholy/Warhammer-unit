@@ -870,11 +870,11 @@ them:
   own abilities, and no universal action is stored anywhere — so Dash, Reposition, Fall
   Back and Pick Up Marker are refused on every operative. A check that refuses legal play
   is worse than no check, so #84 either stores them or drops the check.
-- **R15** — four reads return a collection without the pagination envelope, and three
-  of the four have no recorded reason anywhere. The convention holds for twelve
-  collections and nothing defines what makes a read one of them, so a justified
-  exception and an unexamined one are indistinguishable from outside. `/shortfall` is
-  the one with no bound behind it at all, and R13 makes it longer.
+- **R15** — two unpaginated reads return complete results with no cap. `/shortfall` and
+  `/validate` return a row per army entry and an army has no size limit, and R13 makes
+  them longer. The other three unpaginated reads are bounded by what they are. All five
+  are documented with a membership test in `docs/api/conventions.md`; that test is not
+  in `ARCHITECTURE.md` §2.3, where the rule lives.
 - **R14** — two catalog reads whose contract does not match what they serve. `GET /units`
   and `/units/facets` declare the bearer scheme and accept anonymous callers, so a
   generated client believes they need a token. And `GET /taxonomy` returns names without

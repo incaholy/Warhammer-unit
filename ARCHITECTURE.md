@@ -161,11 +161,12 @@ read needs that the envelope lacks belongs on the row, not on the response and n
 — for the reason stated above about headers. Written down because the first one (K9's event
 read, KILLTEAM.md #91) invented `{events, version}` with no cap before this said anything.
 
-**Status: ✅ Done (R4), with four reads outside the count — see R15.** `/composition`,
-`/shortfall`, `/universal` and `/taxonomy` return a collection without the envelope, and
-three of the four have no recorded reason. The claim below is true of the twelve; what is
-missing is the test for what makes something one of them. Deferred deliberately, because
-the intent is a different shape for every read rather than retrofitting this one.
+**Status: ✅ Done (R4), with five reads outside the count — see R15.** `/shortfall`,
+`/validate`, `/taxonomy`, `/composition` and `/universal` do not paginate, and
+`docs/api/conventions.md` records all five with a three-category test: a computed report
+about a single resource, a static map, or one document rather than a collection. That test
+belongs here too, beside the claim it qualifies. What is genuinely open is a **bound** on
+the two computed reports, which return a row per army entry and have no cap.
 
 All three rules hold. Every one of the twelve collections returns
 `Page[T]` (`{items, total, limit, offset}`) via the shared `PageParams` / `paginate` helpers in
