@@ -1,8 +1,9 @@
 # API conventions
 
 The cross-repo contract between the backend (`warhammer_unit`) and the frontend
-(`warhammer_web`). These are the rules that hold across *every* endpoint, so a
-client can be written against the conventions rather than against each route.
+(`warhammer_unit_web`, cloned locally as `warhammer_web`). These are the rules
+that hold across *every* path, so a client can be written against the
+conventions rather than against each route.
 The machine-readable schema is [`openapi.json`](../../openapi.json) (generated
 from the app by `make openapi`, verified fresh in CI); this file is the human
 half — the rules a schema can't express.
