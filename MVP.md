@@ -673,7 +673,7 @@ nobody can build a screen from "it fails".
 | Outcome | | |
 |---|---|---|
 | Wrong code | **404** | "no invitation matches that code" |
-| Expired code | **404** | the same message, deliberately. The server can tell, but saying so confirms a game exists to a stranger holding a code they should not have |
+| Expired code | **410** | "that invitation has expired, ask for a new one". The server can tell, and says so: hiding it told a slow but legitimate invitee their correct code did not exist |
 | Already used | **404** | the same message, because the server genuinely **cannot** tell. `#71` clears the code on redemption, so the row holds NULL whether it was spent an hour ago or never existed |
 | Game finished | **409** | "that game is over". The caller holds a valid code, so there is nothing to hide |
 | Side occupied | **409** | "someone is already playing that side" |
@@ -681,6 +681,16 @@ nobody can build a screen from "it fails".
 
 A failed join leaves a live code alone: the failure is not the code's fault, and clearing
 it would make the host re-mint over the guest's timing.
+
+**The 410 needs an eighth error code.** The vocabulary is seven — `NOT_FOUND`,
+`CONFLICT`, `VALIDATION`, `REQUEST_VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL` —
+and has no 410, so this adds one to `ErrorCode` and `CODE_STATUS`, reaches the code table
+in `docs/api/conventions.md`, and regenerates the client's `ERROR_CODES` enum. Recorded
+because it is a vocabulary change rather than a status choice, and §2.2 owns the
+vocabulary.
+
+Used and wrong stay indistinguishable, and that is a **limit** rather than a decision:
+`#71` clears the code on redemption, so the row holds NULL either way.
 
 Two more states a client must render (#89):
 
