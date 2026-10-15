@@ -573,8 +573,11 @@ need. **Effort: all S** unless noted.
   invisible to cross-origin JS unless named in CORS `expose_headers`, so on the
   Firebase→Cloud Run deploy the browser read no total and the catalog silently
   fell back to `0` (see the resolved BUG1). Reversing the earlier no-envelope
-  stance was deliberate; whether to nest `Page` inside a `{data, errors, meta}`
-  response envelope is a separate, still-open decision (ARCHITECTURE §2.6 / R9).
+  stance was deliberate. Whether to nest `Page` inside a `{data, errors, meta}`
+  response envelope is a separate question, and this line called it still-open while
+  §2.6 had closed it as **no envelope** (R9). It is open again, and for a different
+  reason: [ROADMAP R16](ROADMAP.md#r16-wrap-every-response-in-an-envelope) supersedes
+  §2.6 and intends the wrapper.
   Each list orders by a natural key plus the primary-key `id` as a tiebreaker, so
   offset paging is stable across page boundaries. `GET /units/facets` adds the
   per-faction counts the catalog rail needs as a server-side `GROUP BY`, so the

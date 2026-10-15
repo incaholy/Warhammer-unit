@@ -289,6 +289,59 @@ cross-origin JS can read it), one error shape
 (`{detail, code, field?, request_id, errors[]}`), and a cross-user row answering
 **404 rather than 403** so an id never reveals whether it exists.
 
+### The response shape, and the change coming to it
+
+**Today** a successful response is the resource itself, with no wrapper:
+
+```json
+// GET /api/v1/units?limit=2
+{ "items": [ { "id": "...", "unit_name": "Intercessor Squad", "points": 80 } ],
+  "total": 1331, "limit": 2, "offset": 0 }
+```
+
+An error is a separate shape, and the only one:
+
+```json
+{ "detail": "name is already taken", "code": "CONFLICT", "field": "name",
+  "request_id": "req_8f1c…",
+  "errors": [ { "code": "CONFLICT", "field": "name", "detail": "name is already taken" } ] }
+```
+
+`errors[]` is uniform — one entry for most failures, all of them for a multi-field
+validation — and the top level mirrors `errors[0]`.
+
+**Planned (R16): every response gains a wrapper.** `ARCHITECTURE.md` §2.6 refused this
+and is superseded; the facts in its refusal still hold, and what changed is that
+uniformity is now wanted as an end rather than weighed against the cost and dropped.
+
+```json
+// GET /api/v1/units?limit=2, after R16 — the reference's shape
+{ "data": [ { "id": "…", "unit_name": "Intercessor Squad", "points": 80 } ],
+  "errors": [],
+  "meta": { "trace_id": "req_8f1c…" } }
+```
+
+`errors` is `[]` on every success — always present, never null. `meta` carries only what
+is set: the reference serialises with `exclude_unset`, so `pagination`, `sort` and
+`filter` are **absent** rather than null when they do not apply.
+
+Note what `data` holds: **the bare array.** Paging does not nest inside it — it moves to
+`meta.pagination`, which means `Page<T>` stops existing rather than gaining a wrapper.
+Twelve generated schemas collapse instead of nesting one level deeper.
+
+Three things this makes true which are not true today: every response carries the trace
+id rather than only the failures, `sort` and `filter` have a home before anything needs
+them, and **no read is an exception** — the five that do not paginate stop being special,
+because there is nothing left to be special about.
+
+It is a **breaking change with no gradual path**, and the cost is in R16 rather than here:
+every route, every response model, and the client's 4,880 generated lines. The client's
+parser ignores a field the backend adds but not a shape that moved, so both repositories
+land together. Whether R16 is inside this MVP or after it is **not yet decided** — R9's
+own advice was to do it before the API has more consumers, and there is one, pre-release.
+
+Three parts of the shape are **open**, and they decide how large R16 is; see R16 for each.
+
 Each section below ends with the endpoints that do not exist yet but will once the
 MVP is finished. Those are marked **planned**, and where a route's shape follows from
 a decision rather than being named by one, it says so — an invented path presented as
