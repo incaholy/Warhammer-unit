@@ -62,7 +62,7 @@ you add a second entry point (a CLI, a scheduled job, a queue consumer), busines
   `lint-imports` alongside `pytest`: a `layers` contract (`app.api` > `app.core.services` >
   `app.core.db`, so a lower layer may not import a higher one) and a `forbidden` contract
   (`app.core` may not import `fastapi` or `starlette`, directly or transitively). A service that
-  imports from `app/api/` tomorrow fails the build rather than passing 689 green tests.
+  imports from `app/api/` tomorrow fails the build rather than passing 723 green tests.
 - **The one real violation is split.** `app/core/security.py` kept the domain half (hashing, token
   encode and decode) and `app/api/deps.py` took the transport half (`get_current_user` /
   `get_current_admin`, turning a decode failure into a 401 with a `WWW-Authenticate` header).
@@ -82,7 +82,7 @@ Two details worth keeping deliberately:
   (`attention-api/app/api/errors.py`). This codebase has both now — `app/core/errors.py` and `app/api/errors.py`, which §2.2 records as done — and the pattern is worth
   reading first.
 - **Object-level authorization returns 404, not 403**, when a resource is not the caller's
-  (`get_owned_army`, `app/api/army.py:91`). That hides whether the id exists at all. The vulnerability
+  (`get_owned_army`, `app/api/army.py:96`). That hides whether the id exists at all. The vulnerability
   class avoided is BOLA / IDOR, which sits at the top of the OWASP API Top 10. Inventory is scoped to
   `current_user.id` from the JWT rather than a path parameter, so there is no id to tamper with.
 
@@ -300,8 +300,8 @@ model/migration drift is caught in CI, not at deploy time. The fast SQLite tier 
 Two tiers, both of which are needed, because they prove different things.
 
 **Fast tier (default).** In-memory SQLite, one fresh schema per test, foreign keys enforced with
-`PRAGMA foreign_keys=ON`. Optimized for iteration: the current suite runs in about eleven seconds and
-needs no services. This is what runs on every keystroke and every push.
+`PRAGMA foreign_keys=ON`. Optimized for iteration: the current suite runs in about thirteen seconds
+and needs no services. This is what runs on every keystroke and every push.
 
 **Parity tier.** Real Postgres, schema built by running the migrations. This is what proves the
 things SQLite cannot: length constraints, native `UUID` and `JSON` behavior, aware timestamps, and
@@ -345,8 +345,8 @@ remains the one open piece.
 **Status: Mostly done (R8, R10).** `openapi.json` is checked in and now **CI-verified fresh**; the
 frontend's types are **generated from it** (`npm run gen:api` → `src/api/schema.d.ts`, re-exported by
 `types.ts`), not hand-maintained; `docs/api/conventions.md` is the cross-repo contract; and `README.md`
-is a real front door (R10). One piece remains: `SPEC.md` is still a 97KB monolith — splitting it into
-audience-scoped docs is the outstanding work. See
+is a real front door (R10). One piece remains: `SPEC.md` is still a 100,867-byte monolith — splitting
+it into audience-scoped docs is the outstanding work. See
 [ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
 
 ---
@@ -354,7 +354,7 @@ audience-scoped docs is the outstanding work. See
 ## 7. Frontend architecture
 
 - **Exactly one HTTP client.** One module owns the base URL, the auth token, error parsing, and
-  status handling; one `fetch` call site in the app (`src/api/client.ts:73`). It notifies the auth
+  status handling; one `fetch` call site in the app (`src/api/client.ts:126`). It notifies the auth
   layer of a 401 through a listener rather than importing React, so the data layer stays free of the
   UI framework.
 - **Server state lives in TanStack Query, never in `useState`.** Query keys come from a single

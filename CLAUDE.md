@@ -1,8 +1,9 @@
 # Warhammer Unit Backend
 
 Backend for storing Warhammer 40k unit datasheets. FastAPI + SQLModel +
-PostgreSQL + Alembic. Full architecture and roadmap are in SPEC.md — read it
-before making structural changes.
+PostgreSQL + Alembic. The target architecture is in ARCHITECTURE.md and the build
+order in ROADMAP.md — read both before making structural changes. SPEC.md is the
+detailed specification: data model, paths, and behaviour.
 
 The Kill Team part (a game tracker) is designed in KILLTEAM.md — read it before
 working on any Kill Team code, and update it when a design decision changes. It is
@@ -16,7 +17,17 @@ uvicorn app.main:app --reload        # run the API
 alembic revision --autogenerate -m "msg"   # generate a migration after editing models
 alembic upgrade head                 # apply migrations
 pytest                               # run tests
+make openapi                         # regenerate openapi.json from the app (no DB needed)
+make lint-imports                    # check the layering contracts in .importlinter
+make check                           # pre-PR gate: ruff check + format check + lint-imports + pytest
 ```
+
+`make openapi` MUST run after any change to a router or to a request/response
+schema. The committed `openapi.json` is the frontend's source of truth, and CI
+fails the build when it drifts from the app. `make lint-imports` MUST pass before a
+PR — CI runs it too — and `make check` is the whole gate in one command. Both need
+`make install-dev` first: `ruff` and `import-linter` live in `requirements-dev.txt`,
+not `requirements.txt`.
 
 `DATABASE_URL` must be set (it lives in `.env`, which is gitignored).
 

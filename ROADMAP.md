@@ -8,9 +8,15 @@ implementations: the shape and the reasoning are here, the code is yours.
 effort; the sections that follow are in ID order so links stay put as priorities change.
 
 **Evidence.** Every claim below was reproduced against the running code rather than read off a commit
-message or a doc: `pytest` (225 passed), `npm test` (144 passed), `npm run lint`, `npm run build`,
-plus throwaway probe scripts for SQL query counting, SQLite DDL inspection, and error-shape
-enumeration. Where something is a latent risk rather than a live defect, it says so.
+message or a doc: `pytest` (**723 passed, 1 skipped**, 724 collected), `npm test` (352 `it`/`test`
+blocks across 47 spec files), `npm run lint`, `npm run build`, plus throwaway probe scripts for SQL
+query counting, SQLite DDL inspection, and error-shape enumeration. Where something is a latent risk
+rather than a live defect, it says so.
+
+**A problem statement in a done entry is the historical record, not the current state.** It is kept
+because it is why the work was done; what landed is in that entry's status marker, and the marker
+wins. The figures inside those statements were true when the entry was written — the suite was 225
+tests then — so re-derive a count before citing one.
 
 Correctness bugs are tracked in [`CODE-REVIEW.md`](CODE-REVIEW.md) and are not repeated here. Note
 that its four findings have since been fixed and its test counts predate the current suite; it is
@@ -47,14 +53,23 @@ of each together, or the gap becomes a mismatch you introduced on purpose.
 
 **Satisfies:** §7 (frontend), §8 (tooling).
 
-**What is missing.** `strict` appears nowhere in the frontend tsconfigs, so `strictNullChecks` and
-`noImplicitAny` are both off (`grep -rn "strict" tsconfig*.json` finds no match).
+**Status: ✅ Done (R1).** All five gaps are closed. `"strict": true` is set in
+both frontend tsconfigs (`tsconfig.app.json`, `tsconfig.node.json`); the backend
+has a `ruff.toml`; backend CI runs `ruff check` then `ruff format --check` ahead
+of the suite, so the pipeline is lint → format check → import contracts →
+openapi freshness → tests, with the Postgres parity tier as a second job; both
+repos declare a `concurrency` group keyed on workflow+ref, cancelling superseded
+PR runs; and the frontend has a committed `.env.example`. There is still no
+`pyproject.toml` or `setup.cfg`, deliberately — `ruff.toml` is the whole config.
 
-The backend has no linter or formatter at all: no `ruff.toml`, no `pyproject.toml`, no `setup.cfg`.
-Backend CI runs `pytest` and nothing else, while the frontend pipeline already runs lint, build, and
-test. Neither pipeline has a `concurrency` group, so superseded runs keep consuming runner time on
-every push to an open PR. The frontend also has no `.env.example`, so the only record of
-`VITE_API_BASE_URL` is prose in `SPEC.md` and the declaration in `src/vite-env.d.ts`.
+**What was missing.** `strict` appeared nowhere in the frontend tsconfigs, so `strictNullChecks` and
+`noImplicitAny` were both off.
+
+The backend had no linter or formatter at all. Backend CI ran `pytest` and nothing else, while the
+frontend pipeline already ran lint, build, and test. Neither pipeline had a `concurrency` group, so
+superseded runs kept consuming runner time on every push to an open PR. The frontend also had no
+`.env.example`, so the only record of `VITE_API_BASE_URL` was prose in `SPEC.md` and the declaration
+in `src/vite-env.d.ts`.
 
 **Why it is first.** Turning `strict` on costs nothing today. Running
 `npx tsc -p tsconfig.app.json --strict --noEmit` exits 0 with zero errors: the code is already
@@ -137,18 +152,26 @@ Pydantic v2's `ValidationError.errors()` and its `loc` field; runtime schema val
 
 **Satisfies:** §3.
 
-**What is missing.** Services call `self.session.commit()` directly, at **27 call sites**. Running
-`grep -rc "session.commit()" app/core/services/*.py` gives 6 in `service_army.py`, 16 in
-`service_unit.py`, 3 in `service_inventory.py`, and 2 in `service_user.py`. `get_session` rolls back
-on exception but never commits (`app/core/db/connection.py:27`), and its docstring says so
-deliberately.
+**Status: ✅ Done (R3).** The boundary is `get_session`
+(`app/core/db/connection.py`), which commits once after the handler returns and
+rolls back the whole unit of work on any exception; its docstring now states that
+services never commit. Zero in-service commits remain —
+`grep -rc "session.commit()" app/core/services/*.py` reports **0 in every
+service** — and a service that needs a key or a constraint error during the
+request calls `flush()` instead. The test fixture moved in the same change, which
+is the half that usually gets missed.
 
-**This is latent, not live.** I read all six routers and all five service classes: every mutating
-route calls exactly one committing service method, and no service method commits twice. There is no
-partial-write bug today. The invariant holds by coincidence of the current feature set, not by
+**What was missing.** Services called `self.session.commit()` directly, at **27 call sites**:
+`grep -rc "session.commit()" app/core/services/*.py` gave 6 in `service_army.py`, 16 in
+`service_unit.py`, 3 in `service_inventory.py`, and 2 in `service_user.py`. `get_session` rolled back
+on exception but never committed, and its docstring said so deliberately.
+
+**It was latent, not live.** All six routers and all five service classes were read: every mutating
+path called exactly one committing service method, and no service method committed twice. There was
+no partial-write bug. The invariant held by coincidence of the feature set of the day, not by
 construction.
 
-It breaks on the first route that does two things. "Add a unit to an army and decrement the owner's
+It would have broken on the first route that did two things. "Add a unit to an army and decrement the owner's
 inventory" is two service calls: the first commit is durable the instant it returns, so if the second
 raises, `get_session` rolls back a transaction that no longer contains the first write. A unit in the
 army, inventory unchanged, no error, no log. No current test would catch it.
@@ -156,8 +179,8 @@ army, inventory unchanged, no error, no log. No current test would catch it.
 **Why now rather than later.** Doing this before that route exists is a mechanical refactor. Doing it
 after is debugging silent data corruption.
 
-**Shape of the work,** mostly deletion. Move the commit into `get_session`, delete the 27 in-service
-commits, and use `session.flush()` where a service needs the database to assign a value before the
+**Shape of the work was,** mostly deletion. Move the commit into `get_session`, delete the 27
+in-service commits, and use `session.flush()` where a service needs the database to assign a value before the
 request ends (a generated key, or `add_unit` needing to know whether the row was new). Two things
 that are not mechanical:
 
@@ -177,37 +200,50 @@ session-per-request.
 
 **Satisfies:** §2.3.
 
-**What is missing.** Exactly one endpoint paginates:
+**Status: ✅ Done (R4).** One convention, applied uniformly: all twelve
+collection reads return `Page[T]` (`{items, total, limit, offset}`) through the
+shared `PageParams` / `paginate` helpers in `app/api/pagination.py`, with the
+offset-based choice written down, a `limit` capped at 200, and an `id` tiebreaker
+on every ordering so a page boundary cannot repeat or skip a row. The total
+travels **in the body** and `X-Total-Count` no longer exists anywhere in `app/`,
+so the CORS trap described below cannot fire. The missing aggregate was
+specifically the per-faction count, and `GET /units/facets` now returns it as one
+`GROUP BY`, which is what let the frontend drop its `limit=1000`
+count-in-the-client hack. Five reads sit outside the convention with a recorded
+reason each — see §2.3 and R15.
 
-| Endpoint | Pagination |
+**What was missing.** Exactly one path paginated. The table is as this entry found it, including the
+taxonomy read at a path R12 has since changed:
+
+| Path (as of this entry) | Pagination then |
 |---|---|
 | `GET /units` | `limit` / `offset`, `le=200`, total in an `X-Total-Count` header |
 | `GET /me/armies` | none |
 | `GET /me/inventory` | none |
 | `GET /factions` | none |
-| `GET /factions/taxonomy` | none |
+| `GET /factions/taxonomy` — now `GET /taxonomy` (R12) | none |
 | `GET /weapons` | none |
 | `GET /abilities` | none |
 | `GET /me/armies/{id}/shortfall` | none |
 | `GET /me/armies/{id}/validate` (`issues`) | none |
 
-Three distinct problems follow.
+Three distinct problems followed.
 
-**The client invented a workaround and it broke.** Because no endpoint answers "how many units per
-faction," `CatalogView` requests `limit=1000` to count client-side. The API caps at 200, so the
-request 422s and every faction renders `0` (frontend `CODE-REVIEW.md` finding 1). The structural
-cause is that the API exposes no aggregate, so the client tried to compute one.
+**The client invented a workaround and it broke.** Because nothing answered "how many units per
+faction," `CatalogView` requested `limit=1000` to count client-side. The API capped at 200, so the
+request 422d and every faction rendered `0` (frontend `CODE-REVIEW.md` finding 1). The structural
+cause was that the API exposed no aggregate, so the client tried to compute one.
 
-**`X-Total-Count` is a side channel with a trap in it.** `app/main.py:38-43` sets `allow_origins`,
+**`X-Total-Count` was a side channel with a trap in it.** The CORS middleware set `allow_origins`,
 `allow_methods`, and `allow_headers`, but **not** `expose_headers`, and a response header is
-invisible to cross-origin JavaScript unless it is named there. This is **not a live bug**:
-`DEPLOY-GCP.md:151` puts the SPA and API on one origin via a Firebase rewrite, so CORS is not
-involved. But `ALLOWED_ORIGINS` exists precisely to support the cross-origin deployment, and in that
-mode `headers.get('X-Total-Count')` (`src/api/units.ts:36`) returns `null` and the catalog silently
-falls back to the row count. Silently is the problem. A total in the response body is not subject to
-this rule at all.
+invisible to cross-origin JavaScript unless it is named there. It was **not a live bug**:
+`DEPLOY-GCP.md` puts the SPA and API on one origin via a Firebase rewrite, so CORS was not involved.
+But `ALLOWED_ORIGINS` exists precisely to support the cross-origin deployment, and in that mode
+`headers.get('X-Total-Count')` returned `null` and the catalog silently fell back to the row count.
+Silently was the problem. A total in the response body is not subject to this rule at all, which is
+why moving it there fixed this structurally rather than by configuration.
 
-**Unbounded lists are a scaling cliff.** `/weapons` and `/abilities` grow with the same catalog that
+**Unbounded lists were a scaling cliff.** `/weapons` and `/abilities` grow with the same catalog that
 made `/units` need a cap, which the frontend review measured at roughly 1,331 units against a seeded
 database.
 
@@ -233,13 +269,20 @@ aggregates versus client-side derivation.
 
 **Satisfies:** §2.1.
 
-**What is missing.** Every route mounts at the root (`app/main.py:94-99`). There is no way to ship a
-breaking change without breaking the deployed frontend simultaneously.
+**Status: ✅ Done (R5).** Every resource router mounts under one
+`APIRouter(prefix="/api/v1")` parent in `app/main.py`. Of the 49 paths in
+`openapi.json`, 48 are under `/api/v1` and the only one that is not is `/health`,
+unversioned on purpose. The frontend bakes the prefix into `API_PREFIX` in
+`src/api/client.ts`, and the Firebase rewrite's `/api/**` already covers
+`/api/v1/**`.
 
-**Why it is nearly free right now.** `DEPLOY-GCP.md:155` already tells you to mount the routers under
-a parent prefix so the Firebase rewrite can forward `/api/**` to Cloud Run. Make it `/api/v1` rather
-than `/api` while you are in there. Today the cost is one `APIRouter(prefix=...)` plus the frontend
-base URL. Once the API has real clients it is a migration.
+**What was missing.** Every path mounted at the root. There was no way to ship a breaking change
+without breaking the deployed frontend simultaneously.
+
+**Why it was nearly free at the time.** `DEPLOY-GCP.md` already told you to mount the routers under
+a parent prefix so the Firebase rewrite could forward `/api/**` to Cloud Run. Make it `/api/v1`
+rather than `/api` while you are in there. The cost then was one `APIRouter(prefix=...)` plus the
+frontend base URL. Once the API has real clients it is a migration.
 
 Keep `/health` unversioned. That exception is the interesting part of the convention, not a footnote:
 platform tooling wants a path that survives version changes.
@@ -250,15 +293,27 @@ platform tooling wants a path that survives version changes.
 
 **Satisfies:** §4 (migrations), §5 (testing).
 
-**What is missing.** The whole suite runs on in-memory SQLite while production is Postgres, and no
-test ever runs a migration.
+**Status: ✅ Done (R6).** Both tiers exist and the conftest chooses between
+them. `tests/conftest.py` reads **`TEST_DATABASE_URL`**: set, the whole suite runs
+against Postgres on a schema built by `alembic upgrade head`; unset, it falls
+back to the fast in-memory SQLite tier with `create_all`. The dedicated variable
+rather than `DATABASE_URL` is what keeps a plain `pytest` from touching a
+developer's database, and the fixture refuses a URL that does not name a test
+database. `tests/test_migrations.py` autogenerates a diff against the models and
+fails on any difference, and CI runs a second `parity` job (a `postgres:16`
+service) that does `alembic upgrade head` then `alembic check` before the suite.
+`make docker-test` runs the same tier in a container, and now actually on
+Postgres.
 
-**The parity harness looks like it exists and does not.** `make docker-test` boots a Postgres
-container and sets `DATABASE_URL` to it, but `tests/conftest.py:31` hardcodes
-`create_engine("sqlite://")` and never reads that variable. So the containerized run executes the
-entire suite on in-memory SQLite and passes. **This is the most misleading state in the repo**,
-because it reads as Postgres coverage on the tin. Fixing the conftest is the load-bearing part of
-this item; adding a CI job on top of it is the easy part.
+**What was missing.** The whole suite ran on in-memory SQLite while production was Postgres, and no
+test ever ran a migration.
+
+**The parity harness looked like it existed and did not.** `make docker-test` booted a Postgres
+container and set `DATABASE_URL` to it, but `tests/conftest.py` hardcoded `create_engine("sqlite://")`
+and never read that variable. So the containerized run executed the entire suite on in-memory SQLite
+and passed. **That was the most misleading state in the repo**, because it read as Postgres coverage
+on the tin. Fixing the conftest was the load-bearing part of this item; adding a CI job on top of it
+was the easy part.
 
 SQLite does not enforce what Postgres will. Probed directly, a column declared `max_length=128`
 accepted a 500-character value and read it back at length 500. Postgres raises
@@ -275,9 +330,11 @@ serializing them can raise only in production), and **native type behavior** (UU
 reads `created_at` outside the models today, so the timestamp class is latent; it activates the first
 time you sort or filter by it.
 
-Separately, `tests/conftest.py:44` builds the schema with `SQLModel.metadata.create_all()`, which
-reads the models and bypasses Alembic entirely. **Nothing verifies that `alembic upgrade head`
-produces a schema matching `models.py`**, and that failure surfaces at deploy time.
+Separately, the fixture built the schema with `SQLModel.metadata.create_all()`, which reads the
+models and bypasses Alembic entirely. **Nothing verified that `alembic upgrade head` produced a
+schema matching `models.py`**, and that failure surfaces at deploy time. `tests/test_migrations.py`
+and the parity job's `alembic check` are what closed it; `create_all` survives on the fast tier
+alone, for speed.
 
 **Shape of the work.**
 
@@ -301,23 +358,33 @@ fail on a non-empty diff, which directly asserts that models and migrations agre
 
 ## R7. Land observability: request ID, structured logs, error reporting
 
-**Satisfies:** §2.4. This is `SPEC.md`'s **M5** item (`SPEC.md:1167`), which is one third done.
+**Satisfies:** §2.4. This is `SPEC.md`'s **M5** item (`SPEC.md:1309`), which M5 itself now records
+as done.
 
-**What is missing.** M5 scopes three pieces. Current state of each:
+**Status: ✅ Done (R7).** All three pieces are wired together in
+`app/observability.py` (`install_observability`): a middleware generates or echoes
+an `X-Request-ID` and stashes it in a context variable; `configure_logging`
+installs a `logging.config.dictConfig` whose filter puts that ID on every JSON log
+line; and `init_sentry` initializes `sentry-sdk` only when `SENTRY_DSN` is set — a
+true no-op locally and in tests — tagging each event with the same ID. The ID also
+goes into every error body and onto the response header, including the catch-all
+500, so the pin in `requirements.txt` buys signal instead of image weight.
 
-| Piece | State |
+**What was missing.** M5 scoped three pieces. Their state when this entry was written:
+
+| Piece | State then |
 |---|---|
-| Sanitized catch-all `Exception` → 500 so internals never leak | **Done** (`app/main.py:78-83`), shipped as part of the `CODE-REVIEW.md` finding 2 fix |
-| Wire `sentry-sdk`, no-op when `SENTRY_DSN` is unset | **Not started.** No occurrence of `sentry` or `SENTRY_DSN` in `app/`, `scripts/`, or `.env.example` |
-| Basic structured logging | **Not started.** No `dictConfig`, `basicConfig`, or `structlog` anywhere; only `logging.getLogger("app")` in `main.py`, used at three call sites |
+| Sanitized catch-all `Exception` → 500 so internals never leak | **Done**, shipped as part of the `CODE-REVIEW.md` finding 2 fix |
+| Wire `sentry-sdk`, no-op when `SENTRY_DSN` is unset | **Not started then.** No occurrence of `sentry` or `SENTRY_DSN` in `app/`, `scripts/`, or `.env.example` |
+| Basic structured logging | **Not started then.** No `dictConfig`, `basicConfig`, or `structlog` anywhere; only `logging.getLogger("app")` in `main.py` |
 
-`sentry-sdk==2.51.0` is pinned in `requirements.txt:41`, so it is installed into the production image
-and does nothing: image weight and dependency surface for zero signal. Either wire it or drop the
-pin. An unused dependency that looks like a feature is worse than an absent one, because it reads as
-covered.
+`sentry-sdk==2.51.0` was already pinned in `requirements.txt`, so it was installed into the
+production image and did nothing: image weight and dependency surface for zero signal. Either wire it
+or drop the pin. An unused dependency that looks like a feature is worse than an absent one, because
+it reads as covered.
 
-**Why the three go together.** `app/main.py:80` logs a full traceback and returns
-`{"detail": "internal server error"}`. Nothing joins the user's report to that log line. Adding
+**Why the three go together.** The catch-all handler logged a full traceback and returned
+`{"detail": "internal server error"}`, with nothing joining the user's report to that log line. Adding
 structured logging alone gives you queryable lines you still cannot correlate to a request. Adding
 Sentry alone gives you an exception without the surrounding request context. The request ID is the
 key that makes the other two worth having, so do them as one change.
@@ -337,34 +404,58 @@ formatting; log correlation; Sentry's FastAPI integration and its no-op behavior
 
 **Satisfies:** §6 (docs), §7 (frontend types).
 
-**What is missing.** There is no `docs/` directory, and `SPEC.md` is 89KB in a single file. The
+**Status: ✅ Mostly done (R8).** `docs/api/conventions.md` exists and is the
+cross-repo contract — §2.3, R15 and R16 all cite it as the published record of the
+pagination rule and of the reads that sit outside it. `openapi.json` is CI-verified
+fresh: the workflow regenerates it and fails on a diff. The frontend's types are
+generated from it rather than hand-maintained — `npm run gen:api` is a real script
+in `package.json` (`node scripts/gen-api.mjs`) and writes `src/api/schema.d.ts`,
+which `types.ts` re-exports. **One piece remains:** `SPEC.md` is still one
+100,867-byte file, and splitting it into audience-scoped docs is the outstanding
+work.
+
+**What was missing.** There was no `docs/` directory, and `SPEC.md` was one large file. The
 organizing principle to apply is one doc, one audience, one question. The single highest-value split
-is **`docs/api/conventions.md`**, because that is the cross-repo contract: it is where R2, R4 and R5
-get written down. Right now that contract exists only as the union of what the code happens to do,
-which is why the frontend guessed wrong twice.
+was **`docs/api/conventions.md`**, because that is the cross-repo contract: it is where R2, R4 and R5
+get written down. At the time that contract existed only as the union of what the code happened to
+do, which is why the frontend guessed wrong twice.
 
-**The generated half is an asset you are not using.** `openapi.json` is checked in, `make openapi`
-regenerates it, and it is currently in sync with the app, which is ahead of the reference. Two things
-follow:
+**The generated half was an asset not being used.** `openapi.json` was checked in and `make openapi`
+regenerated it, in sync with the app by diligence rather than by a check. Two things followed, and
+both have since landed:
 
-- Add a CI step that regenerates it and fails if the committed copy is stale. It is fresh today by
-  diligence, and diligence is exactly what CI is for. A checked-in generated file that can drift is
-  worse than no file, because it is trusted.
-- The frontend hand-maintains `src/api/types.ts` to mirror the backend schema, and its own header
-  comment says it should be generated with `openapi-typescript`. The frontend `Makefile:27-28`
-  already has a `gen-api` target (marked "planned"), but it calls `npm run gen:api`, **which is not a
-  script in `package.json`**, so the target fails if run. One dependency and one script deletes an
-  entire class of drift.
+- Add a CI step that regenerates it and fails if the committed copy is stale. Diligence is exactly
+  what CI is for, and a checked-in generated file that can drift is worse than no file, because it
+  is trusted. **Landed** as the `Check openapi.json is fresh` step in `.github/workflows/ci.yml`.
+- The frontend hand-maintained `src/api/types.ts` to mirror the backend schema, while its own header
+  comment said it should be generated with `openapi-typescript`. Its `Makefile` carried a `gen-api`
+  target marked "planned" that called `npm run gen:api`, which was not a script in `package.json`,
+  so the target failed if run. One dependency and one script deleted an entire class of drift.
+  **Landed**: `gen:api` is a script now and `src/api/schema.d.ts` is generated from `openapi.json`.
 
-Also: `CLAUDE.md:36` says stat names match `models.py` and lists `save`, but the field is `armor_save`
-(`app/core/db/models.py:233`). `SPEC.md` uses the correct name, so this is drift in the instructions
-file specifically. Small, but it is exactly what the docs-change-with-code rule exists to prevent.
+Also, and independent of the split: the stat-name convention in `CLAUDE.md` lists `armor_save` and
+`app/core/db/models.py` agrees, so the `save` drift this entry recorded in the instructions file is
+gone. The `CLAUDE.md:36` citation never belonged to it either — that line sits in the typed-error
+convention, not the stat-name one, which is the kind of citation this document now re-derives rather
+than copies. `SPEC.md` was correct throughout. Small, but it is exactly what the
+docs-change-with-code rule exists to prevent.
 
 ---
 
 ## R9. Decide on the response envelope
 
 **Satisfies:** §2.6. **The deliverable here is a written decision, not necessarily code.**
+
+**Status: ✅ Done (R9) — decided, option C: no full envelope.** The decision is
+written down in `ARCHITECTURE.md` §2.6, which links back here: success responses
+stay bare, because §2.2 (error shape and code), §2.3 (pagination total in the
+body) and §2.4 (request ID) already deliver the three things the wrapper was
+wanted for. The one functional gap was closed directly instead — every error body
+carries a uniform `errors[]` array, so a multi-field 422 reports all of its fields
+in one response, with the top-level `detail`/`code`/`field` mirroring `errors[0]`.
+**[R16](#r16-wrap-every-response-in-an-envelope) supersedes this decision**: same
+facts, a changed judgement on its last clause, so read R16 before acting on this
+entry.
 
 The reference wraps every response in `{data, errors, meta}`, with `meta.trace_id` echoed in an
 `X-Request-ID` header and `meta.pagination` on its one paginated list endpoint.
@@ -388,10 +479,15 @@ half-enveloped API is worse than either end state.
 
 **Satisfies:** §6.
 
-`README.md` is two lines. Someone landing on the repo learns nothing about what this is or how to run
-it, and it is the one doc every new reader opens. The content largely exists already; it needs a
-front door linking to `ARCHITECTURE.md`, `ROADMAP.md`, `SPEC.md`, `MVP.md`, and `DEPLOY.md`. Carried
-over from `CODE-REVIEW.md`, still open.
+**Status: ✅ Done (R10).** `README.md` is a real front door: 99 lines carrying
+what the project is and the stack it runs on, a Quick start, a Common commands
+table, a Layout block, and a Documentation index linking onward to
+`ARCHITECTURE.md`, `ROADMAP.md`, `SPEC.md`, `MVP.md` and the deploy docs.
+
+**What was missing.** `README.md` was two lines. Someone landing on the repo learned nothing about
+what this is or how to run it, and it is the one doc every new reader opens. The content largely
+existed already; it needed a front door linking to `ARCHITECTURE.md`, `ROADMAP.md`, `SPEC.md`,
+`MVP.md`, and `DEPLOY.md`. Carried over from `CODE-REVIEW.md`.
 
 ---
 
@@ -399,15 +495,25 @@ over from `CODE-REVIEW.md`, still open.
 
 **Satisfies:** §1.
 
-**What is missing.** The layering rule is followed almost everywhere and enforced by nothing. There is
-no import-contract check, no architecture test, and CI runs only `pytest`. A service could import
-from `app/api/` tomorrow and all 225 tests would stay green. §1 is marked Partial for this reason
-alone.
+**Status: ✅ Done (R11).** `.importlinter` declares two contracts and CI runs
+`lint-imports` as a step of its own beside the suite: a `layers` contract
+(`app.api` > `app.core.services` > `app.core.db`, so a lower layer may not import
+a higher one) and a `forbidden` contract (`app.core` may not import `fastapi` or
+`starlette`, directly or transitively). The violation is split:
+`app/core/security.py` kept the domain half — hashing, token encode and decode —
+and `app/api/deps.py` took the transport half (`get_current_user` /
+`get_current_admin`, turning a decode failure into a 401 with a
+`WWW-Authenticate` header), so `app.core` raises no `HTTPException` and imports no
+web framework at all. `ARCHITECTURE.md` §1 reads **✅ Holds (R11)** accordingly.
 
-**There is also one real violation to clean up first.** `app/core/security.py` imports FastAPI and
-raises `HTTPException` (`:88`, `:111`), and `app/core/services/service_auth.py:13` imports it, so the
-service layer transitively depends on an HTTP-coupled module. `tests/test_security.py:42` asserts
-`HTTPException` is raised, which pins it in place.
+**What was missing.** The layering rule was followed almost everywhere and enforced by nothing. There
+was no import-contract check, no architecture test, and CI ran only `pytest`. A service could import
+from `app/api/` and the whole suite would stay green. §1 was marked Partial for this reason alone.
+
+**There was also one real violation to clean up first.** `app/core/security.py` imported FastAPI and
+raised `HTTPException`, and `app/core/services/service_auth.py` imported it, so the service layer
+transitively depended on an HTTP-coupled module. A test asserting `HTTPException` was raised pinned
+it in place.
 
 Auth is the usual place this leaks, because token handling sits between transport and domain. The
 split to make: token encode and decode and password hashing are domain concerns and belong in the
@@ -415,10 +521,10 @@ service layer or a neutral module; `get_current_user`, which turns a decode fail
 `WWW-Authenticate` header, is an API dependency and belongs in `app/api/`. Once split, the service
 layer imports only the domain half.
 
-**Shape of the work.** Fix the violation, then add a check so it cannot come back. Two options worth
-comparing: **import-linter**, which expresses "layer A must not import layer B" as a config file and
-runs in CI, or a **ruff** `flake8-tidy-imports` banned-api rule, which is lighter but less precise.
-Either way the check belongs in the same CI lint step added in R1.
+**Shape of the work was.** Fix the violation, then add a check so it cannot come back. Two options
+were worth comparing: **import-linter**, which expresses "layer A must not import layer B" as a
+config file and runs in CI, or a **ruff** `flake8-tidy-imports` banned-api rule, which is lighter
+but less precise. Import-linter won, and the check sits beside the CI lint steps added in R1.
 
 **Concepts:** import-linter layered contracts; why an architecture rule that only exists in a
 document is indistinguishable from no rule.
@@ -478,6 +584,11 @@ payment APIs;
 why `PUT` is idempotent and `POST` is not; lost-update versus double-apply as the two failure modes
 you are choosing between.
 
+**Resolved (the increment is gone).** Both add-unit `POST`s are create-only: a repeat answers
+`409 CONFLICT` rather than silently incrementing, and a quantity change goes through the `PATCH` that
+already set an absolute amount. No idempotency key was needed, because nothing accumulates any more.
+R13 retires `amount` itself, so the set-versus-delta question closes with it.
+
 ### `GET /factions/taxonomy` is a non-resource in a resource's id namespace
 
 `app/api/faction.py:85` serves a static map built from the `FACTION_SUBFACTIONS` constant, not from
@@ -491,7 +602,15 @@ Static reference data is not a resource under `/factions`. Options worth weighin
 outside the id namespace, folding it into the `GET /factions` response since it describes the same
 thing, or shipping it as part of a bootstrap or configuration endpoint.
 
+**Resolved (moved out of the id namespace).** The first option was taken: the taxonomy is served at
+`GET /taxonomy`, and `app/api/faction.py` records in a comment why it no longer sits under
+`/factions`. The collision this section describes cannot happen now, so a `GET /factions/{faction_id}`
+can be added freely. R14 reopens a different question about the same read — whether a picker needs
+ids rather than names — which is about its contract, not its path.
+
 ### CRUD coverage is uneven across sibling catalog resources
+
+The coverage as this entry found it, since changed by the policy recorded below the table:
 
 | Resource | Create | List | Update | Delete |
 |---|---|---|---|---|
@@ -1132,7 +1251,10 @@ The sweep is scoped to the PARENTS the payload contains, so a partial scrape can
 mass-flag a catalog it simply did not mention.
 
 Built ahead of its condition (*before a client consumes the catalog as a picker*), which
-had not been reached — the frontend does not read the Kill Team API yet.
+had not been reached when K7 ran. It has been reached since: the client's `kill-team-ui`
+branch, 70 commits ahead of its own `main`, carries `src/api/killTeam.ts`,
+`killTeamQueries.ts` and `killTeamRosters.ts` plus four Kill Team views, so the picker this
+flag was built for now exists — on an unmerged branch rather than on `main`.
 
 Three decisions were settled while building it. **Where the filter lives:** in the catalog
 service's own queries, not on the relationships, because a roster read reaches the same
