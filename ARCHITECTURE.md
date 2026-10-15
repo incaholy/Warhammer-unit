@@ -231,6 +231,10 @@ subfactions deletable. Factions stay create-and-list by decision, not by omissio
 
 ### 2.6 Response envelope
 
+**Superseded by [R16](ROADMAP.md#r16-wrap-every-response-in-an-envelope).** Every fact
+below still holds; R16 revisits the judgement on its last clause, not the facts, and
+carries the argument and the cost.
+
 **Status: ✅ Decided — no full envelope (R9, option C).** The reference wraps every response in
 `{data, errors, meta}` so pagination metadata, multiple errors, and the trace ID have a defined home.
 But §2.2 (error shape + code), §2.3 (pagination total in the body), and §2.4 (request ID) already

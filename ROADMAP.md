@@ -33,9 +33,10 @@ worth reading for the reasoning, not as a live bug list.
 | 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
 | 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
 | 15 | [R15](#r15-two-unpaginated-reads-return-complete-results-with-no-cap) | Two unpaginated reads return complete results with no cap | §2.3 | Small; a cap or a page on two reads |
+| 16 | [R16](#r16-wrap-every-response-in-an-envelope) | Wrap every response in an envelope | §2.6 | Large; one migration, both repositories together |
 
-R1–R12 are done. R13, R14 and R15 are not started, and unlike their predecessors R13
-changes a shipped schema rather than a draft one.
+R1–R12 are done. R13 to R16 are not started. R13 changes a shipped schema rather than a
+draft one, and R16 changes a contract the other repository generates types from.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
 of each together, or the gap becomes a mismatch you introduced on purpose.
@@ -800,6 +801,76 @@ incomplete search reads exactly like an absence.
 
 "Nothing documents this" is a claim about every file, and it is only ever as good as the
 list of files checked.
+
+---
+
+## R16. Wrap every response in an envelope
+
+**Satisfies:** §2.6, which this supersedes. **Status: Not started.**
+
+Every response becomes `{data, errors, meta}` — `meta` carrying the trace id, and
+pagination, sort and filter where they apply. The shape is `attention-api`'s
+`ResponseEnvelope[T]`, which is where R9 first met it.
+
+### Why, and it is a change of judgement rather than a correction
+
+R9 refused this and **every fact in its reasoning still holds.** The three things the
+wrapper buys were already delivered: pagination metadata in the body (R4), multiple
+validation errors in a uniform `errors[]` (R2), a trace id in a header and every error
+body (R7). §2.6 then said the remainder "would buy only **structural uniformity**" and
+judged that not worth the cost.
+
+That clause is what changes. Uniformity across every response is wanted as an end: no read
+is an exception, and no future read has to argue for one. Alongside it, `meta` gives
+`sort` and `filter` a home before they are needed — filtering exists today with no place
+to echo what was applied — and a trace id reaches a client on success rather than only on
+failure, which matters for a screen that worked and looked wrong.
+
+### What this is NOT justified by
+
+An earlier draft of R15 claimed five unpaginated reads had no recorded reason, which would
+have made non-uniformity a demonstrated cost rather than a preference. **That was wrong.**
+`docs/api/conventions.md` records all five with a three-category test: a computed report
+about a single resource, a static map, or one document rather than a collection. The
+current shape has not failed, and nobody should later cite a failure that did not happen.
+
+### What it breaks
+
+- **Every route and every response model.** Twelve `Page[T]` reads become
+  `ResponseEnvelope[Page[T]]`, and every detail read nests one level.
+- **The client's generated contract**: `schema.d.ts` (4,830 lines) and 54 zod schemas in
+  `schemas.gen.ts`, both CI-gated against `openapi.json`. Regenerated wholesale.
+- **A hard cutover, with no gradual path.** The client's `parsed()` is non-strict, so a
+  backend that ADDS a field never breaks a deployed client — but a wrapper changes the
+  shape rather than adding to it, so every read throws `ResponseShapeError` until the
+  client ships. The two repositories land together or the app is broken in between. R9's
+  own condition applies and is narrowing: "do it in one migration and before the API has
+  more consumers". There is one consumer, pre-release, on an unmerged branch.
+- **Three things already decided.** KILLTEAM #91 settled the event read as an ordinary
+  paged collection. The five unpaginated reads stop being exceptions, because there is
+  nothing left to be an exception to — which closes most of R15. And `paging.ts` in the
+  client walks `total` to fetch user-scoped collections whole, so the walk gains an unwrap
+  in the module whose whole purpose is that a partial collection is silently wrong.
+- **Two shapes that need deciding, not inheriting.** A `204` either stays bodiless — an
+  exception inside the thing adopted for uniformity — or becomes a `200` with
+  `{data: null}`, changing the **thirteen** operations that answer 204 and the client's
+  `apiDelete`, which expects no body at all. And `errors[]` in a success envelope is dead
+  weight beside the `ApiError` the client already throws from a separate schema on
+  `!res.ok`; either both error paths stay, or views that branch on `ApiError.code` are
+  rewritten.
+
+### The rows that already exist
+
+None. This changes no table and no stored data, which is the one respect in which it is
+cheaper than it looks.
+
+### Where it lands in the documents
+
+`ARCHITECTURE.md` §2.6 is marked superseded by this entry and keeps its record. The
+published shape lives in `docs/api/conventions.md`, which is the document a client author
+reads and therefore the one that makes the change visible to its audience. `SPEC.md` has
+no response-shape section and needs one. `MVP.md` names both shapes in its conventions
+paragraph and in every row of its API reference.
 
 ---
 
