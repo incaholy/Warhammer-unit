@@ -812,6 +812,39 @@ Every response becomes `{data, errors, meta}` — `meta` carrying the trace id, 
 pagination, sort and filter where they apply. The shape is `attention-api`'s
 `ResponseEnvelope[T]`, which is where R9 first met it.
 
+### Three parts of the shape are open, and they decide how large this is
+
+Read from the reference rather than assumed, because the first draft of this entry
+assumed and got it wrong: it described `data` as holding the current `Page` object with
+`meta.pagination` beside it, which double-counts paging and is not what the code does.
+
+**E1 — does `data` hold the bare array, or keep `Page`?** The reference returns
+`ResponseEnvelope[List[ChallengeRead]]`: `data` is the array and paging belongs in
+`meta.pagination`, so **`Page[T]` stops existing rather than nesting**. Twelve generated
+schemas collapse instead of gaining a level, which is cheaper than nesting — but every
+read's envelope then carries paging in a different place from where the client reads it
+today. Keeping `Page` inside `data` is the hybrid, and nobody is running it.
+
+**E2 — offset or page-number?** The reference's `Pagination` is
+`{size, number, total_elements, total_pages}`. Warhammer's is `{limit, offset}`, chosen
+deliberately in R4 with §2.3's reasoning for a mostly-static catalog, with a 200 cap and
+an `id` tiebreaker so a page boundary cannot repeat a row. Adopting the envelope does not
+require adopting the pagination MODEL, and conflating the two makes this change look
+larger than it is: the wrapper is a shape, and page-number paging is a different
+decision with its own consequences — including `paging.ts` in the client, which walks
+`total` to fetch user-scoped collections whole and has no `total_elements` to walk.
+
+**E3 — are unset `meta` fields absent or null?** The reference sets
+`response_model_exclude_unset=True` on every route, so `pagination`, `sort` and `filter`
+are omitted when they do not apply rather than serialised as null. Cleaner bodies; the
+cost is that a client cannot tell "not applicable" from "omitted", and the generated
+types will encode whichever is chosen.
+
+One observation worth carrying: the reference's list route accepts `offset` and `limit`
+and **never populates `meta.pagination`**. So "it gives pagination a defined home" is
+true of the model and not yet of the code — the home exists and is empty. Adopting the
+shape means deciding to fill it, not inheriting a filled one.
+
 ### Why, and it is a change of judgement rather than a correction
 
 R9 refused this and **every fact in its reasoning still holds.** The three things the
