@@ -105,7 +105,7 @@ scripts/
   seed_datasheets.py      load the 40k catalog
   seed_killteam.py        load the Kill Team catalog (upsert + withdraw sweep)
   make_admin.py
-tests/                 34 modules, two tiers
+tests/                 35 modules, two tiers
 ```
 
 **The layering is strict and enforced, not aspirational**: API → service → DB, one
@@ -512,18 +512,20 @@ missing from the list of your games.
 
 ## Current state
 
-Measured on this branch (`main` @ `366f918`):
+Measured on **this branch**, not on `main`. Where a figure differs between the two, both
+are given — an earlier version of this table mixed them under one heading, which is how
+three of its numbers went stale in a single commit.
 
 | | |
 |---|---|
-| Tests | **712 passing, 1 skipped** (SQLite tier); **713** on the Postgres parity tier |
-| Test modules | 34 |
+| Tests | **723 passing, 1 skipped** (SQLite tier), 724 collected; **724** on the Postgres parity tier, where the tier-gated test runs |
+| Test modules | 35 |
 | Tables | 26 — 11 Army List and shared, 15 Kill Team |
 | Migrations | 4, and CI fails if they disagree with the models |
 | API | 49 paths, 72 operations, published as a committed `openapi.json` |
-| Recorded decisions | **73**, in [`KILLTEAM.md`](KILLTEAM.md), each with its reasoning — 66 at `366f918`, plus the seven this branch adds for shared play |
+| Recorded decisions | **91**, in [`KILLTEAM.md`](KILLTEAM.md), each with its reasoning — 66 at `366f918`, plus the 25 this branch adds for shared play, the 40k composition and the response envelope |
 | CI gates | 7 — see below |
-| Catalog data | ~1,331 40k units; all 48 Kill Team teams parse and seed |
+| Catalog data | **1,331 40k units stored** from 1,558 scraped rows, the difference being the seed's natural key; all 48 Kill Team teams parse and seed |
 
 **Both halves of the backend shipped.** The Army List API and the Kill Team API are
 merged and tested at the commit above. "Feature-complete" was true when that commit was
@@ -804,11 +806,16 @@ above, and none of it blocking a feature:
   and **not yet written down anywhere**. The count is a recollection, not a record,
   which makes it the least trustworthy figure in this document.
 
-**Closed since the earlier backlog**, named because `SPEC.md` and `CODE-REVIEW.md` still
-cite the IDs: **FE1–FE3** (frontend unblockers), **H2** (`IntegrityError` → 409 is
-registered in `app/main.py`), **H3 + M1** (`selectinload` on the list paths), **M3**
-(`EmailStr` on register), **M5** (Sentry, request ids, structured logs) and **L7** (the
-last-admin guard). The stale-doc cleanup that entry also listed is done.
+**Closed since the earlier backlog.** Those with an id `SPEC.md` still cites:
+**FE1–FE3** (frontend unblockers), **H2** (`IntegrityError` → 409 is registered in
+`app/main.py`), **H3 + M1** (`selectinload` on the list paths) and **M5** (Sentry,
+request ids, structured logs).
+
+Two more are closed in the code and have **no id anywhere** — an earlier version of this
+list invented `M3` and `L7` for them and attributed the citation to `SPEC.md` and
+`CODE-REVIEW.md`, where neither string appears: `Register_Create.email` is an `EmailStr`
+(`app/api/auth.py`), and `UserService.set_admin` refuses to demote the last admin. Both
+are real; the provenance was not. The stale-doc cleanup that entry also listed is done.
 
 ## What success looks like
 
@@ -897,8 +904,8 @@ them:
   40k equivalent (`scripts/data/datasheets.json`) ended up committed". So the open
   question is not whether that data stays in the project; it is already published.
   The create-only seed above is downstream of it.
-- **The two test tiers are asymmetric.** Only one of the 713 tests is tier-gated, so
-  on SQLite 712 of them validate the models rather than the shipped schema. The
+- **The two test tiers are asymmetric.** Only one of the 724 tests is tier-gated, so
+  on SQLite 723 of them validate the models rather than the shipped schema. The
   parity tier exists precisely for that, and it runs in CI — but a developer running
   `pytest` locally is testing the weaker thing.
 - **No end-to-end tests.** The API is tested thoroughly and the client is tested
@@ -1034,6 +1041,6 @@ Workshop's; these are plain-language definitions, not rules.
 | [`README.md`](README.md) | how to run it |
 | [`SPEC.md`](SPEC.md) | the 40k architecture and every 40k route, plus the engineering both halves share |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | the structural rules, each with a status |
-| [`KILLTEAM.md`](KILLTEAM.md) | the Kill Team design — 73 numbered decisions |
+| [`KILLTEAM.md`](KILLTEAM.md) | the Kill Team design — 91 numbered decisions |
 | [`ROADMAP.md`](ROADMAP.md) | build order and the remaining backlog |
 | [`CODE-REVIEW.md`](CODE-REVIEW.md) | a dated correctness review, with outcomes |
