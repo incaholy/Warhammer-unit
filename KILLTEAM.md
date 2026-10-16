@@ -577,8 +577,19 @@ An operative's card shows both halves at once: what it **can do**, from the game
 snapshot of the datacard — weapon profiles, abilities and unique actions, keywords — and
 what is **true of it now**: wounds left, order, whether it has activated, its tokens and
 the actions it has used. Nothing on that screen edits the catalog (decision #21), and it
-reads the snapshot rather than the catalog API, so a game needs no catalog request once
-it has started.
+reads the snapshot rather than the catalog API, so **rendering** a game needs no catalog
+request once it has started.
+
+That used to read "a game needs no catalog request once it has started", which claimed
+more than the snapshot delivers. Three operations take an id the snapshot does not
+contain, and the frontend found this building them (ROADMAP KF4g): **add** an operative
+(#18) and **transform** one (#19) each name a catalog operative, and **add** a piece of
+equipment (#17) names a catalog piece. `KTGame_Read` carries `operatives` and `equipment`
+as what has been FIELDED and TAKEN, not as pools to choose from -- unlike `ploys`, which
+IS the team's whole list, which is why spending a ploy needs nothing extra. So those
+three read the catalog and the rest of the screen does not. The guarantee worth making is
+the one that holds: a battle renders, and is played, without the catalog; three
+mid-battle additions ask it for a list.
 
 Two levels of detail, because both are wanted at different moments. The list of
 operatives is compact enough to see the whole team at a glance — name, wounds, order,
