@@ -1,8 +1,9 @@
 # API conventions
 
 The cross-repo contract between the backend (`warhammer_unit`) and the frontend
-(`warhammer_web`). These are the rules that hold across *every* endpoint, so a
-client can be written against the conventions rather than against each route.
+(`warhammer_unit_web`, cloned locally as `warhammer_web`). These are the rules
+that hold across *every* path, so a client can be written against the
+conventions rather than against each route.
 The machine-readable schema is [`openapi.json`](../../openapi.json) (generated
 from the app by `make openapi`, verified fresh in CI); this file is the human
 half — the rules a schema can't express.
@@ -63,7 +64,7 @@ backend derives status from code, so they can't disagree):
 | `code` | HTTP | Meaning |
 |---|---|---|
 | `NOT_FOUND` | 404 | No such resource (or not visible to this user). |
-| `CONFLICT` | 409 | Clashes with existing state (duplicate, already-a-member). |
+| `CONFLICT` | 409 | Clashes with existing state (duplicate, already-a-member, stale game version). |
 | `VALIDATION` | 400 | A business rule failed on a well-formed request. |
 | `REQUEST_VALIDATION` | 422 | The request itself is malformed (schema/parse). |
 | `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
@@ -73,6 +74,31 @@ backend derives status from code, so they can't disagree):
 Note the two validation codes: `REQUEST_VALIDATION` (422) is "you sent something
 malformed"; `VALIDATION` (400) is "your request was well-formed but broke a rule."
 They are distinct on purpose so a client can tell them apart.
+
+### Optimistic concurrency on a Kill Team game
+
+Two devices on one game is the ordinary case — a phone beside a laptop, or both
+players tracking the same match — so this is a rule a client MUST honour, not an
+edge case.
+
+- A game row carries a **`version`** integer. `KTGame_Read.version` is always
+  present, so a client already has it from the read it rendered.
+- `PATCH /api/v1/me/kill-team/games/{game_id}` and
+  `PATCH /api/v1/me/kill-team/games/{game_id}/operatives/{row_id}` both accept
+  `version` in the body, and a client SHOULD send the one it read.
+- A write whose `version` is not the row's current one answers **`409` with
+  `code: "CONFLICT"` and `field: "version"`**. Re-read the game and rebuild the
+  write against the fresh state. Never re-send it as-is: that is exactly the
+  overwrite the version guard exists to stop.
+- A write that omits `version` is applied blind, but a genuine race still loses at
+  flush time. The backend maps `version` as the row's SQLAlchemy `version_id_col`,
+  so every `UPDATE` carries `WHERE version = <the value the writer read>`, a stale
+  writer matches zero rows, and a `StaleDataError` handler in `app/main.py` answers
+  the same `409` / `field: "version"`.
+
+So `CONFLICT` is three situations, not the two its table row names: a duplicate, an
+already-a-member, and a stale game version. `field` is what tells them apart —
+`"version"` means retry after a re-read, anything else does not.
 
 ## Pagination
 

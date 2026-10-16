@@ -309,7 +309,7 @@ Attention's API contract already specifies exactly this (a `trace_id` in every r
 
 **✅ Already built.** `init_sentry()` in `app/observability.py` is DSN-gated and tags every event with the request id. ~~`sentry-sdk==2.51.0` is already in `requirements.txt` and never imported.~~ You have the tool and it is not plugged in. Three lines in `main.py` and unhandled exceptions arrive with a stack trace, the request path, and the user, instead of vanishing into a 500.
 
-Note the interaction with [`CODE-REVIEW.md`](CODE-REVIEW.md) finding 2: the catch-all `ValueError`/`TypeError` handlers turn real bugs into 400s. Error tracking will not report them, because as far as the app is concerned nothing failed. **Fix that finding first, or you will wire up monitoring that reports nothing.**
+~~Note the interaction with [`CODE-REVIEW.md`](CODE-REVIEW.md) finding 2: the catch-all `ValueError`/`TypeError` handlers turn real bugs into 400s. Error tracking will not report them, because as far as the app is concerned nothing failed. **Fix that finding first, or you will wire up monitoring that reports nothing.**~~ **✅ Nothing to fix first.** Those handlers are gone, `CODE-REVIEW.md` marks finding 2 fixed, and `app/main.py` carries a comment saying their absence is deliberate. A real bug now reaches the generic `Exception` handler as a sanitized 500, which is exactly the shape Sentry reports. Kept struck through rather than deleted because the *interaction* is the lesson: a catch-all that answers 400 makes an error tracker silent, so check for one before trusting a dashboard.
 
 ### Liveness, readiness, and alerts
 
@@ -423,7 +423,7 @@ Each stage above has its own reading list. If you want an order rather than a pi
 
 **Books, if you want depth rather than links:**
 
-- **[Designing Data-Intensive Applications](https://dataintensive.net/)** (Martin Kleppmann). The reference for everything about data and distributed systems. Chapter 7 (Transactions) is the one that pays off soonest given the concurrency notes in `CODE-REVIEW.md`.
+- **[Designing Data-Intensive Applications](https://dataintensive.net/)** (Martin Kleppmann). The reference for everything about data and distributed systems. Chapter 7 (Transactions) is the one that pays off soonest given this project's own concurrency story: `KTGame.version` as SQLAlchemy's `version_id_col`, decided in `KILLTEAM.md` decision #9, with the `StaleDataError` handler in `app/main.py` turning a lost race into a 409. (This line used to cite `CODE-REVIEW.md`, which has no concurrency discussion at all.)
 - **Release It!** (Michael Nygard). Specifically about what fails when software meets production: timeouts, retries, circuit breakers, cascading failure. Reads like a series of war stories, which is why it sticks.
 - **[Site Reliability Engineering](https://sre.google/books/)** (Google). Free online in full. Skim rather than read cover to cover.
 - **Accelerate** (Forsgren, Humble, Kim). The research behind the DORA metrics: why deploying more often, in smaller pieces, with fast rollback, correlates with everything else going well.

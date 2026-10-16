@@ -12,7 +12,7 @@ separate homes:
 |---|---|---|
 | **Database** | Postgres | **Neon** (free, persistent) |
 | **API** | this repo — FastAPI in Docker | **Render** Web Service (free) |
-| **Frontend** | `warhammer_web` — static React build | **Render** Static Site (or Cloudflare Pages / Vercel) |
+| **Frontend** | `incaholy/warhammer_unit_web` — static React build | **Render** Static Site (or Cloudflare Pages / Vercel) |
 
 The frontend is served as static files; all per-user/dynamic behaviour lives in
 the **API + database** tier. Everything below is free-tier; the trade-off is
@@ -25,7 +25,10 @@ idle spin-down (first request after a nap is slow) — fine for a demo.
 
 ## Prerequisites
 
-- Both repos pushed to GitHub (`warhammer_unit`, `warhammer_web`).
+- Both repos pushed to GitHub: **`incaholy/warhammer_unit`** (this one) and
+  **`incaholy/warhammer_unit_web`** (the frontend). `warhammer_web` is only the
+  local directory the frontend is usually cloned into — it is not the repo name, and
+  Render lists the repo under the GitHub name.
 - A **Neon** account (neon.tech) and a **Render** account (render.com) — both free.
 
 ---
@@ -68,6 +71,9 @@ idle spin-down (first request after a nap is slow) — fine for a demo.
 | `SECRET_KEY` | a random value — use Render's **Generate**, or `openssl rand -hex 32` |
 | `APP_ENV` | `production` — safety net (see below) |
 | `ALLOWED_ORIGINS` | the frontend URL — **leave blank for now**, fill in at Step 5 |
+| `SENTRY_DSN` | optional — a Sentry project DSN. Unset means Sentry is never initialized. |
+| `SENTRY_TRACES_SAMPLE_RATE` | optional — performance-trace sampling, default `0` (off). |
+| `LOG_LEVEL` | optional — level for the JSON log formatter, default `INFO`. |
 
 - **Why set `APP_ENV=production`?** `SECRET_KEY` is the real protection — always
   set it. But `APP_ENV` defaults to `dev` in the app, and in dev a *missing*
@@ -89,29 +95,61 @@ On deploy, migrations create all 26 tables in Neon (11 for the 40k army builder,
 
 ## Step 3 — Seed the catalog
 
-The seeded units live only in dev; `scripts/data/datasheets.json` ships **empty**
-in git (it's scraped GW content). Seed Neon from your laptop — Neon is reachable
-over the internet:
+### 3a — 40k datasheets
+
+`scripts/data/datasheets.json` is **committed** (`git ls-files scripts/data/` lists
+it, ~2.1 MB), so a fresh clone already has the catalog and there is **nothing to
+scrape**. Seed Neon from your laptop — Neon is reachable over the internet:
 
 ```bash
 cd warhammer_unit
-make scrape            # regenerates datasheets.json from the local cache (instant, offline)
 
 DATABASE_URL="postgresql://…-pooler…neon.tech/neondb?sslmode=require" \
   python -m scripts.seed_datasheets
 ```
 
-Loads ~1331 units into Neon. `make scrape` needs `beautifulsoup4`/`lxml`
-(dev deps), so scrape **locally**, seed **against Neon**.
+That stores **1,331** units. The file holds 1,558 unit rows; the seed's natural key
+is `(faction, unit_name)`, and 227 rows repeat a pair already loaded, so 1,331 is
+what lands. Both numbers come from the JSON's own `units` list — count them with a
+one-liner over the file, or read `total` back from `GET /api/v1/units`.
+
+> **Do not run `make scrape` here.** It is not needed, because the file is in git.
+> It is also not the offline regeneration an earlier version of this guide claimed:
+> the scraper cache it reads (`scripts/data/cache/`) is **gitignored**, so on a fresh
+> clone there is no cache and the scrape goes out to Wahapedia over the network.
 
 > Re-running the seed today **creates only** — it does not refresh changed stats
 > (see the Tier 1 "seed upsert" item in the backlog). Fine for a first load.
+
+### 3b — Kill Team catalog: a gap in this deploy
+
+**This deploy does not seed Kill Team, and there is no committed data to seed
+from.** `scripts/data/killteam.json` is gitignored, so neither a fresh clone nor the
+deployed container has a copy, and `make seed-kt` (`python -m
+scripts.seed_killteam`) is the only loader. The result on a deploy that stops at
+step 3a: the app serves its 29 Kill Team operations against **15 empty `kt_*`
+tables**. Catalog reads answer empty, and a roster or a game cannot be created
+because there are no operatives to put in one.
+
+The only route through today is to produce the file yourself and seed from your
+laptop, which does need the dev deps and a real network scrape:
+
+```bash
+make install-dev       # beautifulsoup4 / lxml — not in requirements.txt
+make scrape-kt         # writes scripts/data/killteam.json (fetches Wahapedia; scrape-kt-fresh re-requests cached pages)
+
+DATABASE_URL="postgresql://…-pooler…neon.tech/neondb?sslmode=require" \
+  python -m scripts.seed_killteam
+```
+
+Unlike the 40k seed, `seed_killteam` is re-runnable and refreshes changed rows.
 
 ---
 
 ## Step 4 — Frontend (Render Static Site)
 
-**New → Static Site**, connect the `warhammer_web` repo, then:
+**New → Static Site**, connect the **`incaholy/warhammer_unit_web`** repo (that is
+what it is called on GitHub; `warhammer_web` is only a local directory name), then:
 
 | Setting | Value |
 |---|---|
@@ -128,7 +166,7 @@ Loads ~1331 units into Neon. `make scrape` needs `beautifulsoup4`/`lxml`
 > ⚠️ **This one bites everyone.** Vite reads `VITE_API_BASE_URL` **only at build
 > time**, not at runtime. If it's unset (or you set it *after* the build), the
 > app falls back to calling its **own** origin — e.g. a signup POSTs to
-> `https://<web>.onrender.com/auth/register`, the SPA rewrite answers with
+> `https://<web>.onrender.com/api/v1/auth/register`, the SPA rewrite answers with
 > `index.html` (HTTP `200`), the browser can't parse HTML as JSON, and the UI
 > shows a generic "Something went wrong". **Always set this before building, and
 > after changing it use Manual Deploy → "Clear build cache & deploy" so a fresh
@@ -187,7 +225,7 @@ and inspect the `register`/`login` request:
 
 | What you see | Cause | Fix |
 |---|---|---|
-| Request URL is the **web** host (`…-web.onrender.com/auth/register`), `Sec-Fetch-Site: same-origin`, status `200` | `VITE_API_BASE_URL` was unset at build → app calls itself; the `200` is the SPA `index.html`, not JSON | Set `VITE_API_BASE_URL` (Step 4) and **rebuild** (Clear build cache & deploy) |
+| Request URL is the **web** host (`…-web.onrender.com/api/v1/auth/register`), `Sec-Fetch-Site: same-origin`, status `200` | `VITE_API_BASE_URL` was unset at build → app calls itself; the `200` is the SPA `index.html`, not JSON | Set `VITE_API_BASE_URL` (Step 4) and **rebuild** (Clear build cache & deploy) |
 | Console: `blocked by CORS policy` / `No 'Access-Control-Allow-Origin'` | `ALLOWED_ORIGINS` missing or not an exact match on the API | Set `ALLOWED_ORIGINS` to the exact web origin (Step 5), redeploy the **API** |
 | Request to `http://…` or `mixed content` blocked | `VITE_API_BASE_URL` used `http` from an `https` page | Use the `https://` API URL, rebuild |
 | Status `502`/`503`, or a failed/timed-out request | API is down or cold-starting | Check the API's Render **Logs**; retry after wake |
