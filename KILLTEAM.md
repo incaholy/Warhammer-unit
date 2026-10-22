@@ -570,8 +570,31 @@ Endpoints under `/api/v1/me/kill-team/games/...`:
 ## Frontend
 
 Catalog browse → roster builder → game screen. The game screen is phone-first for
-table-side use: large touch targets, one card per operative, turning point / CP / VP
-always visible.
+table-side use: large touch targets, one card per operative, and the scoreboard — turning
+point, CP and VP — never more than one gesture away.
+
+**The scoreboard hides as the player scrolls down, and returns as they scroll up.** This
+replaces an earlier requirement that it be *always visible*, and the reason is a
+measurement rather than a preference. Measured in WebKit at the iPhone 14's viewport of
+390 × 664 by the frontend's browser suite (`warhammer_web` ROADMAP KF9, 2026-10-21), the
+pinned chrome took **481px of 664 — 72%**, leaving 183px for the battle itself. That is
+barely one collapsed operative row. While scrolling down it now takes 339px, 51%.
+
+Three obligations on a client, because the value is in the return rather than the hiding:
+
+- A client MUST restore the scoreboard on the first upward movement, at any scroll depth.
+- A client MUST NOT hide it until it has been scrolled wholly past.
+- A client SHOULD ignore movement small enough to be a resting finger.
+
+The 390 × 664 above is the VIEWPORT, not the iPhone 14's 844px device height: Safari's own
+chrome takes the rest. Stated because every phone figure recorded before that suite existed
+was measured against the device height, and each understated the problem by the same
+factor.
+
+"Always visible" was right while the screen had one band to pin. It stopped being
+affordable once the scoreboard, the advance controls and the tab list all had to stay, and
+a requirement that cannot be met is worse than one that is merely demanding — it gets
+quietly dropped, and nothing records that it was.
 
 An operative's card shows both halves at once: what it **can do**, from the game's own
 snapshot of the datacard — weapon profiles, abilities and unique actions, keywords — and
