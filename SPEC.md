@@ -1,6 +1,16 @@
 # Warhammer Unit Backend — Specification
 
-A backend for storing Warhammer 40k unit datasheets in PostgreSQL, exposed through a FastAPI REST API.
+A backend for **Muster**, a collection and game manager for two Warhammer games, in
+PostgreSQL behind a FastAPI REST API.
+
+**What this document covers.** The 40k half — the datasheet catalog, inventories and
+army lists — and the engineering both halves share: layering, errors, pagination,
+migrations, testing, deployment. The Kill Team half is specified in
+[KILLTEAM.md](KILLTEAM.md) and not here — the two games share their plumbing but
+none of each other's content, as "Models" below records — and scope and current
+state are in [MVP.md](MVP.md). Where any of the three disagree, the one whose
+subject it is wins: routes and architecture here, Kill Team design there, scope in
+MVP.md — which cites both and overrides neither.
 
 The data divides into two halves:
 
@@ -66,6 +76,7 @@ Layout:
 ```
 app/
   main.py                # FastAPI app (entry point)
+  observability.py       # request-ID middleware, JSON logging, optional Sentry (R7)
   api/                   # routers + *_Create/*_Read schemas (one module per resource)
   core/
     services/            # one <Thing>Service per file (business logic)
@@ -98,9 +109,11 @@ run through the Makefile:
 | `make test` | run the pytest suite |
 | `uvicorn app.main:app --reload` | run the API locally |
 
-Dependencies are pinned in `requirements.txt` (runtime) and
-`requirements-dev.txt` (adds `pytest`/`pytest-cov`). Core stack: FastAPI,
-SQLModel, SQLAlchemy, Alembic, psycopg2, Pydantic, python-dotenv.
+Dependencies are pinned in `requirements.txt` (runtime — which is also where
+`pytest` and `pytest-cov` currently live) and `requirements-dev.txt`, which pulls
+that file in with `-r` and adds the dev/operator tools on top: `beautifulsoup4`,
+`lxml`, `ruff` and `import-linter`. Core stack: FastAPI, SQLModel, SQLAlchemy,
+Alembic, psycopg2, Pydantic, python-dotenv.
 
 ## DB layer (`app/core/db/`)
 
@@ -109,7 +122,19 @@ SQLModel, SQLAlchemy, Alembic, psycopg2, Pydantic, python-dotenv.
 This section covers `models.py` — the 40k catalog plus a player's armies and
 inventory, 11 tables. The Kill Team half lives in `models_killteam.py` (15 `kt_*`
 tables: 9 catalog, 2 roster, 4 game) and is specified in **KILLTEAM.md**, not here,
-because the two games share nothing but `TimestampMixin` (KILLTEAM.md #11).
+because neither game's catalog, rosters or games touch the other's.
+
+What they *do* share is the plumbing, deliberately: KILLTEAM.md #11 separates the
+two **sections** (`/kill-team` vs `/army-list`) so that "neither's routes, models or
+views leak into the other", and says in the same breath that "shared infrastructure
+(auth, errors, paging, transactions) is shared on purpose; the separation is between
+the two games, not their plumbing". KILLTEAM.md's "What is reused as-is" is the list:
+`TimestampMixin`, `Page`/`PageParams`/`paginate`, the coded-error family and its
+single `CodedError` handler, one transaction per request via `get_session`,
+`get_current_user`/`get_current_admin`, `not_nullable_fields()`, and the scraper's
+`fetch()`. The sharing reaches the schema too — both Kill Team owner columns are
+`foreign_key="users.id"`, so a kill team roster and a 40k army hang off the same
+`users` row. There is one account system, not one per game.
 
 | Model | Table | Half | Purpose |
 |---|---|---|---|
@@ -176,7 +201,12 @@ User-data details:
   required `faction_id`, a nullable `subfaction_id`, and an optional
   `points_limit` (`CHECK (points_limit IS NULL OR points_limit >= 0)`). This is
   the unit that becomes a roster; its points *total* is computed from its units,
-  not stored.
+  not stored. The total is **understated today**: `Unit.points` holds the
+  **minimum-size** price (the scraper takes the cheapest "N models" row), so a
+  ten-model squad is billed at the five-model cost.
+  [ROADMAP R13](ROADMAP.md#r13-unit-composition-and-points-that-follow-model-count)
+  calls that "a wrong number rather than a missing one", and is the slice that fixes
+  it.
 - `ArmyUnit` — carries `army_id`, `unit_id`, and `amount` (how many in the list),
   with `UNIQUE(army_id, unit_id)` (one row per unit type per army) and
   `CHECK (amount >= 0)`. Armies are independent of inventory — an `ArmyUnit` may
@@ -299,9 +329,12 @@ exposes CRUD methods.
   `LookupError` if the army doesn't exist; delete cascades to the army's
   `army_units`.
 - `add_unit(army_id, unit_id, amount=1)` — validates the army and unit exist
-  (else `LookupError`), then **upserts**: increment `amount` if the unit is
-  already in the army, otherwise create the row. Does **not** check inventory —
-  armies are aspirational.
+  (else `LookupError`), then **create-only**: a unit already in the army raises
+  `ConflictError` (→ 409) rather than incrementing, and the quantity is changed
+  through the idempotent `set_amount`. An incrementing add is not retry-safe,
+  because a timeout is indistinguishable from a slow success and the retry would
+  double-apply (R12, done 2026-08). Does **not** check inventory — armies are
+  aspirational.
 - `set_amount(army_id, unit_id, amount)` — absolute set; `amount < 1` raises
   `ValueError` (use `remove_unit`).
 - `remove_unit(army_id, unit_id)` — delete the entry.
@@ -311,7 +344,12 @@ exposes CRUD methods.
   Returns the units that are short (with their owned/needed counts) so the
   caller can show "what you still need to buy."
 - `points_total(army_id)` — computed points cost: `sum(unit.points × amount)`
-  over the army's units.
+  over the army's units, as one `SUM(amount * points)` aggregate in the DB rather
+  than a per-entry loop. **Caveat:** `Unit.points` is the **minimum-size** price, so
+  this bills every squad at its cheapest legal size and understates any unit fielded
+  above it (a ten-model Intercessor squad reads as five models' worth). See
+  [ROADMAP R13](ROADMAP.md#r13-unit-composition-and-points-that-follow-model-count),
+  which replaces the single column with `UnitPoints` = {`models`, `points`} tiers.
 - `validate(army_id)` — read-only legality check returning a
   `ValidationReport{ok, points_total, points_limit, issues}`. Each issue has a
   `kind`, a `detail`, and the offending `unit` where relevant:
@@ -325,7 +363,9 @@ exposes CRUD methods.
 `InventoryService` manages the units a user owns (the flat inventory), keyed on
 `user_id`:
 - `add_unit(user_id, unit_id, amount=1)` — validates the user and unit exist
-  (else `LookupError`), then **upserts** the owned amount.
+  (else `LookupError`), then **create-only**: a unit already owned raises
+  `ConflictError` (→ 409), and the amount is changed through `set_amount`. Same
+  retry-safety reasoning as `ArmyService.add_unit` (R12).
 - `set_amount(user_id, unit_id, amount)` — absolute set; `amount < 1` raises
   `ValueError` (use `remove_unit`).
 - `remove_unit(user_id, unit_id)` — delete the inventory entry.
@@ -390,7 +430,7 @@ Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 | `app/api/auth.py` | `AuthService` | register / login (public) |
 | `app/api/unit.py` | `UnitService` | catalog units |
 | `app/api/faction.py` | `UnitService` (catalog) | catalog factions, subfactions, weapons & abilities |
-| `app/api/user.py` | — (current user via JWT) | `GET /me` |
+| `app/api/user.py` | `UserService` (admin promotion) | `GET /me` (identity from the JWT, no service call) and the admin-only `PATCH /users/{user_id}` |
 | `app/api/inventory.py` | `InventoryService` | the current user's inventory (`/me/inventory`) |
 | `app/api/army.py` | `ArmyService` | the current user's armies (`/me/armies`) |
 | `app/api/killteam.py` | `KillTeamService` | the Kill Team catalog (`/kill-team`), read-only — see KILLTEAM.md |
@@ -398,17 +438,28 @@ Router modules (each mounted under the `/api/v1` parent in `app/main.py`):
 | `app/api/killteam_game.py` | `KTGameService` | the current user's kill team games (`/me/kill-team/games`) — see KILLTEAM.md |
 
 Success status codes follow REST conventions: `POST` create → **201**, `DELETE`
-→ **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s upsert,
-so they return **201** when they create the row and **200** when they increment
-an existing one.
+→ **204**, `GET`/`PATCH` → **200**. The inventory/army "add unit" `POST`s are
+create-only, so they return **201** or **409** and never **200** — `openapi.json`
+declares exactly `201` and `422` for both (R12 replaced the upsert, which did
+return 200 on an increment).
 
-Routes below are implemented. The **Backing method** column names the service
-call each route makes.
+Every 40k operation below is implemented, and the tables are the whole set — 42
+operations across 27 paths, which is `openapi.json` minus the Kill Team paths and
+the unversioned `GET /health`. The **Backing method** column names the service call
+each one makes.
 
 Authentication: `/auth/register` and `/auth/login` are public; every `/me/*`
 route requires a Bearer JWT (**401** without) and only touches the caller's own
 data — identity comes from the token, never a path param. Catalog **reads** are
-public; catalog **writes** require an admin (**403** otherwise).
+public with **one** caller-relative exception: `owned=true` on `GET /units` and
+`GET /units/facets` narrows both to the units in the caller's own inventory, so the
+same URL answers differently per user. Both therefore declare the bearer scheme in
+`openapi.json`, and both return **401** — not an ignored parameter — when an
+anonymous caller sends `owned=true`, because `get_owned_by` (`app/api/deps.py`)
+raises rather than quietly serving the full catalog to a client that believes it is
+showing an owned-only view (`docs/api/conventions.md` calls it "the only
+caller-relative filter on a public route"). Catalog **writes** require an admin
+(**403** otherwise).
 
 **Catalog** — reads are public; writes require an **admin** (see
 "Authentication & authorization" and "Populating the catalog").
@@ -417,20 +468,34 @@ public; catalog **writes** require an admin (**403** otherwise).
 |---|---|---|---|---|
 | POST | `/units` | create a unit (admin/seed) | `UnitService.create_unit` | done |
 | GET | `/units/{unit_id}` | get one unit (stats, keywords, linked weapons + abilities) | `UnitService.get_unit` | done |
-| GET | `/units` | list units (paged: returns a `Page` envelope `{items, total, limit, offset}`); query params: `faction_id`, `subfaction_id`, `q` (name search), `limit` (1–200), `offset` | `UnitService.list_units` | done |
-| GET | `/units/facets` | per-faction unit counts for the current filter (`{total, by_faction}`), computed server-side in one `GROUP BY` | `UnitService.faction_facets` | done |
+| GET | `/units` | list units (paged: returns a `Page` envelope `{items, total, limit, offset}`); query params: `faction_id`, `subfaction_id`, `q` (name search), `owned` (the caller's inventory only — 401 anonymously), `limit` (1–200), `offset` | `UnitService.list_units` | done |
+| GET | `/units/facets` | per-faction unit counts for the current filter (`{total, by_faction}`), computed server-side in one `GROUP BY`; shares `/units`' filters (`subfaction_id`, `q`, `owned`) minus the `faction_id` it groups by | `UnitService.faction_facets` | done |
 | PATCH | `/units/{unit_id}` | update fields on a unit (admin) | `UnitService.update_unit` | done |
 | DELETE | `/units/{unit_id}` | delete a unit (admin) | `UnitService.delete_unit` | done |
 | POST | `/units/{unit_id}/weapons` | link a weapon to a unit (admin) | `UnitService.link_weapon` | done |
 | POST | `/units/{unit_id}/abilities` | link an ability to a unit (admin) | `UnitService.link_ability` | done |
+| DELETE | `/units/{unit_id}/weapons/{weapon_id}` | unlink a weapon from a unit (admin, idempotent) → 204 | `UnitService.unlink_weapon` | done |
+| DELETE | `/units/{unit_id}/abilities/{ability_id}` | unlink an ability from a unit (admin, idempotent) → 204 | `UnitService.unlink_ability` | done |
 | GET | `/factions` | list factions with their subfactions | `UnitService.list_factions` | done |
-| POST | `/factions`, `/subfactions` | create catalog factions/subfactions (admin/seed) | `UnitService.create_faction` / `create_subfaction` | done |
+| POST | `/factions` | create a catalog faction (admin/seed); `name` is a `FactionName` enum value | `UnitService.create_faction` | done |
+| POST | `/subfactions` | create a catalog subfaction (admin/seed); the name must be allowed under its `faction_id` | `UnitService.create_subfaction` | done |
+| GET | `/subfactions` | list the subfaction **rows** that exist, with ids (paged); optional `faction_id` filter | `UnitService.list_subfactions` | done |
+| DELETE | `/subfactions/{subfaction_id}` | delete a subfaction (admin, guarded → 409 if referenced) | `UnitService.delete_subfaction` | done |
+| GET | `/taxonomy` | the allowed subfaction **names** under each faction, read from the `FACTION_SUBFACTIONS` constant, no DB — what a dropdown needs before any row exists | — (reads the constant) | done |
 | POST | `/weapons` | create a weapon (admin/seed) | `UnitService.create_weapon` | done |
+| GET | `/weapons` | list weapons (paged) — the picker `POST /units/{unit_id}/weapons` needs, since linking takes a `weapon_id` | `UnitService.list_weapons` | done |
+| PATCH | `/weapons/{weapon_id}` | update a weapon (admin) — body `Weapon_Update`, all fields optional | `UnitService.update_weapon` | done |
+| DELETE | `/weapons/{weapon_id}` | delete a weapon (admin; its `unit_weapons` link rows cascade, so no guard) → 204 | `UnitService.delete_weapon` | done |
 | POST | `/abilities` | create an ability (admin/seed) | `UnitService.create_ability` | done |
+| GET | `/abilities` | list abilities (paged) — the same picker problem as weapons | `UnitService.list_abilities` | done |
+| PATCH | `/abilities/{ability_id}` | update an ability (admin) — body `Ability_Update`, all fields optional | `UnitService.update_ability` | done |
+| DELETE | `/abilities/{ability_id}` | delete an ability (admin; its `unit_abilities` link rows cascade) → 204 | `UnitService.delete_ability` | done |
 
 **Auth & the current user's data** — `/auth/*` is public; every `/me/*` route
 requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
-→ 404 via `get_owned_army`).
+→ 404 via `get_owned_army`). The one user-resource path that is *not* under `/me`
+is `PATCH /users/{user_id}`, which is admin-only and acts on somebody else on
+purpose; it is listed last.
 
 | Method | Path | Action | Backing method | Status |
 |---|---|---|---|---|
@@ -438,7 +503,7 @@ requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
 | POST | `/auth/login` | login (public, OAuth2 form) — returns a `Token` | `AuthService.authenticate` | done |
 | GET | `/me` | the current user | `get_current_user` | done |
 | GET | `/me/inventory` | list owned units + amounts (nested `Unit_Read` + `amount`) | `InventoryService.list_inventory` | done |
-| POST | `/me/inventory` | add an owned unit — body `InventoryAdd`, upserts | `InventoryService.add_unit` | done |
+| POST | `/me/inventory` | add an owned unit — body `InventoryAdd`, create-only (409 if owned) | `InventoryService.add_unit` | done |
 | PATCH | `/me/inventory/{unit_id}` | set absolute owned amount — body `AmountSet` | `InventoryService.set_amount` | done |
 | DELETE | `/me/inventory/{unit_id}` | remove a unit from inventory | `InventoryService.remove_unit` | done |
 | POST | `/me/armies` | create an army — body `Army_Create` | `ArmyService.create_army` | done |
@@ -448,9 +513,10 @@ requires a JWT and acts on the token-holder's own data (a stranger's `{army_id}`
 | DELETE | `/me/armies/{army_id}` | delete an army (cascade its `army_units`) | `ArmyService.delete_army` | done |
 | GET | `/me/armies/{army_id}/shortfall` | diff the army against inventory — units short and how many to buy | `ArmyService.shortfall` | done |
 | GET | `/me/armies/{army_id}/validate` | check the list's legality (points vs limit, faction/subfaction) | `ArmyService.validate` | done |
-| POST | `/me/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, upserts | `ArmyService.add_unit` | done |
+| POST | `/me/armies/{army_id}/units` | add a unit — body `ArmyUnitAdd`, create-only (409 if present) | `ArmyService.add_unit` | done |
 | PATCH | `/me/armies/{army_id}/units/{unit_id}` | set absolute amount — body `AmountSet` | `ArmyService.set_amount` | done |
 | DELETE | `/me/armies/{army_id}/units/{unit_id}` | remove a unit from the army | `ArmyService.remove_unit` | done |
+| PATCH | `/users/{user_id}` | grant or revoke admin on another user (**admin-only**) — body `{is_admin}`, returns `User_Read`; demoting the last admin is a 409 | `UserService.set_admin` | done |
 
 Request schemas (`*_Create` plus the small add/patch bodies):
 - `Unit_Create` — `{faction_id, unit_name, movement, toughness, armor_save,
@@ -487,18 +553,25 @@ Read schemas nest the hierarchy:
   weapon_skill, strength, armor_piercing, damage}`; `Ability_Read` —
   `{id, name, description}`. (These are also the shapes embedded in `Unit_Read`.)
 - `UserUnit_Read` and `ArmyUnit_Read` both embed `Unit_Read` and add `amount`.
-- `Army_Read` is `{id, name, faction_id, subfaction_id, points_limit,
-  points_total, units: [ArmyUnit_Read]}` — a full roster (`points_total` is
-  computed).
-- `User_Read` is `{id, username, email}`. A user's armies and inventory are
-  fetched via their own list routes, not embedded here.
+- `Army_Read` is `{id, name, description, faction_id, subfaction_id, points_limit,
+  created_at, points_total, units: [ArmyUnit_Read]}` — a full roster. `points_total`
+  is computed, not stored, and is a **minimum-size** figure: see the caveat under
+  `points_total` in "Service layer" and
+  [ROADMAP R13](ROADMAP.md#r13-unit-composition-and-points-that-follow-model-count).
+- `User_Read` is `{id, username, email, is_admin}`. A user's armies and inventory
+  are fetched via their own list routes, not embedded here. `is_admin` is safe on
+  `/me` — identity comes from the JWT, so a caller learns only their own flag, and
+  authorization stays enforced server-side by `get_current_admin` on every write.
 - `Shortfall_Read` is a list of `{unit: Unit_Read, in_list, owned, need}` rows.
 - `Validation_Read` is `{ok, points_total, points_limit, issues: [{kind, detail,
   unit: Unit_Read?}]}` — the `validate` report.
 
 Error mapping at the API layer (see "Custom service errors" for the typed
-hierarchy). Service errors come back in one shape — `{"detail", "code",
-"field"?}` — where `code` is a stable `ErrorCode`. Only messages the service
+hierarchy). Service errors come back in one shape — `{detail, code, field?,
+request_id, errors: [{code, field, detail}, ...]}`, the five keys spelled out under
+"Custom service errors" and "API-layer handlers" below — where `code` is a stable
+`ErrorCode`, `request_id` is the one on the `X-Request-ID` header, and the top level
+mirrors `errors[0]`. Only messages the service
 author wrote reach the client; any *unexpected* exception is logged server-side
 and returned as a generic body with no internals — never `str(exc)` of an
 arbitrary builtin:
@@ -512,6 +585,7 @@ arbitrary builtin:
 | `ForbiddenError` (auth) | `FORBIDDEN` | 403 |
 | `RequestValidationError` (Pydantic) — carries `field` | `REQUEST_VALIDATION` | 422 |
 | `IntegrityError` (DB-constraint backstop) | `CONFLICT` | 409 — logged, generic body |
+| `StaleDataError` (SQLAlchemy `version_id_col` lost race) | `CONFLICT` | 409 — a Kill Team game row moved on under the writer (KILLTEAM.md #9) |
 | any other unhandled exception | `INTERNAL` | 500 — logged with traceback, generic body |
 
 **One** handler is registered, against the `CodedError` marker base that every
@@ -530,25 +604,29 @@ client `400` instead of a server `500`.
 exceptions and returns a generic 500, and exposes a `GET /health` liveness
 check. Run locally with `uvicorn app.main:app --reload` (or `make run`).
 
-### Planned additions (frontend-readiness)
+### Frontend-readiness additions (built)
 
-These are small, additive, non-breaking endpoints the frontend/admin UI will
-need. **Effort: all S** unless noted.
+Small, additive, non-breaking additions the frontend/admin UI needed. All three are
+shipped — roadmap items 15, 16 and 17 in the list below — and the reasoning is kept
+because it is why each has the shape it has.
 
-- **`GET /weapons` and `GET /abilities`** — the catalog is admin-curated and
-  linking a weapon to a unit (`POST /units/{id}/weapons`) needs a `weapon_id`,
-  but there's currently no way to *list* weapons/abilities to pick from.
-  *Plan:* add `list_weapons()` / `list_abilities()` to `UnitService` (a plain
-  `select(...)`), then `GET /weapons` / `GET /abilities` routes returning
-  `list[Weapon_Read]` / `list[Ability_Read]` (public reads, like the rest of the
-  catalog). Mirrors the existing `list_factions` / `GET /factions`.
-- **`GET /taxonomy`** — deliberately NOT under `/factions/`, which would collide with
-  a future faction resource. The allowed **faction names** are already in the
-  OpenAPI schema (the `FactionName` enum on `Faction_Create`), but the allowed
-  **subfactions per faction** live only in the service-side `FACTION_SUBFACTIONS`
-  map, so an admin UI has no way to render a subfaction dropdown.
-  *Plan:* a read route returning `{faction_name: [allowed subfactions]}` straight
-  from the map (no DB) — e.g. `{"Xenos": ["Aeldari", "Necrons", …], …}`. Public.
+- **`GET /weapons` and `GET /abilities`** *(done, roadmap 15)* — the catalog is
+  admin-curated and linking a weapon to a unit (`POST /units/{unit_id}/weapons`)
+  needs a `weapon_id`, so there had to be a way to *list* weapons/abilities to pick
+  from. `UnitService.list_weapons()` / `list_abilities()` (plain `select(...)`,
+  with `count_weapons`/`count_abilities` beside them) back `GET /weapons` and
+  `GET /abilities` in `app/api/faction.py`, returning `Page[Weapon_Read]` /
+  `Page[Ability_Read]` — public reads, like the rest of the catalog, and paged like
+  every other list. Mirrors `list_factions` / `GET /factions`.
+- **`GET /taxonomy`** *(done, roadmap 16)* — deliberately NOT under `/factions/`,
+  which would collide with a future `GET /factions/{faction_id}`. The allowed
+  **faction names** were already in the OpenAPI schema (the `FactionName` enum on
+  `Faction_Create`), but the allowed **subfactions per faction** lived only in the
+  service-side `FACTION_SUBFACTIONS` map, so an admin UI had no way to render a
+  subfaction dropdown. The route returns `{faction_name: [allowed subfactions]}`
+  straight from the map, no DB — e.g. `{"Xenos": ["Aeldari", "Necrons", …], …}` —
+  so it answers before any subfaction row has been created. Public. It is distinct
+  from `GET /subfactions`, which lists the rows that *do* exist, with their ids.
 - **Pagination is a convention (done, R4).** Every list endpoint returns a
   `Page` envelope — `{items, total, limit, offset}` — via the shared `Page[T]`
   schema and `PageParams` dependency in `app/api/pagination.py` (`limit` 1–200,
@@ -557,8 +635,11 @@ need. **Effort: all S** unless noted.
   invisible to cross-origin JS unless named in CORS `expose_headers`, so on the
   Firebase→Cloud Run deploy the browser read no total and the catalog silently
   fell back to `0` (see the resolved BUG1). Reversing the earlier no-envelope
-  stance was deliberate; whether to nest `Page` inside a `{data, errors, meta}`
-  response envelope is a separate, still-open decision (ARCHITECTURE §2.6 / R9).
+  stance was deliberate. Whether to nest `Page` inside a `{data, errors, meta}`
+  response envelope is a separate question, and this line called it still-open while
+  §2.6 had closed it as **no envelope** (R9). It is open again, and for a different
+  reason: [ROADMAP R16](ROADMAP.md#r16-wrap-every-response-in-an-envelope) supersedes
+  §2.6 and intends the wrapper.
   Each list orders by a natural key plus the primary-key `id` as a tiebreaker, so
   offset paging is stable across page boundaries. `GET /units/facets` adds the
   per-faction counts the catalog rail needs as a server-side `GROUP BY`, so the
@@ -576,22 +657,23 @@ deleting one, check for references and raise `ConflictError` (→ 409) instead o
 letting a raw `IntegrityError` surface as a 500. Weapons/abilities need no guard:
 their link rows (`unit_weapons`/`unit_abilities`) cascade.
 
-- **Fix `delete_unit` (bug)** *(S)* — guard against `ArmyUnit`/`UserUnit`
-  references → `ConflictError`. Today deleting an in-use unit 500s. No route change
-  (409 flows through the `ConflictError` handler).
-- **Unlink weapon/ability** *(S)* — `unlink_weapon(unit_id, weapon_id)` /
+- **`delete_unit` is guarded** *(roadmap 19)* — `_unit_is_referenced` checks
+  `ArmyUnit`/`UserUnit` before the delete and raises `ConflictError`, so deleting an
+  in-use unit answers a clean **409** instead of the raw 500 it used to. No route
+  change — the 409 flows through the `ConflictError` handler.
+- **Unlink weapon/ability** *(roadmap 20)* — `unlink_weapon(unit_id, weapon_id)` /
   `unlink_ability(unit_id, ability_id)` on `UnitService` (idempotent), exposed as
-  `DELETE /units/{id}/weapons/{weapon_id}` and `.../abilities/{ability_id}` → 204.
-  Mirrors the existing `POST` link routes.
-- **Editable weapons + abilities** *(M)* — `update_weapon`/`delete_weapon` and
-  `update_ability`/`delete_ability` (partial update; bad `category` or unknown
+  `DELETE /units/{unit_id}/weapons/{weapon_id}` and
+  `.../abilities/{ability_id}` → 204. Mirrors the `POST` link routes.
+- **Editable weapons + abilities** *(roadmap 23)* — `update_weapon`/`delete_weapon`
+  and `update_ability`/`delete_ability` (partial update; bad `category` or unknown
   field → `UnitValidationError`; 404 if missing), exposed as `PATCH`/`DELETE
-  /weapons/{id}` and `/abilities/{id}` (new all-optional `Weapon_Update` /
-  `Ability_Update`). The high-value gap — stat/description typos are otherwise
-  permanent.
-- **Delete a subfaction** *(S)* — `delete_subfaction(id)` (guarded) +
-  `DELETE /subfactions/{id}` → 204. No `PATCH`: the name is map-constrained, so
-  delete-and-recreate covers a mistake.
+  /weapons/{weapon_id}` and `/abilities/{ability_id}`, with all-optional
+  `Weapon_Update` / `Ability_Update` bodies. This closed the high-value gap —
+  stat/description typos had been permanent.
+- **Delete a subfaction** *(roadmap 21)* — `delete_subfaction(subfaction_id)`
+  (guarded) + `DELETE /subfactions/{subfaction_id}` → 204. No `PATCH`: the name is
+  map-constrained, so delete-and-recreate covers a mistake.
 - **Factions stay create + list only** — the four `FactionName` values are fixed
   and can't be mistyped (422 blocks that), so edit/delete would add a
   guarded-delete failure mode for no real use case. Out of scope unless needed.
@@ -851,15 +933,19 @@ the site. Treat the result as personal/dev use, not redistribution.
 - **Points** *(done)* — **minimum-size** points, parsed from the static `.PriceTag`
   table (the `dsPointy` box is JS-filled, but `.PriceTag` values are in the HTML).
   Only rows with an "N models" label count, so enhancement/stratagem prices are
-  excluded. Storing per-size points would be a later model change.
+  excluded. Storing per-size points is no longer a vague "later": it is planned as
+  `UnitPoints` = {`models`, `points`} in
+  [ROADMAP R13](ROADMAP.md#r13-unit-composition-and-points-that-follow-model-count).
 - **Fail loud** — validate the scraped JSON against the seed schema before writing,
   so a Wahapedia layout change errors instead of seeding garbage.
 
 **Testing.** Parse against a **saved HTML fixture** checked into `tests/fixtures/`
 (no network in tests); only the fetch layer touches the site, exercised manually.
 
-**Dependencies.** Add `httpx` (or `requests`) + `beautifulsoup4` + `lxml` to
-`requirements-dev.txt` — this is operator tooling, not runtime. Playwright only if
+**Dependencies.** `beautifulsoup4` and `lxml` are in `requirements-dev.txt` — the
+parser is operator tooling, not runtime. `httpx` is *not*: it is a runtime pin in
+`requirements.txt`, because FastAPI's `TestClient` and the ASGI stack want it there
+anyway, so the scraper just uses what is already installed. Playwright only if
 JS-rendering forces it.
 
 ## Authentication & authorization
@@ -926,10 +1012,13 @@ XSS surface.
   bootstrapped out of band (above); an existing admin promotes/demotes others via
   `UserService.set_admin(user_id, is_admin)` (`NotFoundError` if missing) behind an
   admin-only `PATCH /users/{id}` `{is_admin}`. Returns `User_Read` (which
-  includes `is_admin`). Last-admin-lockout protection was left out for now.
+  includes `is_admin`). Last-admin-lockout protection **is** in place: `set_admin`
+  counts the admins before a demotion and raises `ConflictError` (→ 409) when the
+  target is the last one standing, so nobody can lock the whole account out of the
+  admin-gated catalog writes.
 - **Rate limiting on `/auth/*`** *(Effort: M)* — brute-force protection on
   `register`/`login`. *Plan:* add `slowapi` (a Starlette-friendly limiter), a
-  keyed-by-IP limit (e.g. 5/min) on the two auth routes, and a 429 handler. Deferred
+  keyed-by-IP limit (e.g. 5/min) on login and register, and a 429 handler. Deferred
   — it's a hardening step, not a core-loop blocker; revisit before public deploy.
 - **Real `SECRET_KEY` in production** *(Effort: S)* — a dev default is in place;
   production must set a random `SECRET_KEY` (`python -c "import secrets;
@@ -971,38 +1060,60 @@ CORS is a fallback, not the primary mechanism. Auth is a **Bearer JWT in the
 
 ## Testing
 
-Tests live in a flat `tests/` directory:
+Tests live in a flat `tests/` directory — `conftest.py`, a `fixtures/` folder of
+saved HTML and JSON, and 35 test modules carrying 724 tests:
 
 ```
 tests/
-  conftest.py            # in-memory SQLite engine + session fixture + object factories
-  test_service_user.py
-  test_service_unit.py
-  test_service_army.py
-  test_service_inventory.py
-  # test_api_*.py — added with the API layer (see below)
+  conftest.py            # engine + session + TestClients + ~20 object factories
+  fixtures/              # saved scrape HTML + seed JSON (no network in tests)
+  # services
+  test_service_user.py  test_service_unit.py  test_service_army.py
+  test_service_inventory.py  test_service_killteam.py
+  test_service_killteam_roster.py  test_service_killteam_game.py
+  # API, one module per router (plus the two cross-router gates)
+  test_api_auth.py  test_api_user.py  test_api_unit.py  test_api_units_owned.py
+  test_api_faction.py  test_api_inventory.py  test_api_army.py
+  test_api_killteam.py  test_api_killteam_roster.py  test_api_killteam_game.py
+  test_api_write_bounds.py    # every write schema is bounded, read off openapi.json
+  # cross-cutting
+  test_errors.py  test_error_handling.py  test_security.py  test_deps.py
+  test_cors.py  test_observability.py  test_null_guards.py  test_connection.py
+  test_migrations.py  test_parity_guard.py  test_models_killteam.py
+  test_docs_style.py          # the two documentation rules a test can hold
+  # scripts
+  test_scrape.py  test_scrape_kt.py  test_seed.py  test_seed_killteam.py
+  test_make_admin.py
 ```
 
-`conftest.py` provides the `session` fixture plus object factories
-(`make_user`, `make_faction`, `make_subfaction`, `make_unit`, `make_army`) that
-build valid rows so each test only spells out what it cares about.
+`conftest.py` provides the `session` fixture, the `client` / `auth_client` /
+`admin_client` `TestClient` fixtures, and about twenty object factories that build
+valid rows so each test only spells out what it cares about: `make_faction`,
+`make_subfaction`, `make_unit`, `make_user`, `make_army` for the 40k side, and a
+`make_kt_*` factory per Kill Team table (faction, kill team, rule, operative,
+weapon, ability, ploy, equipment, selection rule, roster, roster operative, game,
+game operative, game equipment, game event).
 
 The **service tests are implemented and green.** They cover: create a user
 (duplicate username/email → `ValueError`, missing → `LookupError`); create a
 catalog unit (unknown faction → `LookupError`), get/list units; create an army
 (unknown user → `LookupError`), list and delete armies; add a unit to an army or
-to inventory, add the same unit twice increments the amount, set the amount to a
-new value, remove a unit; `set_amount < 1` → `ValueError`; adding a unit to a
+to inventory, add the same unit twice → `ConflictError` (R12 made the add
+create-only), set the amount to a new value, remove a unit; `set_amount < 1` → `ValueError`; adding a unit to a
 nonexistent army/user or a nonexistent unit → `LookupError`; an army may
 reference a unit the user doesn't own (no rejection); deleting an army cascades
 its `army_units`; deleting an inventory entry leaves armies untouched;
 `shortfall` reports `need = max(0, in_list - owned)` and is empty when inventory
 covers the list.
 
-API tests come with the API layer — one file per router (`test_api_user.py`,
-`test_api_unit.py`, `test_api_inventory.py`, `test_api_army.py`), plus
-`test_api_auth.py` and authorization tests once auth lands (a user can't read
-another user's armies; a non-admin can't write the catalog).
+The **API tests are implemented and green** too — one module per router, as listed
+above, including the Kill Team routers. Authorization is covered (a user can't read
+another user's armies, which answers 404 rather than 403; a non-admin can't write
+the catalog), as is the one caller-relative catalog filter
+(`test_api_units_owned.py`: anonymous `owned=true` is a 401). Two gates are
+cross-router rather than per-router: `test_api_write_bounds.py` reads
+`openapi.json` and fails if any `*_Create`/`*_Update` schema declares an unbounded
+string or int, and `test_parity_guard.py` guards the Postgres tier.
 
 - Two test tiers (ROADMAP R6). By default, tests run against an in-memory SQLite
   database (one fresh schema per test, foreign keys enforced) so SQL actually
@@ -1066,6 +1177,12 @@ Cross-cutting concerns:
 
 ## Roadmap
 
+**Two numbering schemes, and they do not line up.** The list below is this file's
+own build history, numbered from 1. `ROADMAP.md` numbers its own entries `R1`–`R16`
+(40k) and `K1`–`K9` (Kill Team). So "roadmap 19–23" or "roadmap 14" in this document
+always means an item in the list below, and an `ROADMAP.md` entry is always written
+with its letter (`R12`, `K7`). The two never refer to the same thing.
+
 1. ✓ Full schema in `models.py` (factions, subfactions, units, abilities,
    weapons, users, armies, inventory) + an initial Alembic migration.
 2. ✓ Service tests written for `UserService` / `UnitService` / `ArmyService` /
@@ -1083,8 +1200,9 @@ Cross-cutting concerns:
 6. ✓ API tests with FastAPI's `TestClient` (dependency-overridden session), one
    file per router.
 7. ✓ `POST /weapons` and `POST /abilities` routes (the catalog is fully
-   enterable over HTTP), and the upsert `POST`s return 201 on create / 200 on
-   increment.
+   enterable over HTTP). The add-unit `POST`s returned 201 on create / 200 on
+   increment at the time; R12 made them create-only, so they now answer 201 or
+   409.
 8. Seed script to bulk-load the datasheet catalog — deferred; now tracked in
    "Remaining work" below (it's the top frontend prerequisite). See "Seeding the
    catalog."
@@ -1197,9 +1315,10 @@ parsing in the Makefile.)
   (`docker-entrypoint.sh` is committed `100755`, and `COPY` preserves the bit). Not
   live-verified (Docker daemon down).
 - [x] **Upsert 201-vs-200 scan** — *fixed:* `InventoryService`/`ArmyService.add_unit`
-  now return `(entry, created)`, so the routes pick 201 vs 200 from the flag instead
+  now return `(entry, created)`, so the routes picked 201 vs 200 from the flag instead
   of scanning a full `list_*` (one fewer query, no read-then-write race). Callers +
-  tests updated to unpack (and assert the flag).
+  tests updated to unpack (and assert the flag). **True at the time.** R12 later made
+  both add-unit `POST`s create-only, so they answer 201 or 409 and never 200.
 
 ### Consistency / cleanup 🧹
 - [x] **Remove dead `ForbiddenError`** — *fixed:* dropped the unused class from
@@ -1235,25 +1354,36 @@ parsing in the Makefile.)
 
 ## Backend next steps (post-MVP backlog)
 
-The backend is **MVP-complete and conformant** (verified by a multi-agent audit).
-The items below are forward-looking next steps, ordered by value and dependency,
-distilled from a 3-agent forward-looking review (roadmap/backlog,
-frontend-driven needs, and technical-debt/hardening). Nothing here is a
-correctness hole in the shipped MVP — those are tracked under "Improvements"
-above; these are the things to build *next*. Effort tags are **S/M/L**.
+The backend is **not** MVP-complete. [MVP.md](MVP.md)'s "What finished means"
+lists five remaining slices and **three of them are in this repo** — `K8` (the
+second side of a Kill Team game), `K9` (a second player in the session) and `R13`
+(unit composition and points that follow the model count). `ROADMAP.md` marks all
+three **Status: Not started**. The other two are `warhammer_web`'s battle screen
+(KF4, KF5). What *is* true is that both core loops are live and the shipped surface
+is conformant with `openapi.json`.
 
-### Tier 0 — Frontend unblockers
+The items below are the post-MVP backlog — forward-looking next steps ordered by
+value and dependency, distilled from a 3-agent review (roadmap/backlog,
+frontend-driven needs, and technical-debt/hardening). They are **not** the path to
+"finished": that path is K8, K9 and R13 in `ROADMAP.md`. Nothing below is a
+correctness hole in the shipped surface either — those are under "Improvements"
+above. Effort tags are **S/M/L**.
 
-Three tiny, additive serializer/query changes that immediately unblock the
-frontend. **None needs a database migration** — all three underlying columns
-already exist on the tables; the work is exposing them.
+### Tier 0 — Frontend unblockers ✅ done
 
-| ID | Change | Where | Effort |
+Three tiny, additive serializer/query changes that unblocked the frontend. **All
+three are shipped** — kept here for the reasoning, not as next steps. None needed a
+database migration: every underlying column already existed, and the work was
+exposing it. `Army_Read` now carries `created_at`, `GET /me/inventory` publishes a
+`q` parameter, and `User_Read` carries `is_admin` — all three are in
+`openapi.json`.
+
+| ID | Change | Where | Status |
 |---|---|---|---|
-| FE1 | Add `created_at` (optionally `updated_at`) to `Army_Read` so the frontend can show the army's "Created" date | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also add `created_at` to the frontend `types.ts` | S |
-| FE2 | Add a `q` filter to `GET /me/inventory` so inventory search is server-side, not client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count already in `GET /units` (`service_unit._apply_unit_filters`) | S |
-| FE3 | Add `is_admin` to the `/me` response to unblock admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | S |
-| BUG1 | ✓ **RESOLVED (R4). Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` came from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser couldn't read the header → `total` defaulted to `0` → pager hidden → stuck on the first 25. **Fixed** by R4 moving `total` into the response body (`Page` envelope), which removes the header entirely — there is no cross-origin-invisible side channel left, so no `expose_headers` entry is needed | resolved in `app/api/pagination.py` + the list endpoints; frontend reads `total` off the body | S |
+| FE1 | ✓ **Done.** `created_at` on `Army_Read` so the frontend can show the army's "Created" date (`updated_at` is still not exposed, deliberately — nothing asks for it) | `app/api/army.py` (the column exists via `TimestampMixin` in `models.py` and is in the initial migration; the serializer already uses `from_attributes`, so declaring the field populates it). Also `created_at` in the frontend `types.ts` | done |
+| FE2 | ✓ **Done.** A `q` filter on `GET /me/inventory`, so inventory search is server-side rather than client-only | `app/api/inventory.py` + `service_inventory.py.list_inventory`, mirroring the case-insensitive `ilike` + count in `GET /units` (`service_unit._apply_unit_filters`) | done |
+| FE3 | ✓ **Done.** `is_admin` on the `/me` response, unblocking admin-UI gating | `User_Read` in `app/api/user.py`. Safe: `/me` is self-only (identity from the JWT), so it reveals only the caller's own admin status and grants nothing — authorization stays enforced server-side by `get_current_admin` on every write | done |
+| BUG1 | ✓ **RESOLVED (R4). Catalog only shows 25 units on the deployed site** (found 2026-07). Not a DB issue: the catalog paginates 25/page by design (`CatalogView.PAGE_SIZE`), and the Prev/Next pager only renders when `total > PAGE_SIZE`. `total` came from the `X-Total-Count` response header, but the API's `CORSMiddleware` omits `expose_headers`, so cross-origin (Firebase → Cloud Run) the browser couldn't read the header → `total` defaulted to `0` → pager hidden → stuck on the first 25. **Fixed** by R4 moving `total` into the response body (`Page` envelope), which removes the header entirely — there is no cross-origin-invisible side channel left, so no `expose_headers` entry is needed | resolved in `app/api/pagination.py` + the list endpoints; frontend reads `total` off the body | resolved |
 
 ### Tier 1 — Make the scrape→seed pipeline honest & robust
 
@@ -1265,12 +1395,12 @@ harden the concurrent "add unit" path.
 |---|---|---|---|
 | H1 | **Seed upsert** — update mutable fields on existing rows (stat line, `points`, `keywords`, `invulnerable_save`) instead of skipping them, so re-seeding truly "patches stats in place" as SPEC claims. Add an update branch per entity and an "updated" count bucket | `scripts/seed_datasheets.py` (create-only today); update `tests/test_seed.py` accordingly | M |
 | C | *(fold into H1)* Change the unit seed natural key from `(faction, unit_name)` to `(faction, subfaction, unit_name)`, stopping the ~227-unit collapse (same-named generic units — Chaos Spawn, Cultists — merging across subfactions; ~1558 scraped → ~1331 seeded) | `scripts/seed_datasheets.py` | S |
-| H2 | Catch `IntegrityError` on concurrent `add_unit` and convert to `ConflictError`/merge; add a catch-all `IntegrityError` → 409 handler. Today two simultaneous "add unit" requests leak a raw 500 | `service_army.py` + `service_inventory.py`; handler in `app/main.py` | M |
+| H2 | ✓ **The handler is done.** `app/main.py` registers `IntegrityError` → generic **409**, so simultaneous "add unit" requests no longer leak a raw 500 (it is in the error-mapping table and in "API-layer handlers" above). What is *not* done is the service-side half: neither `service_army.add_unit` nor `service_inventory.add_unit` catches the `IntegrityError` itself, so the loser of the race gets the handler's generic body instead of a `ConflictError` naming the field. Narrow this item to that | `service_army.py` + `service_inventory.py` | S |
 | H4 | **Fix keyword extraction & normalize** (found in the 2026-08 scrape review). `parse_keywords` over-captures: the real scrape yields **1217 distinct unit keywords, ~906 of them leaked unit/model names** (`Abaddon The Despoiler`, `Annihilation Barge`) — only ~155 are real keywords. Weapon keywords also carry **case-variant duplicates** (`blast`/`BLAST`/`Blast`, even a typo `ANTI-INFANTRy 4+`): 110 raw → **77 canonical**. Restrict `parse_keywords` to the true `KEYWORDS:` line and **case-fold/normalize** both unit and weapon keywords at scrape time. **Prerequisite for any keyword filter or index (DM1)** — a keyword filter is *wrong today regardless of column type* because case variants and leaked names both break it | `scrape_wahapedia.py` (`parse_keywords`; the `.kwb2` capture in `parse_weapons`) | M |
 
 > **Scraper data-completeness gaps (2026-08 review), to fix alongside H4/L2:**
 > (1) `invulnerable_save` is **never captured** — the parser hardcodes `None`
-> (`scrape_wahapedia.py` line ~307), so no unit ever gets an invuln save even
+> (`scrape_wahapedia.py` line ~324), so no unit ever gets an invuln save even
 > though the column exists. (2) **7 units parse to `points = 0`** (e.g. Crusader
 > Squad, Burna Boyz) — the `.PriceTag` lookup misses their price layout. Both are
 > parser gaps, not model problems (the schema allows `NULL` invuln and `points >=
@@ -1283,13 +1413,16 @@ these before opening the API to real traffic.
 
 | ID | Change | Where | Effort |
 |---|---|---|---|
-| H3 + M1 | Eager-load weapons/abilities with `selectinload` on the list endpoints, and batch `ArmyService`'s per-entry `session.get`. Removes the N+1 that makes `GET /units?limit=200` fire ~400 queries and `GET /me/armies` walk the catalog subtree per army | `service_unit.list_units` (and the army list); batch the `session.get` in `points_total`/`shortfall`/`validate` | M |
-| Q1 | **Extend the N+1 fix beyond `/units`** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so *every* list that serializes units lazy-loads them per row: `GET /units` (`1+2N`), `GET /me/inventory` (each entry's `unit` + its weapons/abilities), and `GET /me/armies` — which is worst: it serializes `Army_Read.units` (lazy) **and** re-queries the same units in `points_total`. Options: `selectinload` the chains; compute `points_total` with a single `SUM(amount*points)` aggregate instead of a per-entry loop; and/or split `Army_Read` into a **summary** schema (list — no `units`) vs a **detail** schema (`GET /{id}` — units eager-loaded), the classic list-vs-detail split. Coordinated FE change (the web app reads `army.units`) | `app/api/unit.py`, `app/api/inventory.py`, `app/api/army.py`, `service_army.points_total` | M |
+| H3 + M1 | **Mostly done; narrowed.** `list_units`, `list_armies` and `list_inventory` all `selectinload` the weapons/abilities chains, and `points_total` is a single `SUM(amount * points)` aggregate instead of a per-entry loop. Two gaps are left, both per-entry `session.get` loops: `shortfall` and `validate` still resolve each `ArmyUnit`'s unit one at a time (`_unit_or_404`), so batch those | `service_army.shortfall` / `validate` | S |
+| Q1 | **Done for the lists; one read is left** (found 2026-07). `Unit_Read` nests `weapons` + `abilities`, so every list that serializes units used to lazy-load them per row. All three lists are fixed now — `GET /units`, `GET /me/inventory` and `GET /me/armies` eager-load the chains, and `points_total`'s per-entry re-query is one aggregate. The **army detail read** is the survivor: `GET /me/armies/{army_id}` resolves its army through `get_owned_army` → `ArmyService.get_army`, a bare `session.get(Army, …)` with no `.options(...)`, so serializing `Army_Read.units` still walks the subtree one entry at a time. Fix it by giving the detail path the same `selectinload` chain `list_armies` uses. The list-vs-detail schema split (a summary `Army_Read` with no `units`) stays optional and would need a coordinated FE change, since the web app reads `army.units` | `app/api/army.py` / `service_army.get_army` | S |
 | M5 | ✅ **Done (R7).** `app/observability.py`: request-ID middleware (`X-Request-ID` generated or echoed, on the header + every error body), JSON structured logging with that ID on every line, and `sentry-sdk` initialized only when `SENTRY_DSN` is set (no-op otherwise). The sanitized catch-all `Exception` → 500 was already in place | `app/observability.py`, `app/main.py` | S/M |
 
 > **Revisit: relationship-loading strategy.** The loading strategy across the
-> `*_Read` schemas needs a deliberate pass — everything defaults to **lazy**
-> today, which is what creates the N+1s above. Decide *per relationship* which
+> `*_Read` schemas still needs a deliberate pass. The model-level default is
+> **lazy** everywhere, and every fix above is a per-query `.options(...)` — which
+> is exactly why a path nobody has touched (the army detail read) still lazy-loads:
+> the default is the one thing that was never changed. Decide *per relationship*
+> which
 > strategy each endpoint should use — **lazy** (fine for single-object detail),
 > eager **`selectinload`** (collections / many-to-many) or **`joinedload`**
 > (many-to-one), and **`noload`/`raiseload`** to forbid a relationship from
@@ -1306,7 +1439,7 @@ Independent, low-risk improvements, each landable on its own.
 | M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
-| D1 | **Docs (code review):** give `README.md` a real front door — what the project is, how to run it — linking `SPEC.md`, `MVP.md`, `DEPLOY.md`. Currently 2 lines | `README.md` | S |
+| D1 | ✓ **Done.** `README.md` is a real front door now — 99 lines: what the project is, how to run it, and links out to `SPEC.md`, `MVP.md` and `DEPLOY.md` | `README.md` | done |
 
 ### Tier 4 — Deferred / deploy-time / cleanup
 
@@ -1351,14 +1484,23 @@ Not code changes (or intentionally deferred), grouped by kind.
     finally earn their place (allies, Agents of the Imperium, soup armies). The
     keyword-driven model for all of this is now the documented **north star** —
     see "Target architecture — keyword-driven mustering" below.
-- **Out of scope (unchanged)** — datasheet versioning; wargear/loadout +
-  model-count points scaling; multi-profile datasheet parsing; per-size points.
-- **Stale-doc cleanup** — remove `CLAUDE.md`'s "Known issues" section (all 6
-  already fixed); fix `MVP.md`'s "202 tests" → 209; reconcile stale SPEC prose
-  (the "API tests to come" note, the "Wahapedia scraper planned" note, the
-  present-tense "delete_unit 500s" line, and the "Planned additions
-  (frontend-readiness)" header whose items are all done); correct `CLAUDE.md`'s
-  stat-name shorthand "save" → "armor_save".
+- **Out of scope (narrowed)** — datasheet versioning; multi-profile datasheet
+  parsing. **No longer out of scope:** model-count points scaling and per-size
+  points, which used to sit in this list, are now
+  [ROADMAP R13](ROADMAP.md#r13-unit-composition-and-points-that-follow-model-count)
+  — a priced, designed slice, and one of the five that define "finished" in
+  [MVP.md](MVP.md). Wargear/loadout selection stays out: R13 prices the model
+  count, not the kit each model carries.
+- **Stale-doc cleanup** — mostly overtaken, and three of its four sub-items were
+  themselves the stale thing. `CLAUDE.md` has **no** "Known issues" section to
+  remove and already writes `armor_save`, not "save". `MVP.md` carries no "202
+  tests" figure to bump to 209 — it was rewritten, and the suite is 724 tests across
+  35 modules, so the old target was wrong by roughly five hundred. The one real
+  sub-item, reconciling stale SPEC prose, is done in this pass: the "API tests to
+  come" note, the present-tense "delete_unit 500s" line and the "Planned additions
+  (frontend-readiness)" header have all been corrected in place. The lesson is the
+  one `tests/test_docs_style.py` was written for — a cleanup list nothing checks
+  goes stale faster than the prose it tracks.
 
 ### Tier 5 — Data-model schema (migration-cost; decide before real data)
 

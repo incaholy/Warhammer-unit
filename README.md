@@ -1,12 +1,24 @@
 # Warhammer Unit — backend
 
-The backend for **Muster**, a Warhammer 40k army-list builder. It stores unit
-datasheets (stats, weapons, abilities, keywords) and lets a user keep an
-inventory of models they own and assemble armies from them, with points totals
-and validation. FastAPI REST API over PostgreSQL.
+The backend for **Muster**. It serves two games, kept apart in the API and in the
+client (`/army-list` vs `/kill-team`):
 
-The React frontend lives in a sibling repo (`warhammer_web`) and talks to this
-API.
+- **Warhammer 40k army lists.** Unit datasheets (stats, weapons, abilities,
+  keywords), an inventory of the models a user owns, and armies assembled from
+  that inventory, with points totals and validation.
+- **Kill Team 2024.** A read-only operative catalog, a player's own rosters, and a
+  turn-by-turn game tracker — turning points, activations, ploys, equipment, and an
+  undo. Designed in [`KILLTEAM.md`](KILLTEAM.md).
+
+Kill Team is the larger half by surface area. Of the 72 operations in
+`openapi.json`, 29 are Kill Team; of the 26 SQLModel tables, 15 are the `kt_*`
+tables in `app/core/db/models_killteam.py`. Both counted at commit `753f552`.
+
+FastAPI REST API over PostgreSQL.
+
+The React frontend lives in a sibling repo. On GitHub it is
+**`incaholy/warhammer_unit_web`**; `warhammer_web` is only the directory name it is
+usually cloned into locally.
 
 **Stack:** FastAPI · SQLModel · PostgreSQL · Alembic (migrations) · JWT auth
 (OAuth2 password flow) · Python 3.12.
@@ -19,7 +31,8 @@ running **PostgreSQL**, and `make`.
 
 ```bash
 cp .env.example .env          # then set DATABASE_URL and, outside dev, SECRET_KEY
-make setup                    # install deps, create the DB role/database, run migrations
+make setup                    # install runtime deps, create the DB role/database, run migrations
+make install-dev              # dev tooling: ruff, import-linter, the scrapers
 make run                      # serve on http://localhost:8000  (interactive docs at /docs)
 ```
 
@@ -33,8 +46,13 @@ Optional next steps:
 
 ```bash
 make create-admin USERNAME=<name>   # promote a user to admin (catalog writes are admin-only)
-make seed                           # load the datasheet catalog from scripts/data/datasheets.json
+make seed                           # load the 40k catalog from scripts/data/datasheets.json (committed)
+make scrape-kt && make seed-kt      # scrape, then load the Kill Team catalog (killteam.json is gitignored)
 ```
+
+`make setup` installs `requirements.txt` only. `ruff` and `import-linter` live in
+`requirements-dev.txt`, so `make check` and `make lint-imports` both fail until
+`make install-dev` has run. The scrapers (`beautifulsoup4`, `lxml`) are dev deps too.
 
 `DATABASE_URL` is required and lives in `.env` (gitignored). In `dev` (the
 default `APP_ENV`) a throwaway JWT key is allowed; any other environment
@@ -46,16 +64,20 @@ Everything is driven through the `Makefile` — run `make help` for the full lis
 
 | Command | What it does |
 |---|---|
-| `make setup` | Install deps, create the DB, run migrations (one-shot bootstrap). |
+| `make setup` | Install runtime deps, create the DB, run migrations (one-shot bootstrap). |
+| `make install-dev` | Install `requirements-dev.txt` — ruff, import-linter, the scrapers. |
 | `make run` | Run the API locally with auto-reload. |
 | `make test` | Run the test suite (fast in-memory SQLite tier). |
 | `make docker-test` | Run the suite against real Postgres (the parity tier — schema built from the migrations). |
 | `make check` | Pre-PR gate: strict lint + format-check + tests. |
 | `make lint` / `make format` | Read-only lint overview / auto-fix + format (mutating). |
+| `make lint-imports` | Check the layering contracts in `.importlinter` (also part of `make check`). |
 | `make migrate` | Apply Alembic migrations up to head. |
 | `make migrate-fresh` | Drop, recreate, and re-migrate — **destructive** (wipes data). |
 | `make openapi` | Regenerate `openapi.json` from the app (no DB needed). |
-| `make seed` / `make scrape` | Load the catalog / scrape datasheets into `scripts/data/`. |
+| `make seed` / `make scrape` | Load the 40k catalog / re-scrape it into `scripts/data/datasheets.json`. |
+| `make seed-kt` / `make scrape-kt` | Load the Kill Team catalog / scrape it into `scripts/data/killteam.json`. |
+| `make scrape-kt-fresh` | Re-request every Kill Team page — the scraper cache has no expiry, so this is how a changed page is picked up. |
 | `make docker-up` / `make docker-down` | Run the app + Postgres via docker compose. |
 
 After editing `models.py`, generate a migration with
@@ -73,22 +95,33 @@ whose name lacks `test` or that matches `DATABASE_URL`. See `.env.example`.
 ```
 app/
   api/               FastAPI routers, one module per resource (+ *_Create/*_Read schemas)
+                     40k:        unit.py faction.py inventory.py army.py user.py auth.py
+                     Kill Team:  killteam.py        the read-only catalog
+                                 killteam_roster.py a player's own rosters
+                                 killteam_game.py   the turn-by-turn game tracker
   core/
     services/        business logic, one <Thing>Service per file (typed errors, no HTTPException)
-    db/              models.py (SQLModel tables), connection.py (engine/session), alembic/ (migrations)
-tests/               pytest suite
-scripts/             seed + scrape tooling
+    db/              models.py + models_killteam.py (SQLModel tables), columns.py (shared
+                     column types), connection.py (engine/session), alembic/ (migrations)
+  observability.py   request-id middleware, JSON log formatter, DSN-gated Sentry
+tests/               pytest suite (35 modules)
+scripts/             seed + scrape tooling, for both 40k and Kill Team
 ```
 
 Layering is strict — **API → service → DB**: routers never touch the session,
 services never raise `HTTPException` (they raise typed errors that `app/main.py`
-maps to a normalized `{detail, code, field?}` response). See `CLAUDE.md` for the
-conventions in full.
+maps to one normalized error shape: `{detail, code, errors}` on every error body,
+plus `field` on a field-specific failure and `request_id` whenever the request
+carries one). [`docs/api/conventions.md`](docs/api/conventions.md) states that
+shape in full, and `CLAUDE.md` has the repo conventions.
 
 ## Documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the target architecture and its guiding principles.
 - [`SPEC.md`](SPEC.md) — the specification: data model, endpoints, and behavior.
+- [`docs/api/conventions.md`](docs/api/conventions.md) — the cross-repo API contract:
+  the error shape, the pagination envelope, auth, versioning, optimistic concurrency.
+  The only human-readable statement of those; `openapi.json` is the machine half.
 - [`MVP.md`](MVP.md) — what the minimal product is and what's built.
 - [`ROADMAP.md`](ROADMAP.md) — the delta from today's code to the target architecture, item by item.
 - [`DEPLOY.md`](DEPLOY.md) — the fast, free path to putting the app online.
