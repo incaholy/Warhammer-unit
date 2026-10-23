@@ -1440,6 +1440,47 @@ transaction, so the loser rolls back first. A side-scoped write that bumped noth
 Frontend consequence: this lands on KF4, whose 409 handling was planned as defensive.
 It becomes the slice's core loop.
 
+## R17. Publish the CHECK'd vocabularies as enums
+
+**Satisfies:** §2.2 (the contract). **Status: Not started.** Raised by the frontend
+(`warhammer_web` ROADMAP F4), because the cost lands there and the fix is here.
+
+**Measured against the published document on 2026-10-22:** `openapi.json` carries **zero**
+properties with an `enum`, while **22** CHECK-constrained vocabulary fields are published
+as a bare `string` — `status`, `order`, `kind`, `phase`, `initiative`, `source` and
+`category`, across `KTGame_Read`, `KTGame_Update`, `KTGameOperative_Read`,
+`KTGameOperative_Update`, `KTGameOperative_Add`, `KTGamePloy_Read`, `KTGameWeapon_Read` and
+`KTGame_ListRead`.
+
+**What that costs the client.** A CHECK constraint lives in the DDL and reaches no
+consumer: `schema.d.ts` types the field `string`, `schemas.gen.ts` validates it as
+`z.string()`, and so nothing — not `tsc`, not zod, not a typed fixture — can reject a
+literal that is merely wrong. The client has had to read `ck_kt_game_operative_status`,
+`ck_kt_ploy_kind` and `ck_kt_game_initiative` out of Postgres by hand and hand-mirror them
+into `src/lib/killTeamGame.ts` as `as const` arrays, and nothing checks those mirrors stay
+right.
+
+It is not hypothetical. Four wrong literals shipped on the client's Kill Team branch and
+type-checked on the way: `'in progress'` for `in_progress`, `'on board'` for `on_board`,
+`'M'` for `melee`, and `'strategic'` for `strategy`. Each was wrong in the fixture AND in
+the assertion, so they agreed with each other.
+
+**The change.** Type these columns' Pydantic fields as `Literal[...]` (or a `StrEnum`) so
+FastAPI emits an `enum` in the schema. The values already exist, written once in the CHECK
+constraints; this publishes them rather than inventing them, and the DDL stays the
+enforcement.
+
+**Why it is worth more than a test.** The client's `npm run gen:api` turns a published
+enum into a union type, so `tsc` and zod both start refusing a wrong literal with no new
+test to write or maintain on either side. It retires the largest single category of defect
+the two repositories have hit, and the cost is one annotation per column.
+
+**Watch for:** a value the CHECK allows but no row uses, and the reverse. The constraint is
+the authority, not the data — `ck_kt_game_operative_status` allows `reserve`, and every
+operative in the dev database reads `on_board`.
+
+---
+
 ## Condition-gated: a deep readiness probe
 
 **Status: Not needed yet. Build it when a load balancer or an orchestrator is put in
