@@ -1272,7 +1272,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77.
+**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -1332,6 +1332,15 @@ is another decision:
 Two more things read `kt_games.kill_team_id` and would break with it: `KTGame.kill_team`,
 which feeds `kill_team_name` and `faction_name` in both read models, and `_new_operative`.
 
+`add_operative` is a third, and it is the one with a behaviour change rather than a
+reference to repoint. It refuses `source == "roster"` and refuses an operative whose
+`kill_team_id` differs from the game's (`service_killteam_game.py:254` and `:265`). Both
+guards are right while a game holds one team and wrong the moment it holds two: a host
+filling in the opponent's models by hand hits each of them. #93 adds `'opponent'` to the
+`source` vocabulary and moves the team comparison onto the SIDE. The operative MUST still
+resolve to a catalog row, so an opponent's faction MUST be scraped before it can be
+played against.
+
 ### What the reads become
 
 Measured against `openapi.json`, not transcribed. The earlier draft of this entry said
@@ -1368,7 +1377,7 @@ that reasoning so the next breaking change is not waved through on this preceden
 ### The rows that already exist
 
 Every existing game gets a player side row carrying its CP, VP, rules, ploys, ploys_used
-and choices. An opponent side row is created **only** where `opponent_name` or
+and choices. An opponent side row is backfilled **only** where `opponent_name` or
 `opponent_victory_points` holds something, because that is hand-entered data about a game
 somebody played and discarding it is not a migration detail.
 

@@ -464,6 +464,7 @@ nothing from the catalog.
 | | |
 |---|---|
 | `POST /me/kill-team/games/{game_id}/sides/{side}/ploys` | *replaces* `POST .../ploys` — deducts that side's command points. **Named by #67** |
+| `PUT /me/kill-team/games/{game_id}/sides/{side}` | establishes a side: `kill_team_id` and a display name. Creates or replaces. **Named by #92** |
 | `PATCH /me/kill-team/games/{game_id}/sides/{side}` | the four settable fields that move off the game: `command_points`, `victory_points`, `ploys_used`, `choices`. `rules` and `ploys` move to the side row too, but are snapshots and were never settable. *Shape follows from #67; not named by it* |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/operatives` | field a datacard on that side. *Follows from #67.* The row-keyed operative routes above need no change, since a row id already identifies one operative |
 | `POST /me/kill-team/games/{game_id}/sides/{side}/equipment` | take a piece for that side. *Follows from #67* |
@@ -486,9 +487,12 @@ across the table who has not installed anything. The row is created once that si
 kill team is known, not at game creation, so a game can be in a state where one side
 exists and the other has not been described yet.
 
-How the opponent's side is established is **settled** (#86): joining carries a roster
-as well as a code, because that is what makes the joining side's kill team known, and
-#74 will not create a side row without one.
+A side is established in one of **two** ways (#92). The host MAY describe it with
+`PUT .../sides/{side}`, carrying a `kill_team_id` and a display name. That is the path for
+an opponent across the table who holds no account, and it is the case #67 exists to serve.
+Or a second account joins (#86): joining carries a roster as well as a code, because that
+is what makes the joining side's kill team known. Neither path alone is enough, and #74
+creates no side row without a kill team from one of them.
 
 **Planned — K9, a second player.**
 
@@ -1080,6 +1084,6 @@ Workshop's; these are plain-language definitions, not rules.
 | [`README.md`](README.md) | how to run it |
 | [`SPEC.md`](SPEC.md) | the 40k architecture and every 40k route, plus the engineering both halves share |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | the structural rules, each with a status |
-| [`KILLTEAM.md`](KILLTEAM.md) | the Kill Team design — 91 numbered decisions |
+| [`KILLTEAM.md`](KILLTEAM.md) | the Kill Team design — the numbered decision register |
 | [`ROADMAP.md`](ROADMAP.md) | build order and the remaining backlog |
 | [`CODE-REVIEW.md`](CODE-REVIEW.md) | a dated correctness review, with outcomes |
