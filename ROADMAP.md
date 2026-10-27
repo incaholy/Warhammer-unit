@@ -41,8 +41,9 @@ worth reading for the reasoning, not as a live bug list.
 | 15 | [R15](#r15-two-unpaginated-reads-return-complete-results-with-no-cap) | Two unpaginated reads return complete results with no cap | §2.3 | Small; a cap or a page on two reads |
 | 16 | [R16](#r16-wrap-every-response-in-an-envelope) | Wrap every response in an envelope | §2.6 | Large; one migration, both repositories together |
 | 17 | [R17](#r17-publish-the-checkd-vocabularies-as-enums) | Publish the CHECK'd vocabularies as enums | §2.2 | Small; one annotation per column |
+| 18 | [R18](#r18-publish-the-error-responses) | Publish the error responses | §2.2 | Small; one shared schema, declared per router |
 
-R1–R12 are done. R13 to R17 are not started. R13 changes a shipped schema rather than a
+R1–R12 are done. R13 to R18 are not started. R13 changes a shipped schema rather than a
 draft one, and R16 changes a contract the other repository generates types from.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
@@ -1582,6 +1583,45 @@ the two repositories have hit, and the cost is one annotation per column.
 **Watch for:** a value the CHECK allows but no row uses, and the reverse. The constraint is
 the authority, not the data — `ck_kt_game_operative_status` allows `reserve`, and every
 operative in the dev database reads `on_board`.
+
+---
+
+## R18. Publish the error responses
+
+**Satisfies:** §2.2 (the contract). **Status: Not started.** R17's argument one layer up:
+R17 publishes the column vocabularies, this publishes the error vocabulary, and both exist
+in Python and not in the contract.
+
+**Measured from `openapi.json` at `0b04671`:** across **72** operations the published
+statuses are `200` (45), `201` (14), `204` (13) and `422` (68). Zero publish `400`, `401`,
+`403`, `404`, `409` or `500`, and the string `CONFLICT` does not appear in the file.
+
+**The prose half is already complete and good.** `docs/api/conventions.md:44-99` gives the
+error body, the uniform `errors` array, and a code-to-status table of seven rows. The
+machine half declares none of it, so the contract a client can generate from says every
+operation either succeeds or returns a Pydantic validation error.
+
+**What that costs the client.** `ERROR_CODES` is hand-written at `src/api/client.ts:39` and
+commented as mirroring `app/core/errors.py`, exactly as the CHECK'd vocabularies were
+hand-mirrored before R17. `scripts/gen-api.mjs` emits a `z.enum` only where the published
+node carries one, so no generator can produce the array and nothing checks the copy. Both
+parse sites use `z.enum(ERROR_CODES).optional().catch(undefined)`, which turns an unknown
+code into `undefined` rather than an error — so a vocabulary the client has not been told
+about fails open and silently.
+
+**The change.** One shared `Error` component schema with `code` typed as the `ErrorCode`
+enum, declared through `responses=` on the routers rather than per operation. `app/main.py`
+already registers one handler against `CodedError`, so the statuses a path can answer are
+derivable from the errors its service raises.
+
+**Why it has an id at all.** This was raised in the previous review round, inside an item
+about cross-repo numbers. The numbers landed and this did not, which left it the one
+finding from that round with no entry anywhere — so it was on course to be rediscovered
+rather than scheduled. That is the whole argument for the Order table gate in
+`tests/test_docs_style.py`, applied to a finding instead of a heading.
+
+**Watch for:** the eighth code. `MVP.md` adds `GONE` for #88's expired invite, and until
+this entry lands that code MUST be added to the client's array by hand.
 
 ---
 

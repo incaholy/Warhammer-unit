@@ -1178,7 +1178,7 @@ Cross-cutting concerns:
 ## Roadmap
 
 **Two numbering schemes, and they do not line up.** The list below is this file's
-own build history, numbered from 1. `ROADMAP.md` numbers its own entries `R1`–`R17`
+own build history, numbered from 1. `ROADMAP.md` numbers its own entries `R1`–`R18`
 (40k) and `K1`–`K9` (Kill Team). So "roadmap 19–23" or "roadmap 14" in this document
 always means an item in the list below, and an `ROADMAP.md` entry is always written
 with its letter (`R12`, `K7`). The two never refer to the same thing.

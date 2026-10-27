@@ -688,10 +688,22 @@ it would make the host re-mint over the guest's timing.
 
 **The 410 needs an eighth error code.** The vocabulary is seven — `NOT_FOUND`,
 `CONFLICT`, `VALIDATION`, `REQUEST_VALIDATION`, `UNAUTHORIZED`, `FORBIDDEN`, `INTERNAL` —
-and has no 410, so this adds one to `ErrorCode` and `CODE_STATUS`, reaches the code table
-in `docs/api/conventions.md`, and regenerates the client's `ERROR_CODES` enum. Recorded
-because it is a vocabulary change rather than a status choice, and §2.2 owns the
-vocabulary.
+and has no 410, so this adds one to `ErrorCode` and `CODE_STATUS`, and reaches the code
+table in `docs/api/conventions.md`. Recorded because it is a vocabulary change rather than
+a status choice, and §2.2 owns the vocabulary.
+
+**Nothing regenerates on the client, and an earlier version of this paragraph said it
+would.** `ERROR_CODES` is hand-written at `src/api/client.ts:39`, commented as mirroring
+`app/core/errors.py`, and `scripts/gen-api.mjs` emits a `z.enum` only where the published
+node carries one. The published document carries no error vocabulary at all — `ROADMAP.md`
+R18 is that gap — so there is nothing for a generator to read. The eighth code MUST be
+added to that array by hand, in the same change.
+
+Forgetting it fails open rather than loudly. Both parse sites read
+`z.enum(ERROR_CODES).optional().catch(undefined)` (`src/api/client.ts:53` and `:67`), so an
+unlisted code arrives as `undefined` instead of raising. The join screen would read the 410
+as "no code given" and fall through to the 404 message, which is the single distinction this
+decision exists to draw — and it would type-check on the way.
 
 Used and wrong stay indistinguishable, and that is a **limit** rather than a decision:
 `#71` clears the code on redemption, so the row holds NULL either way.
