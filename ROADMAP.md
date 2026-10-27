@@ -1336,6 +1336,14 @@ is another decision:
 - `uq_kt_game_owner_team_id` is the provably-unique parent every composite leg into
   `kt_games` targets. The child leg moves to the side, so the target moves with it — a
   new unique on `kt_game_sides(owner_user_id, game_id, side, kill_team_id)`.
+- **`UNIQUE(game_id, side)` as well, and it is not implied by the one above.** #77 makes
+  `kill_team_id` nullable so historical games can be backfilled, and `KILLTEAM.md` already
+  records what that costs: Postgres treats two NULLs as distinct, so a four-column unique
+  containing a nullable column refuses nothing when that column is NULL. Two `opponent`
+  rows with no team would satisfy it, and `KTGame_Read.opponent` would become whichever
+  row the query returned first — a query with an ordering rule, which is the shape #74
+  rejected a participants table to avoid. The risk is not theoretical now that a side has
+  two creation paths: #92's `PUT` and #86's join.
 - `UNIQUE(game_id, equipment_id)` becomes `UNIQUE(game_id, side, equipment_id)`, or the
   two sides cannot take the same piece.
 - `ck_kt_game_operative_current_wounds` still couples `current_wounds` to the snapshot's

@@ -757,9 +757,16 @@ Both phones read the same game, and the game's own **event log** is what keeps t
 agreed — not a live connection (decision #72).
 
 Nearly every mutation appends exactly one event, carrying a sequence number that is
-monotonic within the game. So a client never asks "what is the state now?"; it asks what
-happened after the last number it saw — a cursor read over a log that already exists and
-already drives undo:
+monotonic within the game. So for a FIELD CHANGE a client never asks "what is the state
+now?"; it asks what happened after the last number it saw — a cursor read over a log that
+already exists and already drives undo:
+
+**A CREATION is the exception, and a client MUST re-read on one.** `operative_added`
+carries `{"operative": {"before": None, "after": name}}` and `equipment_added` the same
+shape, so a client holding only the log has a name and no snapshot — no wounds, order,
+status, side, weapons or abilities. `guest_joined` carries no payload at all, and the
+host's screen has to go from "no opponent" to a whole second side on seeing it. The log
+drives field changes; a creation or a join triggers **one** detail read.
 
 ```
 GET /me/kill-team/games/{game_id}/events?offset=47&limit=200
@@ -796,8 +803,9 @@ is not, which the earlier version of this section elided. Measured against the c
 of the twelve nested writes, **two** accept a `version` and it is optional on both,
 **four** answer 422 to an extra key, and **six** declare no request body, so a `version`
 sent to them is silently discarded with a 200. So #79 moves it into an `If-Match`-style
-header, required on all twelve, which reaches the bodiless ones without reshaping four
-schemas.
+header, required on **every write under `/games/{game_id}`**, which reaches the bodiless
+ones without reshaping four schemas. Twelve is the measurement that produced the rule, not
+its boundary: K8 and K9 add five more write operations, and the same rule covers them.
 
 **A 409 means re-read and re-decide, not re-read and retry** (#78). The difference is not
 stylistic. You read at version 12 with an operative on 5 wounds and tap 4; your opponent
