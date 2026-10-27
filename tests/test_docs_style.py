@@ -151,3 +151,102 @@ def test_rfc2119_keywords_are_the_four_the_style_allows() -> None:
             for m in banned.finditer(line):
                 offenders.append(f"{doc.name}:{n}: {m.group(1)} — use MUST/MUST NOT/SHOULD/MAY")
     assert not offenders, "\n".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# A measurement of a tracked file, restated without saying WHEN it was taken.
+# ---------------------------------------------------------------------------
+
+FILE_REF = re.compile(r"`[\w./-]+\.(?:md|py|json|ts|tsx|mjs|yml|toml|cfg)`")
+
+# `99 lines`, `100,867-byte`, `2,112,565 bytes`, `24 KB`. The lookbehind keeps `#48`
+# and `R12` out, for the reason `LOOSE_COUNT` documents.
+FILE_MEASURE = re.compile(r"(?<![#\w])[\d,]+[\s-](?:lines?|bytes?|KB)\b", re.I)
+
+# Seven to forty hex characters: a short SHA through a full one.
+COMMIT_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+# Measurements that predate this gate, listed so they are VISIBLE and can only shrink.
+# A fix deletes its line, and the test below fails while a line names something that no
+# longer offends -- so the list cannot outlive the problem. Emptying it is the next commit.
+KNOWN_UNPINNED = (
+    "`datasheets.json` is scraped",
+    "`SPEC.md` is still one",
+    "`README.md` is a real front door: 99 lines",
+    "The client's generated contract",
+    "`README.md` is a real front door now",
+    "`SPEC.md` is still a 100,867-byte monolith",
+)
+
+
+def _statements(text: str) -> list[str]:
+    """One statement per unit, with prose unwrapped and table rows kept whole.
+
+    Markdown prose wraps, so a filename and its measurement sit on different LINES
+    constantly -- `ROADMAP.md` names `SPEC.md` on one line and its byte count on the
+    next, which a line-scanner cannot see. Paragraphs are therefore unwrapped before
+    splitting. A table row is its own statement: flattening a table joins unrelated
+    cells and reports the wrong row.
+    """
+    para: list[str] = []
+    out: list[str] = []
+
+    def flush() -> None:
+        if para:
+            out.extend(re.split(r"(?<=[.;])\s+", " ".join(" ".join(para).split())))
+            para.clear()
+
+    for line in text.split("\n"):
+        if line.lstrip().startswith("|"):
+            flush()
+            out.append(line)
+        elif not line.strip():
+            flush()
+        else:
+            para.append(line)
+    flush()
+    return out
+
+
+def _unpinned_measurements(doc: Path) -> list[str]:
+    return [
+        st.strip()
+        for st in _statements(doc.read_text(encoding="utf-8"))
+        if FILE_REF.search(st) and FILE_MEASURE.search(st) and not COMMIT_SHA.search(st)
+    ]
+
+
+@pytest.mark.parametrize("doc", _governed_files(), ids=lambda p: p.name)
+def test_a_file_measurement_names_the_commit_it_was_taken_at(doc: Path) -> None:
+    """`README.md is 99 lines` rots; `99 lines at 753f552` does not.
+
+    `CLAUDE.md` already says it: "where a count is measured at a commit, say which
+    commit". Nothing enforced it, and the class this gate exists for is not
+    inattention -- `bb7f94e` on this branch BOTH rewrote `README.md` to 132 lines and
+    wrote "99 lines" into `ROADMAP.md`. One commit created the fact and the falsehood
+    about it, with the author looking straight at both.
+
+    `CODE-REVIEW.md:152` is the counter-example and the model: it pins its count to a
+    commit and is still true a month later, while the two unpinned copies of the same
+    measurement rotted.
+
+    The rule is narrow on purpose. It fires only where a backticked FILE and a
+    line/byte count share one statement, so "287 bytes a row" and "24-42 KB" -- which
+    measure payloads rather than files -- are untouched.
+    """
+    offenders = [st for st in _unpinned_measurements(doc) if not any(k in st for k in KNOWN_UNPINNED)]
+    assert offenders == [], (
+        f"{doc.name}: a tracked file's size is restated with no commit. "
+        f"Pin it, cite the document that owns it, or drop the number: {offenders}"
+    )
+
+
+def test_every_known_unpinned_measurement_still_exists() -> None:
+    """The half that makes the list above a RATCHET rather than a licence.
+
+    Without this, a fixed entry stays in `KNOWN_UNPINNED` forever and the next
+    regression is waved through on a permission nobody remembers granting.
+    """
+    live = [st for doc in _governed_files() for st in _unpinned_measurements(doc)]
+    fixed = [k for k in KNOWN_UNPINNED if not any(k in st for st in live)]
+    assert fixed == [], f"these no longer offend -- delete them from KNOWN_UNPINNED: {fixed}"
