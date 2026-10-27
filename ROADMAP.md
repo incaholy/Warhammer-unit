@@ -1272,7 +1272,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93.
+**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -1292,6 +1292,23 @@ and their ownership leg widens from three columns to four so it names the SIDE r
 the game (#67) — which is why this cannot be a widened where-clause: `kill_team_id` sits
 inside the current triple and `kt_games` holds exactly one, so a second team's operative
 fails the insert rather than slipping past a missing check.
+
+`kt_game_events` gains `side` with it (#94), and that is part of the move rather than an
+extra. Shifting `command_points`, `victory_points`, `ploys_used` and `choices` onto the side
+BREAKS `undo` for all four at the moment the columns move. `_write` adds `target_id` to the
+payload only when a row is named (`service_killteam_game.py:777`), so a game-level write
+omits it and `_event_target` returns the game (`:858`) — correct while those columns are on
+`kt_games` and wrong the instant they are not. With no `target_id`, `_undo_fields` calls
+`setattr` for a column the game no longer has and raises a bare `ValueError`, which is not a
+`CodedError` and reaches the player as a 500. With the side row's id, `_event_target` probes
+two models, finds neither, and answers 404 for a row that exists. Deferring the column to K9
+would leave that window open against a shipped schema.
+
+**Two siblings share `_event_target`'s assumption.** `_undo_created` (`:833`) and
+`_undo_deleted` (`:842`) both iterate the same `(KTGameOperative, KTGameEquipment)` pair.
+Neither breaks under #94, because no operation creates or deletes a side row yet — but
+#83's vacate is the candidate that would, and K9 MUST check them rather than inherit the
+assumption.
 
 Three smaller things land here because both halves of the slice need them.
 `kt_game_events` gains `actor_user_id` (#70), nullable, since an event log that cannot say
@@ -1362,7 +1379,8 @@ nothing about the read models, which is where a client meets the change.
 **`KTGameOperative_Read`** and **`KTGameEquipment_Read`** — each gains `side`.
 
 **`KTGameEvent_Read`** — gains `actor_user_id` and the actor's display name, or #70 means
-nothing.
+nothing, and `side` (#94), or a client polling the log cannot tell which half of the game
+an event changed.
 
 **`PATCH /me/kill-team/games/{game_id}`** narrows rather than disappears. `_UPDATABLE`
 holds nine fields; six move to `PATCH .../sides/{side}`, leaving `status`, `initiative`
