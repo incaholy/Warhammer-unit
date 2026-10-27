@@ -509,7 +509,7 @@ shared predicate (#82) — `#73`'s "either side may finish" rests on a finish be
 reversible, which these are not. A participant refused one gets **403**, not the 404 the
 rest of the API answers, because that rule hides existence from a stranger and a
 participant is looking at the game. A guest leaves by vacating their side, which keeps
-the game and its record intact (#83).
+the game and its record intact and writes an event, so the host's screen learns it (#83).
 
 No route widens who may read a game, but **two** predicates change, not one (#75).
 Thirteen nested operations reach the game through one dependency, where "owner" becomes
@@ -774,16 +774,19 @@ its next write rides on each event, as the version that event produced.
 Each client polls that **every 3 seconds** while the battle screen is in front of
 someone, and **stops** while it is hidden, doing one catch-up read on return (#72). On a
 network error it backs off 3s, 6s, 12s, 24s, capping at 30s and resetting on success; on a
-404 it stops and shows the tombstone (#81). The answer is usually empty; when it is not,
+404 it stops and reports the game as gone (#81) — there is no tombstone to show, because
+`kt_game_events` cascades with the game row. The answer is usually empty; when it is not,
 it is two or three rows. Two clients at that cadence is 0.67 requests a second.
 
 Those are obligations on a **client**, and nothing on the server enforces them — there is
 no rate limiting anywhere (L1), so a buggy client can poll as fast as it likes.
 
 **"Nearly" is doing work in that first sentence.** Two mutations write no event at all —
-creating a game and deleting one — so #81 gives both one, because a log that is the only
-convergence channel makes anything missing from it invisible. Deletion was the harmful
-case: a guest's first notice would be a 404 on the next poll, with nothing to explain it.
+creating a game and deleting one — because a log that is the only convergence channel makes
+anything missing from it invisible. #81 gives **creation** one, as the anchor a guest's
+first poll reads from. Deletion keeps none and cannot have one: `kt_game_events` cascades
+with the game row, so a tombstone written before the delete is destroyed by it. The 404 on
+the next poll IS the notice, and #72 renders it as such.
 A write that sends a value already stored also records nothing, which stays deliberate
 (#58): an empty event would spend the next undo reverting nothing.
 
