@@ -501,11 +501,14 @@ creates no side row without a kill team from one of them.
 | `GET /me/kill-team/games/{game_id}/events` | the event log, paged by `?offset=&limit=` like every other collection and capped at 200 (#91). How both clients converge. **Named by #72** |
 | `POST /me/kill-team/joins` | redeem an invite code with the roster you are playing, both in the **body** so the code never reaches an access log. Outside the `games` id namespace, because a join has no game id and `ARCHITECTURE.md` §2.5 forbids a non-resource sitting beside one (#90). **Named by #71, #86 and #90** |
 | `POST /me/kill-team/games/{game_id}/invite` | mint a code and its expiry; writing a new one revokes the old, because there is only one slot. **Host only** (#82). *Follows from #71; not named by it* |
+| `GET /me/kill-team/games/{game_id}/invite` | read back the outstanding code and its expiry, or **404** when there is none. **Host only** (#82). Without it a host who reloads must re-mint, which revokes the code the guest is typing (#95) |
 | `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
 
-**Two operations stay host-only.** Deleting a game cascades the event log and cannot be
+**Three operations stay host-only.** Deleting a game cascades the event log and cannot be
 undone, and minting an invite revokes the outstanding code, so neither inherits the
-shared predicate (#82) — `#73`'s "either side may finish" rests on a finish being
+shared predicate (#82). Reading the code back is the third, for a different reason: it
+discloses a live credential, and the guest holding a side of the game is not the person
+entitled to it (#95) — `#73`'s "either side may finish" rests on a finish being
 reversible, which these are not. A participant refused one gets **403**, not the 404 the
 rest of the API answers, because that rule hides existence from a stranger and a
 participant is looking at the game. A guest leaves by vacating their side, which keeps
@@ -623,7 +626,8 @@ The read returns `player` populated and **`opponent: null`**. A client must rend
 third state, the way it already must for `initiative` (#62).
 
 **2. Nel mints an invite.** `POST .../games/{id}/invite`, host only (#82). Eight
-characters from `secrets`, `invite_expires_at` 15 minutes out (#71). Event 2,
+characters from `secrets`, drawn from 32 uppercase letters and digits, so 40 bits;
+`invite_expires_at` 15 minutes out (#71). Event 2,
 `invite_minted` — and the payload carries **no code**. #71 keeps the code out of access
 logs; the event log is a log too, and it is readable by whoever joins.
 

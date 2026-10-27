@@ -1463,9 +1463,10 @@ operations reach the game through `get_owned_game`, which does a primary-key fet
 Python equality test, and `get_game` — the detail read — has no owner clause of its own.
 Widening that test to "owner or participant" covers those thirteen — but **not
 uniformly**, which the earlier draft of this entry treated as the slice's cheapness.
-Two operations stay host-only behind a second loader (#82): deleting a game, which
-cascades the event log with no undelete, and minting an invite, which revokes the
-outstanding code because #71 keeps one slot. #73's "either side may finish" rests on
+Three operations stay host-only behind a second loader (#82): deleting a game, which
+cascades the event log with no undelete, minting an invite, which revokes the
+outstanding code because #71 keeps one slot, and reading that code back, which discloses
+a live credential to whoever asks (#95). #73's "either side may finish" rests on
 #66 making a finish reversible, and those two are not. A participant refused one gets
 403 rather than the house 404, because #31 hides existence from a stranger and a
 participant already has the game on screen (#82). A guest's way out is vacating their
@@ -1480,9 +1481,13 @@ work; what lands here is the predicate, the listing, and the invite flow.
 
 The invite code is a capability and is treated as one (#71): generated with `secrets`,
 redeemed in a POST body so it never reaches an access log, one slot so regeneration
-revokes, cleared on use so a screenshot cannot replay it. **Prerequisite, stated rather
-than assumed:** there is no rate limiting anywhere in this service, so the code's own
-entropy is the only thing standing between it and a brute force.
+revokes, cleared on use so a screenshot cannot replay it. A host reads their own live
+code back from the path that minted it (#95), because one slot means a re-mint revokes
+the code the guest is typing. **Prerequisite, stated rather than assumed:** there is no
+rate limiting anywhere in this service, so the code's own entropy is the only thing
+standing between it and a brute force. That entropy is **40 bits** — 8 characters from a
+32-character single-case alphabet — which needs about 611 million guesses a second for an
+even chance inside the 15-minute window.
 
 Convergence is polling, not a socket (#72). The event log is already the game's source of
 truth and `sequence` is already monotonic per game, so
