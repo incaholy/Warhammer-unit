@@ -253,9 +253,11 @@ def test_every_known_unpinned_measurement_still_exists() -> None:
 ROADMAP_HEADING = re.compile(r"^## (R\d+)\.", re.M)
 ORDER_ROW = re.compile(r"^\|\s*\d+\s*\|\s*\[(R\d+)\]", re.M)
 
-# Entries with a heading and no row in the Order table. A RATCHET, read with the test
-# below: an entry leaves this list when it is indexed and nothing may be added.
-KNOWN_UNINDEXED: frozenset[str] = frozenset({"R17"})
+# Entries with a heading and no row in the Order table. EMPTY, and that is the point:
+# R17 was the entry this gate was written against and the commit that indexed it emptied
+# the list, so this is a record of a closed class rather than a standing licence. A
+# RATCHET, read with the test below -- it only ever shrinks.
+KNOWN_UNINDEXED: frozenset[str] = frozenset()
 
 
 def _unindexed_entries() -> list[str]:

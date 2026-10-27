@@ -40,8 +40,9 @@ worth reading for the reasoning, not as a live bug list.
 | 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
 | 15 | [R15](#r15-two-unpaginated-reads-return-complete-results-with-no-cap) | Two unpaginated reads return complete results with no cap | §2.3 | Small; a cap or a page on two reads |
 | 16 | [R16](#r16-wrap-every-response-in-an-envelope) | Wrap every response in an envelope | §2.6 | Large; one migration, both repositories together |
+| 17 | [R17](#r17-publish-the-checkd-vocabularies-as-enums) | Publish the CHECK'd vocabularies as enums | §2.2 | Small; one annotation per column |
 
-R1–R12 are done. R13 to R16 are not started. R13 changes a shipped schema rather than a
+R1–R12 are done. R13 to R17 are not started. R13 changes a shipped schema rather than a
 draft one, and R16 changes a contract the other repository generates types from.
 
 R2, R4 and R5 each change a contract the other repo depends on. Land the backend and frontend sides
@@ -1404,6 +1405,36 @@ lockstep change rather than an `/api/v2`. The client is pre-release on an unmerg
 branch, and a second version for a product with one consumer is ceremony. Recorded with
 that reasoning so the next breaking change is not waved through on this precedent.
 
+**It also ships a migration together with the code that depends on it, which
+`DEPLOY-GCP.md` says never to do.** That rule is stated without exception: during a rolling
+deploy both revisions serve against one database, so the pattern is expand, migrate, contract
+across three deploys (`DEPLOY-GCP.md:229-241`). K8 moves columns off `kt_games` and reshapes
+its read models in one migration, which is the shape the rule refuses.
+
+The exemption is that there is no rolling deploy. Nothing is deployed at all:
+`.github/workflows/` holds `ci.yml` and no deploy step, no document records a service URL,
+and `DEPLOY-GCP.md` describes a target rather than a running system. The rule's premise is
+two revisions against one database, and with no revisions there is no premise, so the rule
+does not reach this slice.
+
+This is written down because the rule as stated is absolute and the next reader cannot
+derive the exception. It expires at the first deploy, which is `DEPLOY-GCP.md` Stage 2:
+two revisions overlap even on a default Cloud Run deploy, so the premise arrives with the
+first one. The document files the practice under Stage 3, which is where the traffic-shifting
+tools land and not where the hazard starts. K8 MUST land before that deploy, and a later
+slice that reshapes a deployed schema gets no such licence.
+
+The older version of this argument is NOT the reason: K1 says the migration "stays
+changeable until `fire-team` merges, since nothing is deployed against it", and `fire-team`
+merged on 2026-10-08, so that condition has lapsed. The live reason is the absent pipeline,
+not the open branch.
+
+**`downgrade()` is lossy by construction, not by oversight.** #77 backfills `opponent_name`
+and `opponent_victory_points` onto an opponent side row, and two side rows cannot go back
+into one game row. The reverse MUST say so in its docstring rather than appear to reverse.
+A genuinely reversible path would mean keeping the dropped columns, which is the contract
+step K8 is performing.
+
 ### The rows that already exist
 
 Every existing game gets a player side row carrying its CP, VP, rules, ploys, ploys_used
@@ -1484,12 +1515,22 @@ It becomes the slice's core loop.
 **Satisfies:** §2.2 (the contract). **Status: Not started.** Raised by the frontend
 (`warhammer_web` ROADMAP F4), because the cost lands there and the fix is here.
 
-**Measured against the published document on 2026-10-22:** `openapi.json` carries **zero**
-properties with an `enum`, while **22** CHECK-constrained vocabulary fields are published
-as a bare `string` — `status`, `order`, `kind`, `phase`, `initiative`, `source` and
-`category`, across `KTGame_Read`, `KTGame_Update`, `KTGameOperative_Read`,
-`KTGameOperative_Update`, `KTGameOperative_Add`, `KTGamePloy_Read`, `KTGameWeapon_Read` and
-`KTGame_ListRead`.
+**Measured from `SQLModel.metadata` and `openapi.json` at `da8141c`:** there are **11**
+vocabulary CHECK constraints over **8** columns — `availability`, `category`, `initiative`,
+`kind`, `order`, `phase`, `source` and `status`. Those columns publish **23** properties
+across **16** schemas, and **zero** carry an `enum`.
+
+**The first draft of this entry selected its fields by name, and the name is not the
+authority.** It claimed 22 fields across eight schemas; those eight hold **15** of the 23,
+and the list was wrong in both directions. `availability` was absent —
+`ck_kt_operative_availability` (`models_killteam.py:219`) allows `'roster'` and
+`'in_battle'`, and the column publishes bare on `KTOperative_Read` and
+`KTOperative_ListRead`. Implement R17 from a hand-written list and that column stays exactly
+as it is, which is the one outcome this entry exists to prevent. `ValidationIssue_Read.kind`
+(`app/api/army.py:80`) is the same error reversed: it shares a name with a constrained
+column, sits on a schema with no table, and so has no vocabulary to publish. The "Watch for"
+line below already said the constraint is the authority. The field list was the one place
+that did not follow it.
 
 **What that costs the client.** A CHECK constraint lives in the DDL and reaches no
 consumer: `schema.d.ts` types the field `string`, `schemas.gen.ts` validates it as
@@ -1508,6 +1549,30 @@ the assertion, so they agreed with each other.
 FastAPI emits an `enum` in the schema. The values already exist, written once in the CHECK
 constraints; this publishes them rather than inventing them, and the DDL stays the
 enforcement.
+
+**How to measure this.** Walk `SQLModel.metadata`, and take every `CheckConstraint` whose
+text is `col IN (...)`. That is the list in one pass, and it cannot pick a field the
+constraints do not govern.
+
+Two shapes the walk MUST handle, both live in this schema:
+
+- A nullable guard — `initiative IS NULL OR initiative IN ('player', 'opponent')`.
+- A quoted identifier — `"order" IN ('engage', 'conceal')`, because `order` is a SQL keyword.
+
+A pattern that misses them finds 9 constraints rather than 11 and reports no failure, which
+is the vacuous pass `tests/test_docs_style.py` guards against elsewhere.
+
+**The test R17 ships with.** The same walk is the acceptance test: for each such constraint,
+assert the published property carries an `enum` whose values equal the constraint's. It MUST
+NOT land before the annotations do, because it fails 23 times today. It is what says R17 is
+finished, not a gate on the way there.
+
+**Out of scope: the event `type`.** `kt_game_events.type` has no vocabulary CHECK.
+`ck_kt_game_event_type` is `length(trim(type)) > 0` (`models_killteam.py:1088`), which
+constrains emptiness and not values. R17 publishes constraints, and here there is none to
+publish. It matters anyway: the service writes **11** distinct types across the `_write` call
+sites in `service_killteam_game.py` at `da8141c`, and #72 makes `type` the field a polling
+client switches on. Constraining that vocabulary is a decision K9 owes. R17 does not make it.
 
 **Why it is worth more than a test.** The client's `npm run gen:api` turns a published
 enum into a union type, so `tsc` and zod both start refusing a wrong literal with no new
