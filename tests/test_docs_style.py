@@ -166,17 +166,11 @@ FILE_MEASURE = re.compile(r"(?<![#\w])[\d,]+[\s-](?:lines?|bytes?|KB)\b", re.I)
 # Seven to forty hex characters: a short SHA through a full one.
 COMMIT_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
-# Measurements that predate this gate, listed so they are VISIBLE and can only shrink.
-# A fix deletes its line, and the test below fails while a line names something that no
-# longer offends -- so the list cannot outlive the problem. Emptying it is the next commit.
-KNOWN_UNPINNED = (
-    "`datasheets.json` is scraped",
-    "`SPEC.md` is still one",
-    "`README.md` is a real front door: 99 lines",
-    "The client's generated contract",
-    "`README.md` is a real front door now",
-    "`SPEC.md` is still a 100,867-byte monolith",
-)
+# EMPTY, and that is the point. The six measurements this gate was written against were
+# corrected in the commit that emptied it, so the list is a record of a closed class
+# rather than a standing licence. A new entry here needs the same justification the
+# originals had: it is a ratchet, and it only ever shrinks.
+KNOWN_UNPINNED: tuple[str, ...] = ()
 
 
 def _statements(text: str) -> list[str]:

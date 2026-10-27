@@ -944,7 +944,7 @@ difference should be visible. Stated here because a reviewer should not have to 
 them:
 
 - **The 40k catalog's provenance is unresolved.** `datasheets.json` is scraped
-  third-party data and it **is committed** — 2,112,565 bytes, tracked on every
+  third-party data and it **is committed** — 2,112,565 bytes at `ebc0780`, tracked on every
   branch. `.gitignore` records the state rather than the intent: it excludes the Kill
   Team scrape because it is "a copy of someone else's content", and notes that "the
   40k equivalent (`scripts/data/datasheets.json`) ended up committed". So the open

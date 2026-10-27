@@ -345,7 +345,7 @@ remains the one open piece.
 **Status: Mostly done (R8, R10).** `openapi.json` is checked in and now **CI-verified fresh**; the
 frontend's types are **generated from it** (`npm run gen:api` → `src/api/schema.d.ts`, re-exported by
 `types.ts`), not hand-maintained; `docs/api/conventions.md` is the cross-repo contract; and `README.md`
-is a real front door (R10). One piece remains: `SPEC.md` is still a 100,867-byte monolith — splitting
+is a real front door (R10). One piece remains: `SPEC.md` is still a monolith — splitting
 it into audience-scoped docs is the outstanding work. See
 [ROADMAP R8](ROADMAP.md#r8-split-the-docs-and-generate-the-frontend-types).
 

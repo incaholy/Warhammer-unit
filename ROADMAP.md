@@ -411,8 +411,9 @@ fresh: the workflow regenerates it and fails on a diff. The frontend's types are
 generated from it rather than hand-maintained — `npm run gen:api` is a real script
 in `package.json` (`node scripts/gen-api.mjs`) and writes `src/api/schema.d.ts`,
 which `types.ts` re-exports. **One piece remains:** `SPEC.md` is still one
-100,867-byte file, and splitting it into audience-scoped docs is the outstanding
-work.
+file, and splitting it into audience-scoped docs is the outstanding work. The byte count
+that stood here is gone rather than pinned: the argument is that the file is too large to
+navigate, and no number was carrying it.
 
 **What was missing.** There was no `docs/` directory, and `SPEC.md` was one large file. The
 organizing principle to apply is one doc, one audience, one question. The single highest-value split
@@ -479,7 +480,7 @@ half-enveloped API is worse than either end state.
 
 **Satisfies:** §6.
 
-**Status: ✅ Done (R10).** `README.md` is a real front door: 99 lines carrying
+**Status: ✅ Done (R10).** `README.md` is a real front door: 132 lines at `ebc0780`, carrying
 what the project is and the stack it runs on, a Quick start, a Common commands
 table, a Layout block, and a Documentation index linking onward to
 `ARCHITECTURE.md`, `ROADMAP.md`, `SPEC.md`, `MVP.md` and the deploy docs.
@@ -990,7 +991,7 @@ current shape has not failed, and nobody should later cite a failure that did no
 
 - **Every route and every response model.** Twelve `Page[T]` reads become
   `ResponseEnvelope[Page[T]]`, and every detail read nests one level.
-- **The client's generated contract**: `schema.d.ts` (4,830 lines) and 54 zod schemas in
+- **The client's generated contract**: `schema.d.ts` (4,830 lines at `warhammer_web` `440da79`) and 54 zod schemas in
   `schemas.gen.ts`, both CI-gated against `openapi.json`. Regenerated wholesale.
 - **A hard cutover, with no gradual path.** The client's `parsed()` is non-strict, so a
   backend that ADDS a field never breaks a deployed client — but a wrapper changes the
@@ -1363,7 +1364,7 @@ played against.
 Measured against `openapi.json`, not transcribed. The earlier draft of this entry said
 nothing about the read models, which is where a client meets the change.
 
-**`KTGame_Read`** — 24 fields today, 16 of them unchanged.
+**`KTGame_Read`** — 24 fields today, 15 of them unchanged: the table below moves six, removes two and relocates one.
 
 | | |
 |---|---|
@@ -1383,8 +1384,11 @@ nothing, and `side` (#94), or a client polling the log cannot tell which half of
 an event changed.
 
 **`PATCH /me/kill-team/games/{game_id}`** narrows rather than disappears. `_UPDATABLE`
-holds nine fields; six move to `PATCH .../sides/{side}`, leaving `status`, `initiative`
-and `markers` on the game. The router's docstring lists four of the nine and is wrong
+holds nine fields; the **four settable fields** `MVP.md` names move to
+`PATCH .../sides/{side}`, leaving `status`, `initiative` and `markers` on the game. Two
+more of the nine — `opponent_name` and `opponent_victory_points` — are REMOVED rather than
+moved, which is why this is four and not six. The count is `MVP.md`'s to state; this cites
+it, because the copy that was restated here is the one that rotted. The router's docstring lists four of the nine and is wrong
 today, independently of this slice.
 
 **This is a breaking change to a contract the other repo consumes**, and it lands as a

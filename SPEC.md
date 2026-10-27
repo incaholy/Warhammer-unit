@@ -1439,7 +1439,7 @@ Independent, low-risk improvements, each landable on its own.
 | M4 | Replace `passlib` 1.7.4 with direct `bcrypt` calls (keep `hash_password`/`verify_password` as the seam) to unblock Python 3.13 and drop the `crypt` `DeprecationWarning` | `app/core/security.py` | S/M |
 | L2 | **Scraper "fail loud"** — validate the assembled JSON against the seed schema (and cross-check factions/subfactions against `FactionName`/`FACTION_SUBFACTIONS`) *before* writing, so a Wahapedia layout change errors instead of seeding garbage | `scrape_wahapedia.py` `main()` | S/M |
 | L3 | Add a deep readiness probe (`/health/ready` or `?deep=1`) that runs `SELECT 1` | `app/main.py` | S |
-| D1 | ✓ **Done.** `README.md` is a real front door now — 99 lines: what the project is, how to run it, and links out to `SPEC.md`, `MVP.md` and `DEPLOY.md` | `README.md` | done |
+| D1 | ✓ **Done.** `README.md` is a real front door now — what the project is, how to run it, and links out to `SPEC.md`, `MVP.md` and `DEPLOY.md`. `ROADMAP.md` R10 states its size and is the copy to trust | `README.md` | done |
 
 ### Tier 4 — Deferred / deploy-time / cleanup
 
