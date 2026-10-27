@@ -244,3 +244,55 @@ def test_every_known_unpinned_measurement_still_exists() -> None:
     live = [st for doc in _governed_files() for st in _unpinned_measurements(doc)]
     fixed = [k for k in KNOWN_UNPINNED if not any(k in st for st in live)]
     assert fixed == [], f"these no longer offend -- delete them from KNOWN_UNPINNED: {fixed}"
+
+
+# The Order table at the top of `ROADMAP.md` is a hand-maintained index of the sections
+# below it, so it goes stale every time one is added. R13 went in without a row last
+# round and R17 did it again this round, which is the signal that the gap is structural
+# and not inattention.
+ROADMAP_HEADING = re.compile(r"^## (R\d+)\.", re.M)
+ORDER_ROW = re.compile(r"^\|\s*\d+\s*\|\s*\[(R\d+)\]", re.M)
+
+# Entries with a heading and no row in the Order table. A RATCHET, read with the test
+# below: an entry leaves this list when it is indexed and nothing may be added.
+KNOWN_UNINDEXED: frozenset[str] = frozenset({"R17"})
+
+
+def _unindexed_entries() -> list[str]:
+    text = (DOCS / "ROADMAP.md").read_text(encoding="utf-8")
+    indexed = set(ORDER_ROW.findall(text))
+    return [e for e in ROADMAP_HEADING.findall(text) if e not in indexed]
+
+
+def test_every_roadmap_entry_appears_in_the_order_table() -> None:
+    """An entry nothing links to is an entry nobody schedules.
+
+    R17 was reachable only by scrolling to its own heading: the Order table stopped at
+    R16, the status line below it still said "R13 to R16", and `SPEC.md` still described
+    the range as `R1`-`R16`. Three sites, and the entry was written by someone who had
+    just read all three.
+
+    This is the second instance. R13 was found the same way one round earlier, which is
+    what makes it a class rather than a slip -- a reader cannot schedule what the index
+    does not list, and the index is the only part of the document a reader is expected
+    to read in full.
+
+    The gate is the heading, not the prose. A status line counts entries and will drift
+    again; the table is the one place a missing entry is unambiguous.
+    """
+    offenders = [e for e in _unindexed_entries() if e not in KNOWN_UNINDEXED]
+    assert offenders == [], (
+        f"ROADMAP.md: these entries have a heading and no row in the Order table. "
+        f"Add a row, or drop the heading: {offenders}"
+    )
+
+
+def test_every_known_unindexed_entry_is_still_unindexed() -> None:
+    """The half that makes the list above a RATCHET rather than a licence.
+
+    Same argument as `test_every_known_unpinned_measurement_still_exists`: a fixed entry
+    left in the allowlist spends its permission on the next regression.
+    """
+    live = _unindexed_entries()
+    fixed = sorted(e for e in KNOWN_UNINDEXED if e not in live)
+    assert fixed == [], f"these are indexed now -- delete them from KNOWN_UNINDEXED: {fixed}"
