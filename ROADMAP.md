@@ -14,10 +14,12 @@ wins — build order here. Where they disagree about **what the code does today*
 check the code.
 
 **Evidence.** Every claim below was reproduced against the running code rather than read off a commit
-message or a doc. Measured at `9ad5353`: `pytest` (**732 passed, 1 skipped**, 733 collected),
-`npm test` (**688** `it`/`test` blocks across **62** spec files), `npm run lint`, `npm run build`,
-plus throwaway probe scripts for SQL query counting, SQLite DDL inspection, and error-shape
-enumeration. Where something is a latent risk
+message or a doc. At `9ad5353` here: `pytest` (**732 passed, 1 skipped**, 733 collected). At
+`warhammer_web` `440da79`: `npm test` (**688** `it`/`test` blocks across **62** spec files),
+`npm run lint`, `npm run build`. Plus throwaway probe scripts for SQL query counting, SQLite
+DDL inspection, and error-shape enumeration. The two repositories are pinned separately
+because they are pinned to their own commits -- an earlier version of this line put the npm
+figures at `9ad5353`, which `warhammer_web` has never seen. Where something is a latent risk
 rather than a live defect, it says so.
 
 **A problem statement in a done entry is the historical record, not the current state.** It is kept
@@ -1008,8 +1010,10 @@ current shape has not failed, and nobody should later cite a failure that did no
 
 - **Every route and every response model.** Twelve `Page[T]` reads become
   `ResponseEnvelope[Page[T]]`, and every detail read nests one level.
-- **The client's generated contract**: `schema.d.ts` (4,830 lines at `warhammer_web` `440da79`) and 54 zod schemas in
-  `schemas.gen.ts`, both CI-gated against `openapi.json`. Regenerated wholesale.
+- **The client's generated contract**: `schema.d.ts` (4,830 lines) and 53 zod schemas in
+  `schemas.gen.ts`, both at `warhammer_web` `440da79` and both CI-gated against
+  `openapi.json`. Regenerated wholesale. The file exports 54 names; the 54th is
+  `PAGE_LIMIT_MAX`, a constant rather than a schema.
 - **A hard cutover, with no gradual path.** The client's `parsed()` is non-strict, so a
   backend that ADDS a field never breaks a deployed client — but a wrapper changes the
   shape rather than adding to it, so every read throws `ResponseShapeError` until the
@@ -1270,7 +1274,8 @@ mass-flag a catalog it simply did not mention.
 
 Built ahead of its condition (*before a client consumes the catalog as a picker*), which
 had not been reached when K7 ran. It has been reached since: the client's `kill-team-ui`
-branch, 70 commits ahead of its own `main`, carries `src/api/killTeam.ts`,
+branch, 86 commits ahead of its own `main` at `warhammer_web` `440da79`, carries
+`src/api/killTeam.ts`,
 `killTeamQueries.ts` and `killTeamRosters.ts` plus four Kill Team views, so the picker this
 flag was built for now exists — on an unmerged branch rather than on `main`.
 
