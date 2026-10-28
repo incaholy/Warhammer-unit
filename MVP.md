@@ -491,14 +491,16 @@ A side row carries `occupant_user_id`, nullable (#74), written in K8 and unread 
 K9. NULL means no account holds that side, which is the ordinary case: an opponent
 across the table who has not installed anything. The row is created once that side's
 kill team is known, not at game creation, so a game can be in a state where one side
-exists and the other has not been described yet.
+exists and the other has not been described yet. #77's backfill is the single exception:
+it writes an opponent row for a historical game whose team was never recorded, so that
+row has a NULL `kill_team_id` and exists without the condition that normally creates it.
 
 A side is established in one of **two** ways (#92). The host MAY describe it with
 `PUT .../sides/{side}`, carrying a `kill_team_id` and a display name. That is the path for
 an opponent across the table who holds no account, and it is the case #67 exists to serve.
 Or a second account joins (#86): joining carries a roster as well as a code, because that
-is what makes the joining side's kill team known. Neither path alone is enough, and #74
-creates no side row without a kill team from one of them.
+is what makes the joining side's kill team known. Neither path alone is enough, and
+outside #77's backfill no side row exists without a kill team from one of them.
 
 **Planned — K9, a second player.**
 
@@ -718,11 +720,21 @@ decision exists to draw — and it would type-check on the way.
 Used and wrong stay indistinguishable, and that is a **limit** rather than a decision:
 `#71` clears the code on redemption, so the row holds NULL either way.
 
-Two more states a client must render (#89):
+Four more states a client must render (#89). Three are the opponent panel, and the
+discriminator is the side row rather than the team name — the first and third both name
+no team:
 
-- **No opponent yet.** `opponent` is null, so the screen shows your side and an
-  invitation prompt — never an empty opponent panel, which implies a team that has been
-  described and holds nothing.
+- **No opponent yet.** No side row, so `opponent` is null and the screen shows your side
+  and an invitation prompt — never an empty opponent panel, which implies a team that has
+  been described and holds nothing.
+- **An established opponent.** The side row carries a `kill_team_id`, so the full panel
+  renders.
+- **A pre-K8 record.** The side row exists with a NULL `kill_team_id`, because #77
+  backfilled a game whose opponent team was never recorded. The panel shows the name and
+  score the backfill preserved, labelled as a record, and offers #92's `PUT` to complete
+  it. Never an invitation prompt: the game already had an opponent. Where the name is NULL
+  too — #77 fires on a score alone — the panel labels the score as an unrecorded opponent
+  rather than rendering blank.
 - **Polling failing.** After the first failed retry the screen says it is out of date and
   when it last succeeded: "last updated 14:32, reconnecting". One state covers a network
   error and a server error, because a client cannot reliably tell them apart. A tracker

@@ -1338,10 +1338,13 @@ And `kt_game_sides` carries `occupant_user_id` (#74), nullable, **written here a
 deliberately unread until K9**. A nullable column on a table this migration creates is
 free; adding it in K9 is a migration with a backfill against a schema that is by then
 shipped and seeded, which is the cost this slice's last paragraph warns about. The side
-row is created once that side's kill team is known rather than at game creation, so
-`kill_team_id` can stay NOT NULL for rows that have children — a composite leg under
-MATCH SIMPLE skips its whole check when any column is NULL, which is the hazard
-`fk_kt_game_roster`'s comment already records. And `use_ploy` becomes side-scoped
+row is created once that side's kill team is known rather than at game creation, so every
+row that has children carries a `kill_team_id` — a composite leg under MATCH SIMPLE skips
+its whole check when any column is NULL, which is the hazard `fk_kt_game_roster`'s comment
+already records. The COLUMN is still nullable (#77), and that is not a contradiction: the
+only rows allowed to hold NULL are #77's backfilled opponents, which have no operatives
+and no equipment, so no composite leg exists on them to skip. The invariant is "a row with
+children has a team", not "the column is NOT NULL". And `use_ploy` becomes side-scoped
 (`POST .../sides/{side}/ploys`), because #65's whole argument is that spending a ploy is
 one operation against one CP pool, and there are now two.
 
