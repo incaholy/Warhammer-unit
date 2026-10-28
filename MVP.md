@@ -13,6 +13,12 @@ each has work left, listed under [What "finished" means](#what-finished-means). 
 document tracks the *product's* MVP rather than either repo's, because an API nobody can
 use is not a viable product.
 
+**Where the documents disagree.** Routes and architecture are settled in [SPEC.md](SPEC.md),
+Kill Team design in [KILLTEAM.md](KILLTEAM.md), build order in [ROADMAP.md](ROADMAP.md), and
+scope here. Where any disagree about **design intent**, the one whose subject it is wins —
+scope here, and this document cites the others rather than overriding them. Where they
+disagree about **what the code does today**, neither wins: check the code.
+
 **On the jargon.** This is a document about two tabletop games, so it uses their
 words. Every one of them is defined in the [glossary](#glossary) at the end — nothing
 in here assumes you have played either game.
@@ -529,7 +535,7 @@ three of its numbers went stale in a single commit.
 
 | | |
 |---|---|
-| Tests | **723 passing, 1 skipped** (SQLite tier), 724 collected; **724** on the Postgres parity tier, where the tier-gated test runs |
+| Tests | **732 passing, 1 skipped** (SQLite tier), 733 collected at `9ad5353`; **733** on the Postgres parity tier, where the tier-gated test runs |
 | Test modules | 35 |
 | Tables | 26 — 11 Army List and shared, 15 Kill Team |
 | Migrations | 4, and CI fails if they disagree with the models |
@@ -975,8 +981,8 @@ them:
   40k equivalent (`scripts/data/datasheets.json`) ended up committed". So the open
   question is not whether that data stays in the project; it is already published.
   The create-only seed above is downstream of it.
-- **The two test tiers are asymmetric.** Only one of the 724 tests is tier-gated, so
-  on SQLite 723 of them validate the models rather than the shipped schema. The
+- **The two test tiers are asymmetric.** Only one of the 733 tests is tier-gated, so
+  on SQLite 732 of them validate the models rather than the shipped schema. The
   parity tier exists precisely for that, and it runs in CI — but a developer running
   `pytest` locally is testing the weaker thing.
 - **No end-to-end tests.** The API is tested thoroughly and the client is tested

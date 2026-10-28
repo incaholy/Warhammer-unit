@@ -1061,7 +1061,7 @@ CORS is a fallback, not the primary mechanism. Auth is a **Bearer JWT in the
 ## Testing
 
 Tests live in a flat `tests/` directory — `conftest.py`, a `fixtures/` folder of
-saved HTML and JSON, and 35 test modules carrying 724 tests:
+saved HTML and JSON, and 35 test modules carrying 733 tests at `9ad5353`:
 
 ```
 tests/
@@ -1494,7 +1494,7 @@ Not code changes (or intentionally deferred), grouped by kind.
 - **Stale-doc cleanup** — mostly overtaken, and three of its four sub-items were
   themselves the stale thing. `CLAUDE.md` has **no** "Known issues" section to
   remove and already writes `armor_save`, not "save". `MVP.md` carries no "202
-  tests" figure to bump to 209 — it was rewritten, and the suite is 724 tests across
+  tests" figure to bump to 209 — it was rewritten, and the suite is 733 tests across
   35 modules, so the old target was wrong by roughly five hundred. The one real
   sub-item, reconciling stale SPEC prose, is done in this pass: the "API tests to
   come" note, the present-tense "delete_unit 500s" line and the "Planned additions

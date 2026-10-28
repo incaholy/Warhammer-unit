@@ -7,10 +7,17 @@ implementations: the shape and the reasoning are here, the code is yours.
 **Item IDs are stable labels, not an ordering.** The table below is ordered by value per unit of
 effort; the sections that follow are in ID order so links stay put as priorities change.
 
+**Where the documents disagree.** Routes and architecture are settled in [SPEC.md](SPEC.md),
+Kill Team design in [KILLTEAM.md](KILLTEAM.md), scope and current state in [MVP.md](MVP.md),
+and build order here. Where any disagree about **design intent**, the one whose subject it is
+wins — build order here. Where they disagree about **what the code does today**, neither wins:
+check the code.
+
 **Evidence.** Every claim below was reproduced against the running code rather than read off a commit
-message or a doc: `pytest` (**723 passed, 1 skipped**, 724 collected), `npm test` (352 `it`/`test`
-blocks across 47 spec files), `npm run lint`, `npm run build`, plus throwaway probe scripts for SQL
-query counting, SQLite DDL inspection, and error-shape enumeration. Where something is a latent risk
+message or a doc. Measured at `9ad5353`: `pytest` (**732 passed, 1 skipped**, 733 collected),
+`npm test` (**688** `it`/`test` blocks across **62** spec files), `npm run lint`, `npm run build`,
+plus throwaway probe scripts for SQL query counting, SQLite DDL inspection, and error-shape
+enumeration. Where something is a latent risk
 rather than a live defect, it says so.
 
 **A problem statement in a done entry is the historical record, not the current state.** It is kept
@@ -114,12 +121,15 @@ app:
 There is also no stable machine-readable code anywhere: clients get a free-text message and an HTTP
 status.
 
-**What it already costs.** The frontend types the body as `detail?: string`
-(`src/api/client.ts:29`) and assigns it straight to the user-facing message (`client.ts:90`). When a
-422 arrives, `detail` is an array, so the message becomes that array stringified: `[object Object]`
-for one error, `[object Object],[object Object]` for two. Whether the user sees it in a toast or
-inline depends on the call path (mutations routed through the `MutationCache` in `main.tsx:17-20`
-toast it; `AuthView` catches and renders inline at `:131-133`), but the text is garbage either way.
+**What it cost, before this entry closed it.** *Original reasoning kept; R2 fixed all of it,
+so this describes the client as it was and not as it is.* ~~The frontend typed the body as
+`detail?: string` and assigned it straight to the user-facing message.~~ When a 422 arrived,
+`detail` was an array, so the message became that array stringified: `[object Object]` for one
+error, `[object Object],[object Object]` for two. Whether the user saw it in a toast or inline
+depended on the call path — mutations routed through the `MutationCache` in `main.tsx` toasted
+it, `AuthView` caught and rendered inline — and both of those paths still exist. What no longer
+exists is the garbage text: `ApiError` now carries a parsed `code`, and the two schemas that
+parse it are named in `MVP.md`.
 
 The missing code has a second cost: `ArmyView` collapses 404, 500, network failure, and expired token
 into the single sentence "Army not found" (frontend `CODE-REVIEW.md` finding 3), because there is
@@ -207,7 +217,8 @@ collection reads return `Page[T]` (`{items, total, limit, offset}`) through the
 shared `PageParams` / `paginate` helpers in `app/api/pagination.py`, with the
 offset-based choice written down, a `limit` capped at 200, and an `id` tiebreaker
 on every ordering so a page boundary cannot repeat or skip a row. The total
-travels **in the body** and `X-Total-Count` no longer exists anywhere in `app/`,
+travels **in the body** and no code sets `X-Total-Count` any more — it survives only as a
+comment in `app/main.py` recording why it was removed —
 so the CORS trap described below cannot fire. The missing aggregate was
 specifically the per-faction count, and `GET /units/facets` now returns it as one
 `GROUP BY`, which is what let the frontend drop its `limit=1000`
@@ -555,14 +566,16 @@ break the pattern, and the first is the only one that can corrupt data.
 
 ### The load-bearing one: `POST` that accumulates is not retry-safe
 
-Both quantity endpoints increment rather than set:
+Both quantity endpoints incremented rather than set. *This is the pre-R12 state: both
+`add_unit` methods are create-only now and raise `ConflictError`, and `amount += ` appears
+nowhere in `app/`.*
 
-- `POST /me/inventory` → `service_inventory.py:35`, `entry.amount += amount`
-- `POST /me/armies/{army_id}/units` → `service_army.py:164`, `entry.amount += amount`
+- ~~`POST /me/inventory` → `service_inventory.py`, `entry.amount += amount`~~
+- ~~`POST /me/armies/{army_id}/units` → `service_army.py`, `entry.amount += amount`~~
 
-Both are honest about it (each is commented "upsert: increment") and both correctly return 201 on
-insert and 200 on update, which is the right HTTP for an upsert. The problem is not the status codes,
-it is the accumulation.
+Both were honest about it -- each carried an "upsert: increment" comment, now gone with the code
+-- and both correctly returned 201 on insert and 200 on update, which is the right HTTP for an
+upsert. The problem was never the status codes, it was the accumulation.
 
 **A network timeout is indistinguishable from a slow success.** A client that times out and retries
 has no way to know whether the first request landed, so a retried "add 1" becomes "add 2". No
@@ -594,8 +607,10 @@ R13 retires `amount` itself, so the set-versus-delta question closes with it.
 
 ### `GET /factions/taxonomy` is a non-resource in a resource's id namespace
 
-`app/api/faction.py:85` serves a static map built from the `FACTION_SUBFACTIONS` constant, not from
-the database. It sits at `/factions/taxonomy`, and there is no `GET /factions/{faction_id}` yet.
+`faction_taxonomy` (`app/api/faction.py`) serves a static map built from the
+`FACTION_SUBFACTIONS` constant, not from the database. ~~It sits at `/factions/taxonomy`~~ — it
+sat there when this was written, and the resolution below moved it. There is still no
+`GET /factions/{faction_id}`.
 
 When one is added, `taxonomy` and `{faction_id}` occupy the same path slot. It resolves today only
 because declaration order decides, and a `UUID`-typed path parameter would reject the literal string
