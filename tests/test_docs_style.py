@@ -298,3 +298,69 @@ def test_every_known_unindexed_entry_is_still_unindexed() -> None:
     live = _unindexed_entries()
     fixed = sorted(e for e in KNOWN_UNINDEXED if e not in live)
     assert fixed == [], f"these are indexed now -- delete them from KNOWN_UNINDEXED: {fixed}"
+
+
+# A markdown table fails SILENTLY. A row split from its header renders as a paragraph of
+# literal pipes, and a stray `|` makes a 5-cell row in a 4-column table that GitHub
+# truncates. Both happened in this branch -- #72's row gained a pipe, and #95 was written
+# one blank line below the register it belongs to, so the whole decision was unreadable
+# while every other check passed.
+TABLE_SEP = re.compile(r"^\|[\s:|-]+\|$")
+
+
+def _tables(doc: Path) -> list[list[tuple[int, str]]]:
+    """Contiguous runs of pipe lines, outside fenced code blocks.
+
+    A run is what markdown will try to render as ONE table, which is the unit both
+    assertions below are about.
+    """
+    runs: list[list[tuple[int, str]]] = []
+    cur: list[tuple[int, str]] = []
+    fenced = False
+    for n, line in enumerate(doc.read_text(encoding="utf-8").split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced and line.lstrip().startswith("|"):
+            cur.append((n, line))
+        elif cur:
+            runs.append(cur)
+            cur = []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+@pytest.mark.parametrize("doc", _governed_files(), ids=lambda p: p.name)
+def test_every_table_row_is_attached_to_its_header(doc: Path) -> None:
+    """A pipe run with no `|---|` row is a fragment, not a table.
+
+    This is the shape a blank line produces: the rows above keep the header and render,
+    the rows below it become a paragraph of pipes. `#95` sat in that paragraph, and
+    counting cells per row -- which is what I checked, three times -- cannot see it,
+    because the orphaned row has the right number of cells. The missing separator is
+    the observable part.
+    """
+    orphans = [run[0][0] for run in _tables(doc) if not any(TABLE_SEP.match(row.strip()) for _, row in run)]
+    assert orphans == [], (
+        f"{doc.name}: pipe rows at these lines have no `|---|` separator, so they render "
+        f"as literal pipes rather than as table rows. A blank line above them is the "
+        f"usual cause: {orphans}"
+    )
+
+
+@pytest.mark.parametrize("doc", _governed_files(), ids=lambda p: p.name)
+def test_every_table_row_has_the_column_count_its_header_declares(doc: Path) -> None:
+    """One stray `|` adds a column the header has no name for, and GitHub drops it.
+
+    Caught by hand once in this branch, on a register row wide enough that the extra
+    cell was invisible. A test is cheaper than reading 95 rows.
+    """
+    offenders = []
+    for run in _tables(doc):
+        widths = {n: len(row.split("|")) - 2 for n, row in run}
+        expected = max(set(widths.values()), key=list(widths.values()).count)
+        offenders += [(n, w) for n, w in widths.items() if w != expected]
+    assert offenders == [], (
+        f"{doc.name}: these rows do not have their table's column count (line, cells): {offenders}"
+    )
