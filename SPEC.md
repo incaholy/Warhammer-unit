@@ -751,7 +751,12 @@ Starlette resolves a handler by walking the raised exception's MRO, so every cod
 error lands there — including one added tomorrow. It builds the body
 `{detail, code, field?, request_id, errors: [{code, field, detail}, ...]}` and sets the status from
 `CODE_STATUS[code]` — close to FastAPI's default plus a `code`, i.e. **no
-`{data, meta}` envelope** (intentionally deferred; see roadmap R9).
+`{data, meta}` envelope** today. That is the current shape and not a settled decision:
+[ROADMAP R16](ROADMAP.md#r16-wrap-every-response-in-an-envelope) supersedes §2.6 and
+intends the wrapper. "Frontend-readiness additions (built)" above carries the reasoning;
+this line cites it rather than restating it, because the restated copy is the one that
+rotted — it still read "intentionally deferred; see roadmap R9" after that section had
+reversed the stance 118 lines earlier.
 
 > **Adding a new service `*ValidationError`?** Inherit `CodedError` (alongside
 > `ValueError`) and it is mapped automatically. This replaced a hand-maintained
