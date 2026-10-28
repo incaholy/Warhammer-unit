@@ -14,13 +14,14 @@ wins — build order here. Where they disagree about **what the code does today*
 check the code.
 
 **Evidence.** Every claim below was reproduced against the running code rather than read off a commit
-message or a doc. At `9ad5353` here: `pytest` (**732 passed, 1 skipped**, 733 collected). At
-`warhammer_web` `440da79`: `npm test` (**688** `it`/`test` blocks across **62** spec files),
-`npm run lint`, `npm run build`. Plus throwaway probe scripts for SQL query counting, SQLite
-DDL inspection, and error-shape enumeration. The two repositories are pinned separately
-because they are pinned to their own commits -- an earlier version of this line put the npm
-figures at `9ad5353`, which `warhammer_web` has never seen. Where something is a latent risk
-rather than a live defect, it says so.
+message or a doc. At `4dbef9d` here: `pytest` (**744 passed, 1 skipped**, 745 collected). At
+`warhammer_web` `440da79`: `npm test` (**669** `it`/`test` blocks across **60** spec files) and
+`npm run test:browser` (**19** blocks across **2** Playwright specs), `npm run lint` and
+`npm run build`, and throwaway probe scripts for SQL query counting, SQLite DDL inspection
+and error-shape enumeration. Each repository is pinned to its own commit. The two test
+commands are counted separately because `vite.config.ts` excludes `browser/**` from
+vitest, so any single figure attributed to `npm test` is wrong whichever number it
+carries. Where something is a latent risk rather than a live defect, it says so.
 
 **A problem statement in a done entry is the historical record, not the current state.** It is kept
 because it is why the work was done; what landed is in that entry's status marker, and the marker
@@ -1275,9 +1276,9 @@ mass-flag a catalog it simply did not mention.
 Built ahead of its condition (*before a client consumes the catalog as a picker*), which
 had not been reached when K7 ran. It has been reached since: the client's `kill-team-ui`
 branch, 86 commits ahead of its own `main` at `warhammer_web` `440da79`, carries
-`src/api/killTeam.ts`,
-`killTeamQueries.ts` and `killTeamRosters.ts` plus four Kill Team views, so the picker this
-flag was built for now exists — on an unmerged branch rather than on `main`.
+`src/api/killTeam.ts`, `killTeamQueries.ts` and `killTeamRosters.ts` plus six Kill Team
+views, so the picker this flag was built for now exists — on an unmerged branch rather
+than on `main`.
 
 Three decisions were settled while building it. **Where the filter lives:** in the catalog
 service's own queries, not on the relationships, because a roster read reaches the same

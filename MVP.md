@@ -537,12 +537,12 @@ three of its numbers went stale in a single commit.
 
 | | |
 |---|---|
-| Tests | **732 passing, 1 skipped** (SQLite tier), 733 collected at `9ad5353`; **733** on the Postgres parity tier, where the tier-gated test runs |
+| Tests | **744 passing, 1 skipped** (SQLite tier), 745 collected at `4dbef9d`; **745** on the Postgres parity tier, where the tier-gated test runs |
 | Test modules | 35 |
 | Tables | 26 — 11 Army List and shared, 15 Kill Team |
 | Migrations | 4, and CI fails if they disagree with the models |
 | API | 49 paths, 72 operations, published as a committed `openapi.json` |
-| Recorded decisions | **91**, in [`KILLTEAM.md`](KILLTEAM.md), each with its reasoning — 66 at `366f918`, plus the 25 this branch adds for shared play, the 40k composition and the response envelope |
+| Recorded decisions | **95**, in [`KILLTEAM.md`](KILLTEAM.md), each with its reasoning — 66 at `366f918`, plus the 29 this branch adds for shared play, the 40k composition and the response envelope |
 | CI gates | 7 — see below |
 | Catalog data | **1,331 40k units stored** from 1,558 scraped rows, the difference being the seed's natural key; all 48 Kill Team teams parse and seed |
 
@@ -839,7 +839,8 @@ of the twelve nested writes, **two** accept a `version` and it is optional on bo
 sent to them is silently discarded with a 200. So #79 moves it into an `If-Match`-style
 header, required on **every write under `/games/{game_id}`**, which reaches the bodiless
 ones without reshaping four schemas. Twelve is the measurement that produced the rule, not
-its boundary: K8 and K9 add five more write operations, and the same rule covers them.
+its boundary: K8 and K9 add **seven** more write operations under that path -- five in K8
+and two in K9, from the planned tables above -- and the same rule covers them.
 
 **A 409 means re-read and re-decide, not re-read and retry** (#78). The difference is not
 stylistic. You read at version 12 with an operative on 5 wounds and tap 4; your opponent
@@ -993,8 +994,8 @@ them:
   40k equivalent (`scripts/data/datasheets.json`) ended up committed". So the open
   question is not whether that data stays in the project; it is already published.
   The create-only seed above is downstream of it.
-- **The two test tiers are asymmetric.** Only one of the 733 tests is tier-gated, so
-  on SQLite 732 of them validate the models rather than the shipped schema. The
+- **The two test tiers are asymmetric.** Only one of the 745 tests is tier-gated, so
+  on SQLite 744 of them validate the models rather than the shipped schema. The
   parity tier exists precisely for that, and it runs in CI — but a developer running
   `pytest` locally is testing the weaker thing.
 - **No end-to-end tests.** The API is tested thoroughly and the client is tested
