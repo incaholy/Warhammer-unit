@@ -1299,16 +1299,16 @@ fails the insert rather than slipping past a missing check.
 `kt_game_events` gains `side` with it (#94), and that is part of the move rather than an
 extra. Shifting `command_points`, `victory_points`, `ploys_used` and `choices` onto the side
 BREAKS `undo` for all four at the moment the columns move. `_write` adds `target_id` to the
-payload only when a row is named (`service_killteam_game.py:777`), so a game-level write
-omits it and `_event_target` returns the game (`:858`) — correct while those columns are on
+payload only when a row is named (`_write` in `service_killteam_game.py`), so a game-level
+write omits it and `_event_target` returns the game — correct while those columns are on
 `kt_games` and wrong the instant they are not. With no `target_id`, `_undo_fields` calls
 `setattr` for a column the game no longer has and raises a bare `ValueError`, which is not a
 `CodedError` and reaches the player as a 500. With the side row's id, `_event_target` probes
 two models, finds neither, and answers 404 for a row that exists. Deferring the column to K9
 would leave that window open against a shipped schema.
 
-**Two siblings share `_event_target`'s assumption.** `_undo_created` (`:833`) and
-`_undo_deleted` (`:842`) both iterate the same `(KTGameOperative, KTGameEquipment)` pair.
+**Two siblings share `_event_target`'s assumption.** `_undo_created` and
+`_undo_deleted` both iterate the same `(KTGameOperative, KTGameEquipment)` pair.
 Neither breaks under #94, because no operation creates or deletes a side row yet — but
 #83's vacate is the candidate that would, and K9 MUST check them rather than inherit the
 assumption.
@@ -1362,7 +1362,7 @@ which feeds `kill_team_name` and `faction_name` in both read models, and `_new_o
 
 `add_operative` is a third, and it is the one with a behaviour change rather than a
 reference to repoint. It refuses `source == "roster"` and refuses an operative whose
-`kill_team_id` differs from the game's (`service_killteam_game.py:254` and `:265`). Both
+`kill_team_id` differs from the game's (both guards in `add_operative`, `service_killteam_game.py`). Both
 guards are right while a game holds one team and wrong the moment it holds two: a host
 filling in the opponent's models by hand hits each of them. #93 adds `'opponent'` to the
 `source` vocabulary and moves the team comparison onto the SIDE. The operative MUST still
@@ -1529,11 +1529,11 @@ across **16** schemas, and **zero** carry an `enum`.
 **The first draft of this entry selected its fields by name, and the name is not the
 authority.** It claimed 22 fields across eight schemas; those eight hold **15** of the 23,
 and the list was wrong in both directions. `availability` was absent —
-`ck_kt_operative_availability` (`models_killteam.py:219`) allows `'roster'` and
+`ck_kt_operative_availability` (`models_killteam.py`) allows `'roster'` and
 `'in_battle'`, and the column publishes bare on `KTOperative_Read` and
 `KTOperative_ListRead`. Implement R17 from a hand-written list and that column stays exactly
 as it is, which is the one outcome this entry exists to prevent. `ValidationIssue_Read.kind`
-(`app/api/army.py:80`) is the same error reversed: it shares a name with a constrained
+(`app/api/army.py`) is the same error reversed: it shares a name with a constrained
 column, sits on a schema with no table, and so has no vocabulary to publish. The "Watch for"
 line below already said the constraint is the authority. The field list was the one place
 that did not follow it.
@@ -1574,7 +1574,7 @@ NOT land before the annotations do, because it fails 23 times today. It is what 
 finished, not a gate on the way there.
 
 **Out of scope: the event `type`.** `kt_game_events.type` has no vocabulary CHECK.
-`ck_kt_game_event_type` is `length(trim(type)) > 0` (`models_killteam.py:1088`), which
+`ck_kt_game_event_type` is `length(trim(type)) > 0` (`models_killteam.py`), which
 constrains emptiness and not values. R17 publishes constraints, and here there is none to
 publish. It matters anyway: the service writes **11** distinct types across the `_write` call
 sites in `service_killteam_game.py` at `da8141c`, and #72 makes `type` the field a polling
@@ -1606,7 +1606,7 @@ error body, the uniform `errors` array, and a code-to-status table of seven rows
 machine half declares none of it, so the contract a client can generate from says every
 operation either succeeds or returns a Pydantic validation error.
 
-**What that costs the client.** `ERROR_CODES` is hand-written at `src/api/client.ts:39` and
+**What that costs the client.** `ERROR_CODES` is hand-written in `src/api/client.ts` and
 commented as mirroring `app/core/errors.py`, exactly as the CHECK'd vocabularies were
 hand-mirrored before R17. `scripts/gen-api.mjs` emits a `z.enum` only where the published
 node carries one, so no generator can produce the array and nothing checks the copy. Both

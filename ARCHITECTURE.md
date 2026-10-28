@@ -82,7 +82,7 @@ Two details worth keeping deliberately:
   (`attention-api/app/api/errors.py`). This codebase has both now — `app/core/errors.py` and `app/api/errors.py`, which §2.2 records as done — and the pattern is worth
   reading first.
 - **Object-level authorization returns 404, not 403**, when a resource is not the caller's
-  (`get_owned_army`, `app/api/army.py:96`). That hides whether the id exists at all. The vulnerability
+  (`get_owned_army` in `app/api/army.py`). That hides whether the id exists at all. The vulnerability
   class avoided is BOLA / IDOR, which sits at the top of the OWASP API Top 10. Inventory is scoped to
   `current_user.id` from the JWT rather than a path parameter, so there is no id to tamper with.
 
@@ -280,7 +280,7 @@ that usually gets missed: leaving it behind would keep the suite green while ass
 
 - Schema changes go through `app/core/db/models.py` plus an Alembic migration. Never raw DDL.
 - **The engine is created lazily and cached**, so importing any module does not require a configured
-  database (`get_engine`, `app/core/db/connection.py:10`). This is why the suite runs in CI with no
+  database (`get_engine` in `app/core/db/connection.py`). This is why the suite runs in CI with no
   database service, and it is a better call than the reference, which builds its engine at import
   time and raises if `DATABASE_URL` is missing.
 - Migrations are **executable-tested**: something runs `alembic upgrade head` and asserts the result
@@ -354,7 +354,7 @@ it into audience-scoped docs is the outstanding work. See
 ## 7. Frontend architecture
 
 - **Exactly one HTTP client.** One module owns the base URL, the auth token, error parsing, and
-  status handling; one `fetch` call site in the app (`src/api/client.ts:126`). It notifies the auth
+  status handling; one `fetch` call site in the app (`request` in `src/api/client.ts`). It notifies the auth
   layer of a 401 through a listener rather than importing React, so the data layer stays free of the
   UI framework.
 - **Server state lives in TanStack Query, never in `useState`.** Query keys come from a single

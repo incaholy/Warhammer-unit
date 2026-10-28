@@ -697,14 +697,14 @@ table in `docs/api/conventions.md`. Recorded because it is a vocabulary change r
 a status choice, and §2.2 owns the vocabulary.
 
 **Nothing regenerates on the client, and an earlier version of this paragraph said it
-would.** `ERROR_CODES` is hand-written at `src/api/client.ts:39`, commented as mirroring
+would.** `ERROR_CODES` is hand-written in `src/api/client.ts`, commented as mirroring
 `app/core/errors.py`, and `scripts/gen-api.mjs` emits a `z.enum` only where the published
 node carries one. The published document carries no error vocabulary at all — `ROADMAP.md`
 R18 is that gap — so there is nothing for a generator to read. The eighth code MUST be
 added to that array by hand, in the same change.
 
 Forgetting it fails open rather than loudly. Both parse sites read
-`z.enum(ERROR_CODES).optional().catch(undefined)` (`src/api/client.ts:53` and `:67`), so an
+`z.enum(ERROR_CODES).optional().catch(undefined)` (`apiFieldErrorSchema` and `apiErrorBodySchema` in `src/api/client.ts`), so an
 unlisted code arrives as `undefined` instead of raising. The join screen would read the 410
 as "no code given" and fall through to the 404 message, which is the single distinction this
 decision exists to draw — and it would type-check on the way.
@@ -940,8 +940,9 @@ whether it is bookkeeping or a rule the app has taken on.
 
 **Five of the seven** are enumerated in `service_killteam_game.py`'s own module
 docstring. The ploy check arrived later with #65, and the withdrawn-row refusal is
-enforced in both the game service (`:272` for an operative, `:448` for equipment) and the
-roster service (`:90`, `:277`). So this list is **compiled**, which an earlier version of
+enforced in both the game service (`add_operative` for an operative, `add_equipment` for
+equipment) and the roster service (`create_roster` and its own `add_operative`). All four
+are the same `if …withdrawn:` guard. So this list is **compiled**, which an earlier version of
 this section claimed it was not — a reader told it was lifted from one docstring would go
 looking for all seven in one place and find five.
 
