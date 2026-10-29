@@ -1018,6 +1018,13 @@ them:
 - **The 40k catalog holds no composition at all.** The scraper locates the composition
   block on each page specifically in order to skip it, so the thing a list builder most
   obviously needs is the one thing not captured.
+- **K9 shows an opponent your login handle, until DM2 lands.** `users` holds no display
+  name, so #70's event log carries the `username` — and no path discloses one today:
+  `GET /me` is self-only and the admin `PATCH` carries only `is_admin`. A shared game is
+  therefore the first place a non-admin reads another user's. Accepted for K9 rather than
+  blocking it, with a nullable `display_name` riding on DM2's `users` migration (`SPEC.md`,
+  Tier 5) and the read falling back until then. The handle is also immutable, so a player
+  cannot change how they appear in the log.
 - **The tracker cannot record a Dash.** `actions_used` is checked against the operative's
   own abilities, and no universal action is stored anywhere — so Dash, Reposition, Fall
   Back and Pick Up Marker cannot be recorded. Not refused in practice: the picker is built

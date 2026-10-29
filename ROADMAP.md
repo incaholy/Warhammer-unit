@@ -1335,10 +1335,12 @@ Neither breaks under #94, because no operation creates or deletes a side row yet
 assumption.
 
 Three smaller things land here because both halves of the slice need them.
-`kt_game_events` gains `actor_user_id` (#70), nullable, since an event log that cannot say
+`kt_game_events` gains `actor_user_id` AND `actor_display_name` (#70), both nullable, since
+an event log that cannot say
 who wrote a row makes undo a button with an invisible target — needed whichever undo
 semantics K9 settles on, so it is not deferred with them. `KTGameEvent_Read` carries the
-actor's display name beside it, because no user route exists to resolve a UUID.
+actor's display name beside it, because no user route exists to resolve a UUID — and it is
+STORED rather than joined, so a later rename leaves old events alone (#70).
 
 And `kt_game_sides` carries `occupant_user_id` (#74), nullable, **written here and
 deliberately unread until K9**. A nullable column on a table this migration creates is
@@ -1421,7 +1423,7 @@ nothing about the read models, which is where a client meets the change.
 
 **`KTGameOperative_Read`** and **`KTGameEquipment_Read`** — each gains `side`.
 
-**`KTGameEvent_Read`** — gains `actor_user_id` and the actor's display name, or #70 means
+**`KTGameEvent_Read`** — gains `actor_user_id` and the stored `actor_display_name`, or #70 means
 nothing, and `side` (#94), or a client polling the log cannot tell which half of the game
 an event changed.
 
