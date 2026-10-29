@@ -1403,7 +1403,7 @@ harden the concurrent "add unit" path.
 | H1 | **Seed upsert** — update mutable fields on existing rows (stat line, `points`, `keywords`, `invulnerable_save`) instead of skipping them, so re-seeding truly "patches stats in place" as SPEC claims. Add an update branch per entity and an "updated" count bucket | `scripts/seed_datasheets.py` (create-only today); update `tests/test_seed.py` accordingly | M |
 | C | *(fold into H1)* Change the unit seed natural key from `(faction, unit_name)` to `(faction, subfaction, unit_name)`, stopping the ~227-unit collapse (same-named generic units — Chaos Spawn, Cultists — merging across subfactions; ~1558 scraped → ~1331 seeded) | `scripts/seed_datasheets.py` | S |
 | H2 | ✓ **The handler is done.** `app/main.py` registers `IntegrityError` → generic **409**, so simultaneous "add unit" requests no longer leak a raw 500 (it is in the error-mapping table and in "API-layer handlers" above). What is *not* done is the service-side half: neither `service_army.add_unit` nor `service_inventory.add_unit` catches the `IntegrityError` itself, so the loser of the race gets the handler's generic body instead of a `ConflictError` naming the field. Narrow this item to that | `service_army.py` + `service_inventory.py` | S |
-| H4 | **Fix keyword extraction & normalize** (found in the 2026-08 scrape review). `parse_keywords` over-captures: the real scrape yields **1217 distinct unit keywords, ~906 of them leaked unit/model names** (`Abaddon The Despoiler`, `Annihilation Barge`) — only ~155 are real keywords. Weapon keywords also carry **case-variant duplicates** (`blast`/`BLAST`/`Blast`, even a typo `ANTI-INFANTRy 4+`): 110 raw → **77 canonical**. Restrict `parse_keywords` to the true `KEYWORDS:` line and **case-fold/normalize** both unit and weapon keywords at scrape time. **Prerequisite for any keyword filter or index (DM1)** — a keyword filter is *wrong today regardless of column type* because case variants and leaked names both break it | `scrape_wahapedia.py` (`parse_keywords`; the `.kwb2` capture in `parse_weapons`) | M |
+| H4 | **Fix keyword extraction & normalize** (found in the 2026-08 scrape review). `parse_keywords` over-captures: the real scrape yields **1217 distinct unit keywords, ~906 of them leaked unit/model names** (`Abaddon The Despoiler`, `Annihilation Barge`) — the count of real keywords depends on a frequency cut nobody has stated -- see the keyword modeling fork below, which carries the distribution. Weapon keywords also carry **case-variant duplicates** (`blast`/`BLAST`/`Blast`, even a typo `ANTI-INFANTRy 4+`): 110 raw → **77 canonical**. Restrict `parse_keywords` to the true `KEYWORDS:` line and **case-fold/normalize** both unit and weapon keywords at scrape time. **Prerequisite for any keyword filter or index (DM1)** — a keyword filter is *wrong today regardless of column type* because case variants and leaked names both break it | `scrape_wahapedia.py` (`parse_keywords`; the `.kwb2` capture in `parse_weapons`) | M |
 
 > **Scraper data-completeness gaps (2026-08 review), to fix alongside H4/L2:**
 > (1) `invulnerable_save` is **never captured** — the parser hardcodes `None`
@@ -1583,16 +1583,52 @@ be undone by a re-seed. Of the three, it is the only window that genuinely close
 > column list: the script's decides what get-or-create matches, the constraint's
 > decides what is representable. Item C should land on its own timetable.
 
-> **Keyword modeling fork (relates to DM1 + H4).** Keywords are a small, bounded,
-> controlled vocabulary (~77 weapon, ~60–80 real unit keywords once names are
-> stripped — see the 2026-08 keyword review), the *same shape* as abilities and
-> weapons, which are already modeled as shared rows + a many-to-many link. Decide
-> deliberately: keep keywords as a **`JSONB` array** per row (simple; needs H4
-> normalization + a GIN index to make "units with keyword X" work), or promote
-> them to a **`keywords` table + `unit_keywords`/`weapon_keywords` M2M**
-> (guaranteed clean vocabulary, trivial join filters, but a bigger schema
-> change). Either way, keyword *filtering is only reliable after H4* — today case
-> variants and leaked names make it wrong regardless of column type.
+> **Keyword modeling fork (relates to DM1 + H4). STILL OPEN, and this records its
+> state rather than deciding it.** The two branches: keep keywords as a **`JSONB`
+> array** per row (simple; needs H4 normalization plus a GIN index to make "units
+> with keyword X" work), or promote them to a **`keywords` table +
+> `unit_keywords`/`weapon_keywords` M2M** (guaranteed clean vocabulary, trivial
+> join filters, bigger schema change). They are the *same shape* as abilities and
+> weapons, which are already shared rows plus a many-to-many link.
+>
+> **Neither branch avoids the data model.** `JSONB` is DM1 plus a GIN index on two
+> columns; the M2M is three new tables and a backfill. Choosing is a documentation
+> decision; building either is a migration.
+>
+> **Half the premise is measured and half is a threshold nobody has stated.** For
+> **weapons** it is a measurement: 110 raw values collapse to **77** by case-folding
+> alone, reproduced against `scripts/data/datasheets.json` at `ebc0780`. "Small,
+> bounded, controlled" holds. For **units** there is no such number. The 1217
+> distinct values at that commit distribute as **799 appearing exactly once, 236
+> twice, 87 three-to-five times, 54 six-to-twenty, and 41 twenty-one or more** — and
+> the single-occurrence set is plainly leaked character names (`Adrax Agatone`,
+> `Chief Librarian Tigurius`, `Kayvaan Shrike`). So the count of "real" keywords is
+> **418 at a two-occurrence cut, 182 at three, 95 at six, 41 at twenty-one**, and it
+> is a judgement about where that cut falls rather than something countable. This
+> document has carried three different figures for it — H4's "~155", an earlier
+> "~60–80" here, and the ~311 implied by H4's own subtraction of 906 leaked names
+> from 1217 — none reproducible, because none names the threshold. The top of the
+> distribution is not in doubt: `Infantry` 722, `Imperium` 663, `Character` 533,
+> `Vehicle` 528.
+>
+> **KM2 says it resolves this fork, and it does not.** KM2 adds `FactionKeyword` plus
+> `UnitFactionKeyword` for the `faction_keywords` field KM1 creates — a NEW field read
+> from the datasheet's `FACTION KEYWORDS:` line, which does not exist in
+> `datasheets.json` today. This fork is about the EXISTING `keywords` arrays on `Unit`
+> and `Weapon`, read from the `KEYWORDS:` line. Two different vocabularies serving two
+> different jobs: faction keywords drive mustering eligibility (KM3), general keywords
+> drive display and filtering. So KM2 establishes the M2M pattern in the schema and
+> lowers the marginal cost of extending it, which INFORMS this choice without making
+> it — and a split model, faction keywords in a table and the rest in `JSONB`, is a
+> legitimate outcome rather than an inconsistency.
+>
+> **What H4 gates, and what it does not.** H4 gates *filtering*, which is wrong today
+> whatever the column type, and it gates *confidence in the sizing* — if the real
+> figure were 600 rather than 182, the M2M's "small bounded vocabulary" argument
+> weakens. It does **not** gate the choice, which is the ordinary question of whether
+> the schema should ENFORCE the cleanliness H4 produces or merely hold it. That is
+> the same question #54 and #31 answer elsewhere with "unrepresentable rather than
+> merely checked", and it needs no new data to answer.
 
 ### Target architecture — keyword-driven mustering (design now, build later)
 
@@ -1666,7 +1702,7 @@ throughout; retire their *eligibility* role only after KM3 is proven.
 | ID | Change | Depends on | Effort |
 |---|---|---|---|
 | KM1 | **Capture faction keywords (scraper-only)** — add a `parse_faction_keywords` sibling to `parse_keywords` that reads the `FACTION KEYWORDS:` line into a new `faction_keywords` field per unit in `datasheets.json`. **No model change** — this just makes the real keyword *sets* visible so KM2 can be designed against real data. Normalize case here too (same discipline as H4) | — (do first; pairs with H4) | S |
-| KM2 | **Model the keyword vocabulary + M2M** — add `FactionKeyword` (catalog table, canonical values) and `UnitFactionKeyword` (unit ↔ keyword M2M); migration + seed backfill from KM1's data. Make `faction`/`subfaction` a **derived/display** taxonomy (or keep as-is but stop treating it as the eligibility source). Resolves the DM1 keyword-fork toward a table for faction keywords | KM1 | L |
+| KM2 | **Model the keyword vocabulary + M2M** — add `FactionKeyword` (catalog table, canonical values) and `UnitFactionKeyword` (unit ↔ keyword M2M); migration + seed backfill from KM1's data. Make `faction`/`subfaction` a **derived/display** taxonomy (or keep as-is but stop treating it as the eligibility source). Establishes the table-and-M2M pattern for FACTION keywords, which informs the DM1 keyword fork without resolving it -- that fork is about the separate `keywords` arrays | KM1 | L |
 | KM3 | **Switch `validate()` Tier 2 to keyword-set eligibility** — replace the `unit.faction_id == army.faction_id` equality with "unit's keyword set contains `Army.faction_keyword_id`". Add `Army.faction_keyword_id`. Run **alongside** the FK check first (compare results), then make keywords authoritative | KM2 | M |
 | KM4 | **`AllyRule` + cross-keyword allowances** — a data table encoding "army keyword X permits keyword Y, up to N units/points, under condition Z" (Agents of the Imperium, soup, allied Knights). This is the builder→legality-engine line and a GW-dataslate maintenance commitment — enter deliberately | KM3 | L |
 
