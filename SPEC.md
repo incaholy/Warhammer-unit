@@ -1529,10 +1529,10 @@ are intentional — see "DB layer".
 
 **The three are not equally actionable, which the table does not say.** DM1 is
 blocked on the keyword fork recorded under it: changing a column's type is wasted
-work if keywords are about to become a table and an M2M. DM3 is blocked on a
-scraper change, because the `Weapon` / `Ability` half of its question cannot be
-answered from the output file at all — the scraper dedupes by name first-wins, so
-collisions are destroyed upstream. DM2 is blocked on nothing.
+work if keywords are about to become a table and an M2M. DM3 is deferred BY DECISION
+behind one scraper change, so that `Unit`, `Weapon` and `Ability` get a single key
+strategy rather than one chosen twice — the note below carries the reasoning, and it
+does not defer item C with it. DM2 is blocked on nothing.
 
 **DM2's cost curve is also the different one, and the table flattens that.** DM1 and
 DM3 get more expensive with CATALOG size, which is bounded, re-seedable and small —
@@ -1545,13 +1545,14 @@ be undone by a re-seed. Of the three, it is the only window that genuinely close
 |---|---|---|---|
 | DM1 | **`keywords` → `JSONB`** on `Unit` and `Weapon` (currently `sa_type=JSON`, which is Postgres `json` = raw text). `jsonb` stores parsed binary and is the only one that supports a **GIN index + `@>` containment**, i.e. an indexable "find units with keyword X" query | 2026-08: one-line `sa_type` change + trivial migration on an empty table. Later: `ALTER TYPE json → jsonb` **rewrites the whole table** and any dependent indexes | S |
 | DM2 | **Case-insensitive uniqueness** on `User.username` / `User.email` (today `unique=True` = a case-*sensitive* index, so `Foo@x.com` ≠ `foo@x.com` and `Max` can register when `max` exists). Use `citext` columns or a `UNIQUE (lower(...))` functional index | 2026-08: swap the index, no data to conflict. Later: you may already have colliding rows, so you must **de-duplicate real accounts** before the constraint will even apply — a data migration, not a schema one. Email case-folding is also a correctness expectation | S/M |
-| DM3 | **DB-level natural key on catalog rows** so duplicates are *impossible*, not just avoided by the seed script. `Unit.unit_name` is indexed but **not unique**; `Ability.name` / `Weapon.name` have no uniqueness at all. This is the schema-enforcement half of the seed-key work in **item C / H1** (which fixes the *script*); a DB constraint guarantees it even under races or a buggy re-seed | 2026-08: add the constraint on a clean table. Later: adding it requires finding + merging duplicate rows and re-pointing every M2M link (`unit_abilities`/`unit_weapons`) — a nasty backfill | S–M |
+| DM3 | **DB-level natural key on catalog rows** so duplicates are *impossible*, not just avoided by the seed script. `Unit.unit_name` is indexed but **not unique**; `Ability.name` / `Weapon.name` have no uniqueness at all. This is the schema-enforcement half of the seed-key work in **item C / H1** (which fixes the *script* and is NOT blocked by this); a DB constraint guarantees it even under races or a buggy re-seed. **The key itself is not chosen** — see the note below: all three tables wait on one scraper change | 2026-08: add the constraint on a clean table. Later: adding it requires finding + merging duplicate rows and re-pointing every M2M link (`unit_abilities`/`unit_weapons`) — a nasty backfill | S–M |
 
-> **DM3 — the 2026-08 scrape decided the Unit key, with two gotchas.** Measured
-> over the 1558 real units: `(faction, unit_name)` collapses **227** units;
-> `(faction, subfaction, unit_name)` collapses just **1** (Karanak, a
-> multi-profile split) — so **`UNIQUE(faction_id, subfaction_id, unit_name)` is
-> the key** (matches item C; *not* global — "Captain" recurs across chapters).
+> **DM3 — the 2026-08 scrape measured the Unit key; the choice is DEFERRED behind
+> one scraper change.** Measured over the 1558 real units, and re-verified against
+> `scripts/data/datasheets.json` at `ebc0780`: `(faction, unit_name)` collapses
+> **227** units; `(faction, subfaction, unit_name)` collapses just **1** (Karanak, a
+> multi-profile split) — so `UNIQUE(faction_id, subfaction_id, unit_name)` is the
+> **candidate** (*not* global — "Captain" recurs across chapters).
 > Two traps the data exposed: **(a)** 141 units have `subfaction = NULL`, and SQL
 > treats `NULL ≠ NULL`, so a plain composite UNIQUE **won't enforce** on those —
 > use Postgres 15+ `UNIQUE (...) NULLS NOT DISTINCT` (or a `coalesce` expression
@@ -1559,8 +1560,28 @@ be undone by a re-seed. Of the three, it is the only window that genuinely close
 > external `source_id` (the scraper must capture it) is a guaranteed key. For
 > **Weapon / Ability** the output file can't reveal collisions — the scraper
 > already dedupes by name first-wins, so any clash (two different "Bolt pistol"
-> profiles) is lost *upstream*; decide `UNIQUE(name)` vs `source_id` by inspecting
-> the scraper's pre-dedup stream. Resolve all this alongside item C.
+> profiles) is lost *upstream*.
+>
+> **So all three tables wait on the same prerequisite, and get ONE answer.** The
+> scraper MUST either capture a stable `source_id` or dump its pre-dedup stream
+> before any of these constraints is chosen. That is KM1's shape — scraper-only, no
+> model change, run to make the real data visible so the decision can be designed
+> rather than guessed. Choosing the composite for `Unit` now and `source_id` for
+> `Weapon`/`Ability` later would mean two strategies in one catalog, and deciding
+> `Unit` twice if the evidence turns out to favour `source_id` for all of them.
+>
+> **What this leaves open, stated rather than implied.** Catalog rows stay
+> unprotected by the database until then: duplicates are prevented only by the seed
+> script's get-or-create, so a race or a buggy re-seed still inserts doubles. That is
+> the cost of waiting and it is accepted, because a wrong constraint is a table
+> rewrite where a missing one is the status quo.
+>
+> **Item C is NOT deferred with it, and the two are easy to confuse.** Item C changes
+> the SEED SCRIPT's natural key, which is what collapses 1558 scraped rows to 1331
+> stored ones — a live data loss, fixed by a script change with no schema in it. DM3
+> is the database constraint. The script key and the DB key need not be the same
+> column list: the script's decides what get-or-create matches, the constraint's
+> decides what is representable. Item C should land on its own timetable.
 
 > **Keyword modeling fork (relates to DM1 + H4).** Keywords are a small, bounded,
 > controlled vocabulary (~77 weapon, ~60–80 real unit keywords once names are
