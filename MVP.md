@@ -954,8 +954,9 @@ wrote down why. Absent on purpose. Each is a decision with reasoning recorded in
 ### Where the app does decide
 
 The constraint above says the app never applies a rule, and that is true of the game's
-rules. It is not true of nothing. Seven things are enforced, and each entry below says
-whether it is bookkeeping or a rule the app has taken on.
+rules. It is not true of nothing. Seven things are enforced today, and each entry below
+says whether it is bookkeeping or a rule the app has taken on. **#84 removes one of the
+seven**, so this is a count of the current state and not of the settled design.
 
 **Five of the seven** are enumerated in `service_killteam_game.py`'s own module
 docstring. The ploy check arrived later with #65, and the withdrawn-row refusal is
@@ -972,13 +973,13 @@ looking for all seven in one place and find five.
 | Command points never go negative | **bookkeeping** | a `CHECK`. How often a ploy may be used stays the players' (#65) |
 | A game has four turning points | **bookkeeping** | a `CHECK`, and `advance` is the only way they move (#85) |
 | A new pick of a withdrawn catalog row is refused | **bookkeeping** | the row is gone from the source; rows already in a game are untouched (#55) |
-| An action must be on the operative's own datacard | **a rule the app took on** | it refuses a write based on what a card lists — and today it refuses **legal** play, because no universal action is stored, so Dash, Reposition, Fall Back and Pick Up Marker cannot be recorded at all. #84 stores them, or removes the check |
+| An action must be on the operative's own datacard | **a rule the app took on, and #84 REMOVES it** | it refuses a write based on what a card lists. No universal action is stored, so Dash, Reposition, Fall Back and Pick Up Marker cannot be recorded. The refusal is unreachable rather than hostile — the picker is built from the card, so a player meets an omission and not a 400 |
 | A ploy must be one the game's snapshot lists | **a rule the app took on** | same shape, defensible: #65 pays the CP from the snapshot, so a ploy the team does not have has no cost to charge |
 
-Two of the seven refuse a write based on card contents. Both are defensible and neither
-is the game's rules — but calling them bookkeeping would be a stretch, and a reader who
-found the constraint stated absolutely would have no way to tell a considered exception
-from something that crept in.
+Two of the seven refuse a write based on card contents, and #84 removes the first of
+them. Both are defensible and neither is the game's rules — but calling them bookkeeping
+would be a stretch, and a reader who found the constraint stated absolutely would have no
+way to tell a considered exception from something that crept in.
 
 ## Known gaps and accepted trade-offs
 
@@ -1018,8 +1019,10 @@ them:
   obviously needs is the one thing not captured.
 - **The tracker cannot record a Dash.** `actions_used` is checked against the operative's
   own abilities, and no universal action is stored anywhere — so Dash, Reposition, Fall
-  Back and Pick Up Marker are refused on every operative. A check that refuses legal play
-  is worse than no check, so #84 either stores them or drops the check.
+  Back and Pick Up Marker cannot be recorded. Not refused in practice: the picker is built
+  from the card, so no client path offers a name the check would reject, and what a player
+  meets is an omission rather than an error. **#84 drops the check** rather than storing a
+  universal set, and the picker has to offer the names for that to change anything.
 - **R15** — two unpaginated reads return complete results with no cap. `/shortfall` and
   `/validate` return a row per army entry and an army has no size limit, and R13 makes
   them longer. The other three unpaginated reads are bounded by what they are. All five
