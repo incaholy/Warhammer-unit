@@ -278,11 +278,37 @@ that usually gets missed: leaving it behind would keep the suite green while ass
 
 ## 4. Persistence and migrations
 
-- Schema changes go through `app/core/db/models.py` plus an Alembic migration. Never raw DDL.
+- Schema changes go through `app/core/db/models.py` plus Alembic revisions. Never raw DDL.
 - **The engine is created lazily and cached**, so importing any module does not require a configured
   database (`get_engine` in `app/core/db/connection.py`). This is why the suite runs in CI with no
   database service, and it is a better call than the reference, which builds its engine at import
   time and raises if `DATABASE_URL` is missing.
+- **Migrations are SMALL AND INCREMENTAL by default: one revision per coherent operation, named
+  by its `-m` message.** A slice that changes four tables is several revisions, not one file of
+  twelve steps. Nothing ever enforced one — `test_migrations_match_models` builds the schema by
+  running the migrations and asserts `compare_metadata` is empty, which is agnostic to how many
+  produced it — so the single large file was habit rather than a rule. The reason to change it is
+  findability: a failure names a revision, and the revision's message says what it was doing, where
+  a 400-line file names a line number inside an operation you then have to reconstruct.
+- **Two rules make small revisions safe rather than merely numerous.** First, **never split a
+  constraint swap**: dropping the old foreign key in one revision and adding the widened one in the
+  next leaves a window with no protection at all, and that window is reachable through
+  `downgrade`. A drop-and-add is ONE operation. Second, **a data backfill is its own revision**,
+  separate from the DDL that enables it — a backfill is where the slow and the lossy failures live,
+  and isolating it means the failure names the backfill instead of the schema change it rode in on.
+  Each revision then carries a `downgrade()` small enough to be plausibly correct; where it cannot
+  be (a backfill that destroys the column it read), that revision's docstring says so rather than
+  appearing to reverse.
+- **What makes that safe is a property of `env.py`, and it is invisible.** `context.configure(...)`
+  passes no `transaction_per_migration`, so Alembic's default holds and the **whole** `upgrade` runs
+  inside one `begin_transaction()`. States between files are therefore never observable, and a
+  failure at the eighth operation rolls back the first seven. Migrations also only ever run against
+  Postgres — the default test tier builds from the models with `create_all` and only the parity tier
+  runs `alembic upgrade head` — so transactional DDL is always available. **The pressure on this is
+  already known:** `CREATE INDEX CONCURRENTLY` cannot run inside a transaction block, and DM1 wants
+  a GIN index. Whoever needs it will reach for `transaction_per_migration=True`, which would make
+  every multi-file slice's intermediate states reachable. The two are coupled — give the concurrent
+  index its own revision and leave the default alone, or audit the multi-file slices first.
 - Migrations are **executable-tested**: something runs `alembic upgrade head` and asserts the result
   matches the models. Model and migration drift is the classic way this fails, and it fails at deploy
   time rather than in review.

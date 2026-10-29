@@ -49,7 +49,7 @@ worth reading for the reasoning, not as a live bug list.
 | 13 | [R13](#r13-unit-composition-and-points-that-follow-model-count) | Unit composition, and points that follow model count | §2.5 | Moderate; a migration with a backfill |
 | 14 | [R14](#r14-two-catalog-reads-whose-contract-does-not-match-what-they-serve) | Two catalog reads whose contract does not match what they serve | §2.2, §2.5 | Small each; one is a dependency change |
 | 15 | [R15](#r15-two-unpaginated-reads-return-complete-results-with-no-cap) | Two unpaginated reads return complete results with no cap | §2.3 | Small; a cap or a page on two reads |
-| 16 | [R16](#r16-wrap-every-response-in-an-envelope) | Wrap every response in an envelope | §2.6 | Large; one migration, both repositories together |
+| 16 | [R16](#r16-wrap-every-response-in-an-envelope) | Wrap every response in an envelope | §2.6 | Large; **no** schema change, both repositories together |
 | 17 | [R17](#r17-publish-the-checkd-vocabularies-as-enums) | Publish the CHECK'd vocabularies as enums | §2.2 | Small; one annotation per column |
 | 18 | [R18](#r18-publish-the-error-responses) | Publish the error responses | §2.2 | Small; one shared schema, declared per router |
 
@@ -1443,8 +1443,12 @@ that reasoning so the next breaking change is not waved through on this preceden
 **It also ships a migration together with the code that depends on it, which
 `DEPLOY-GCP.md` says never to do.** That rule is stated without exception: during a rolling
 deploy both revisions serve against one database, so the pattern is expand, migrate, contract
-across three deploys (`DEPLOY-GCP.md:229-241`). K8 moves columns off `kt_games` and reshapes
-its read models in one migration, which is the shape the rule refuses.
+across three deploys (`DEPLOY-GCP.md:229-241`). The refused shape is one DEPLOY, not one
+revision: K8 moves columns off `kt_games`, reshapes its read models and ships the code that
+reads them, all together. Splitting the schema work across revisions does not change that —
+expand and contract in two files inside one deploy is still one deploy — so the exemption is
+needed whatever the file count. What a split buys is that a three-deploy sequence becomes
+POSSIBLE later, not that this slice becomes one.
 
 The exemption is that there is no rolling deploy. Nothing is deployed at all:
 `.github/workflows/` holds `ci.yml` and no deploy step, no document records a service URL,

@@ -14,7 +14,7 @@ build order and status are the K entries in ROADMAP.md.
 
 ```bash
 uvicorn app.main:app --reload        # run the API
-alembic revision --autogenerate -m "msg"   # generate a migration after editing models
+alembic revision --autogenerate -m "what this ONE revision does"   # after editing models
 alembic upgrade head                 # apply migrations
 pytest                               # run tests
 make openapi                         # regenerate openapi.json from the app (no DB needed)
@@ -59,7 +59,12 @@ not `requirements.txt`.
   limit. A SQLModel `max_length` constrains the DDL, not the request schema, so an
   unbounded field is a 500 on Postgres that SQLite cannot see.
   `tests/test_api_write_bounds.py` enforces both over `openapi.json`.
-- Schema changes go through `models.py` + an Alembic migration, never raw SQL.
+- Schema changes go through `models.py` + Alembic, never raw SQL. Migrations are
+  **small and incremental**: one revision per coherent operation, named by its `-m`
+  message, so a failure names a revision rather than a line. Two rules keep that safe —
+  never split a constraint swap (a drop-and-add is one operation), and give a data
+  backfill its own revision. `ARCHITECTURE.md` §4 has the reasoning and the `env.py`
+  property it depends on.
 - Keep stat names matching the datasheet terms used in `models.py`
   (`movement`, `toughness`, `armor_save`, `wounds`, `leadership`,
   `objective_control`).

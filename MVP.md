@@ -755,7 +755,7 @@ changed is rewritten, and a row the source no longer mentions is flagged rather 
 deleted. The sweep is scoped to the parents actually present in the payload, so a
 partial scrape cannot mass-flag a catalog it simply did not mention.
 
-**Schema changes** go through the models and a migration, never raw SQL:
+**Schema changes** go through the models and Alembic, never raw SQL:
 
 ```
 edit models.py  →  alembic revision --autogenerate  →  alembic upgrade head

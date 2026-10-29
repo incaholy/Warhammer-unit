@@ -265,7 +265,9 @@ live database — the reason the engine can't be created at import time.
 ### Migrations (`app/core/db/alembic/`)
 
 Schema changes are made by editing `models.py`, then autogenerating and applying
-a migration:
+a revision. A change touching several tables is normally **several revisions**, one per
+coherent operation, so a failure names a revision whose message says what it was doing —
+see `ARCHITECTURE.md` §4 for the rule and the two constraints on it:
 
 ```
 alembic revision --autogenerate -m "describe the change"   # generate
