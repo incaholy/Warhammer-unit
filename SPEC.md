@@ -1509,21 +1509,43 @@ Not code changes (or intentionally deferred), grouped by kind.
   one `tests/test_docs_style.py` was written for — a cleanup list nothing checks
   goes stale faster than the prose it tracks.
 
-### Tier 5 — Data-model schema (migration-cost; decide before real data)
+### Tier 5 — Data-model schema (migration-cost; re-price before scheduling)
 
-Found in a 2026-08 data-model review. None is a correctness bug in the current
-(effectively empty) catalog, and each is a *deliberate deferral* — but all three
-get **markedly more expensive once there is real data**, because the fix stops
-being a one-line model change and becomes a table rewrite or a data-cleanup
-backfill. Captured here so they're *considered*, not silently inherited. The
-structural decisions already made (faction validity in code, catalog FKs =
-RESTRICT, `amount >= 0`) were reviewed and are intentional — see "DB layer".
+Found in a 2026-08 data-model review, and **the cost argument below has since
+expired.** It was written against an "effectively empty" catalog, where each fix
+was a one-line model change. That is no longer the state: `scripts/data/datasheets.json`
+is committed and seeded, holding **1,558 units, 2,235 weapons, 1,026 abilities and
+4 factions** at `ebc0780`, and the Kill Team tables are seeded on `main` — see
+`KILLTEAM.md`'s "Catalog" section, which says so in its own opening line. So "cheap
+now" is true of none of the three, and the column below describes a window that has
+closed rather than one closing.
 
-| ID | Change | Why cheap now / costly later | Effort |
+None is a correctness bug, and each remains a *deliberate deferral* — the point of
+the section is that they are considered rather than silently inherited. But they
+MUST be re-priced before they can be scheduled against, because the cost column is
+the input that decides which to do first. The structural decisions already made
+(faction validity in code, catalog FKs = RESTRICT, `amount >= 0`) were reviewed and
+are intentional — see "DB layer".
+
+**The three are not equally actionable, which the table does not say.** DM1 is
+blocked on the keyword fork recorded under it: changing a column's type is wasted
+work if keywords are about to become a table and an M2M. DM3 is blocked on a
+scraper change, because the `Weapon` / `Ability` half of its question cannot be
+answered from the output file at all — the scraper dedupes by name first-wins, so
+collisions are destroyed upstream. DM2 is blocked on nothing.
+
+**DM2's cost curve is also the different one, and the table flattens that.** DM1 and
+DM3 get more expensive with CATALOG size, which is bounded, re-seedable and small —
+rewriting 1,558 rows is not frightening. DM2 gets more expensive with ACCOUNTS, which
+only accumulate and are never re-seeded: every user who registers before the
+constraint lands is a row that may have to be de-duplicated by hand, and that cannot
+be undone by a re-seed. Of the three, it is the only window that genuinely closes.
+
+| ID | Change | Why it was cheap in 2026-08 / costly later | Effort |
 |---|---|---|---|
-| DM1 | **`keywords` → `JSONB`** on `Unit` and `Weapon` (currently `sa_type=JSON`, which is Postgres `json` = raw text). `jsonb` stores parsed binary and is the only one that supports a **GIN index + `@>` containment**, i.e. an indexable "find units with keyword X" query | Now: one-line `sa_type` change + trivial migration on an empty table. Later: `ALTER TYPE json → jsonb` **rewrites the whole table** and any dependent indexes | S |
-| DM2 | **Case-insensitive uniqueness** on `User.username` / `User.email` (today `unique=True` = a case-*sensitive* index, so `Foo@x.com` ≠ `foo@x.com` and `Max` can register when `max` exists). Use `citext` columns or a `UNIQUE (lower(...))` functional index | Now: swap the index, no data to conflict. Later: you may already have colliding rows, so you must **de-duplicate real accounts** before the constraint will even apply — a data migration, not a schema one. Email case-folding is also a correctness expectation | S/M |
-| DM3 | **DB-level natural key on catalog rows** so duplicates are *impossible*, not just avoided by the seed script. `Unit.unit_name` is indexed but **not unique**; `Ability.name` / `Weapon.name` have no uniqueness at all. This is the schema-enforcement half of the seed-key work in **item C / H1** (which fixes the *script*); a DB constraint guarantees it even under races or a buggy re-seed | Now: add the constraint on a clean table. Later: adding it requires finding + merging duplicate rows and re-pointing every M2M link (`unit_abilities`/`unit_weapons`) — a nasty backfill | S–M |
+| DM1 | **`keywords` → `JSONB`** on `Unit` and `Weapon` (currently `sa_type=JSON`, which is Postgres `json` = raw text). `jsonb` stores parsed binary and is the only one that supports a **GIN index + `@>` containment**, i.e. an indexable "find units with keyword X" query | 2026-08: one-line `sa_type` change + trivial migration on an empty table. Later: `ALTER TYPE json → jsonb` **rewrites the whole table** and any dependent indexes | S |
+| DM2 | **Case-insensitive uniqueness** on `User.username` / `User.email` (today `unique=True` = a case-*sensitive* index, so `Foo@x.com` ≠ `foo@x.com` and `Max` can register when `max` exists). Use `citext` columns or a `UNIQUE (lower(...))` functional index | 2026-08: swap the index, no data to conflict. Later: you may already have colliding rows, so you must **de-duplicate real accounts** before the constraint will even apply — a data migration, not a schema one. Email case-folding is also a correctness expectation | S/M |
+| DM3 | **DB-level natural key on catalog rows** so duplicates are *impossible*, not just avoided by the seed script. `Unit.unit_name` is indexed but **not unique**; `Ability.name` / `Weapon.name` have no uniqueness at all. This is the schema-enforcement half of the seed-key work in **item C / H1** (which fixes the *script*); a DB constraint guarantees it even under races or a buggy re-seed | 2026-08: add the constraint on a clean table. Later: adding it requires finding + merging duplicate rows and re-pointing every M2M link (`unit_abilities`/`unit_weapons`) — a nasty backfill | S–M |
 
 > **DM3 — the 2026-08 scrape decided the Unit key, with two gotchas.** Measured
 > over the 1558 real units: `(faction, unit_name)` collapses **227** units;
