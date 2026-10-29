@@ -1052,7 +1052,7 @@ paragraph and in every row of its API reference.
 ## A slice states what it breaks, and what happens to rows that already exist
 
 Added because K8 did neither and the gap was found in review rather than in building.
-K8 named two of the four constraints its migration touches, and one of the two it missed
+K8 named two of the six constraints its migration touches, and one of the two it missed
 was another decision (#60) reached through a column the slice was dropping. R13 had the
 same hole from the other end: its DDL was right and it never said what happens to an
 existing `army_units` row.
@@ -1356,8 +1356,9 @@ one operation against one CP pool, and there are now two.
 
 ### What this breaks
 
-The earlier version of this entry named two constraints. There are four, and one of them
-is another decision:
+The earlier version of this entry named two constraints. There are **six**, and one of
+them is another decision. The count has been wrong twice: two when written, then four
+after `UNIQUE(game_id, side)` was added at `f5c8d11` without it moving:
 
 - `uq_kt_game_owner_team_id` is the provably-unique parent every composite leg into
   `kt_games` targets. The child leg moves to the side, so the target moves with it — a
@@ -1372,6 +1373,13 @@ is another decision:
   two creation paths: #92's `PUT` and #86's join.
 - `UNIQUE(game_id, equipment_id)` becomes `UNIQUE(game_id, side, equipment_id)`, or the
   two sides cannot take the same piece.
+- **`ck_kt_game_opponent_vp` goes with its column.** `opponent_victory_points` is dropped,
+  so its `>= 0` CHECK is dropped with it and is **not replaced** — #77 backfills the number
+  as a value in the opponent side's `victory_points` document, where
+  `_validate_victory_points` guards it in the service instead. That loses no guarantee,
+  because the player's `victory_points` has never had a DDL check and a CHECK cannot express
+  the rule over keys nobody declared. It is still a move from the DDL to the service, which
+  #77 records rather than leaving to be noticed when the CHECK fails to reappear.
 - `ck_kt_game_operative_current_wounds` still couples `current_wounds` to the snapshot's
   `wounds`, so a transform to a lower-wound card stays the service's problem.
 - **`fk_kt_game_roster` is decision #60.** Its comment says so: no `ondelete`,
