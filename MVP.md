@@ -482,7 +482,8 @@ its 24 fields. Nine leave: six move onto their side, `opponent_name` and
 `opponent` objects.
 `KTGame_ListRead` names both teams and gains `your_side`, so a row reads as a matchup
 and says which half is yours (#75). The operative and equipment reads gain `side`, and
-the event read gains the actor. `PATCH .../games/{game_id}` **narrows** from nine
+the event read gains the actor, the actor's name and its own `side`.
+`PATCH .../games/{game_id}` **narrows** from nine
 settable fields to three — `status`, `initiative`, `markers`. Of the six that leave, four
 move to `PATCH .../sides/{side}` and two are removed outright. That is a breaking change to a contract the client consumes,
 landing in lockstep rather than behind an `/api/v2`.
