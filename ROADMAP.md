@@ -1296,8 +1296,8 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 8 of the
-nine below are committed there; `main` has none of them, so K8 is not `built`.
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 9 of the
+ten below are committed there; `main` has none of them, so K8 is not `built`.
 Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
@@ -1427,7 +1427,7 @@ its own step and points here, so adding a step edits one list rather than every 
 | 6 | `a6b9d3f1e825` | Widens the operative ownership leg onto the side, and restores its simple game key | Committed on `kill-team-opponent` |
 | 7 | `b7c1e4a9f336` | Swaps the equipment unique to name `side` | Committed on `kill-team-opponent` |
 | 8 | `c8d2f5b1a749` | Retires `uq_kt_game_owner_team_id`, which step 6 orphaned | Committed on `kill-team-opponent` |
-| 9 | — | Swaps `ck_kt_game_operative_source` to admit `'opponent'` (#93) | Planned |
+| 9 | `d9e3a6c2f815` | Swaps `ck_kt_game_operative_source` to admit `'opponent'` (#93) | Committed on `kill-team-opponent` |
 | 10 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned, and GATED on K8's code half |
 
 The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was

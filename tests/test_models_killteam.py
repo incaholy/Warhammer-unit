@@ -976,6 +976,24 @@ def test_a_game_operatives_vocabulary_is_closed(session, make_kt_game_operative,
         session.commit()
 
 
+def test_the_schema_admits_an_opponent_source(session, make_kt_game_operative):
+    """#93's fourth value, which the CHECK takes one revision before the service does.
+
+    `_SOURCES` still refuses `'opponent'`, so nothing can reach this through a route yet.
+    That ordering is the safe one and the same the equipment unique took: the schema is
+    permissive and the service is the narrower gate until its own change lands.
+
+    The sibling test above still refuses `wishful_thinking`, which is what keeps this a
+    WIDENING rather than an opening.
+    """
+    row = make_kt_game_operative()
+    row.source = "opponent"
+    session.add(row)
+    session.commit()
+
+    assert session.get(KTGameOperative, row.id).source == "opponent"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "constraint"),
     [

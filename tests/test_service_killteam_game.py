@@ -671,6 +671,22 @@ def test_a_withdrawn_kill_team_cannot_newly_field_a_side(session, battle, make_k
         svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=gone.id)
 
 
+def test_the_service_still_refuses_an_opponent_source(session, battle):
+    """The other half of the chain's ninth revision, asserted from this side.
+
+    The CHECK admits `'opponent'` now; `_SOURCES` does not, so `add_operative` refuses it
+    and no route can write one. This test MUST be inverted when #93's piece lands, and it
+    exists so that the window between the two is a stated state rather than an oversight.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    assert "opponent" not in svc._SOURCES
+    with pytest.raises(KTGameValidationError, match="must be one of"):
+        svc.add_operative(game.id, b["cards"][0].id, source="opponent")
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()

@@ -1071,7 +1071,18 @@ class KTGameOperative(TimestampMixin, table=True):
             "status IN ('reserve', 'on_board', 'incapacitated')",
             name="ck_kt_game_operative_status",
         ),
-        CheckConstraint("source IN ('roster', 'equipment', 'rule')", name="ck_kt_game_operative_source"),
+        # `'opponent'` joins the three (#93): a host describing an opponent (#92) has to be
+        # able to field that opponent's models, and `source` answers "why is this row
+        # here" -- "the host typed it in" is a different answer from `'equipment'` or
+        # `'rule'`, so it is a new value rather than a reused one.
+        #
+        # The CHECK admits it before `_SOURCES` does, which is the safe direction: the
+        # schema is permissive and the service is the narrower gate, the same way
+        # `add_equipment` held the line while `uq_kt_game_equipment` was widened.
+        CheckConstraint(
+            "source IN ('roster', 'equipment', 'rule', 'opponent')",
+            name="ck_kt_game_operative_source",
+        ),
         CheckConstraint(
             "activated_in_turning_point IS NULL OR activated_in_turning_point BETWEEN 1 AND 4",
             name="ck_kt_game_operative_activated_tp",
