@@ -364,3 +364,83 @@ def test_every_table_row_has_the_column_count_its_header_declares(doc: Path) -> 
     assert offenders == [], (
         f"{doc.name}: these rows do not have their table's column count (line, cells): {offenders}"
     )
+
+
+# A count stated just before the list it introduces is the most fragile number in these
+# documents. K8's "What this breaks" has been wrong three times: two when written, four
+# after `UNIQUE(game_id, side)` was added without it moving, and six until writing the
+# model found a missing FK target. Every correction was made by hand, and the last two
+# were found by accident.
+COUNT_WORDS = {
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+}
+
+# A **bolded** number word, then same-paragraph prose ending in a colon, a blank line,
+# and a contiguous bullet block. Every span is `[^\n]` rather than `.`, which makes this
+# immune to `re.DOTALL` rather than merely written without it -- adding the flag changes
+# nothing, which a mutation confirmed. The first draft used `.` WITH the flag and one
+# match swallowed 370 lines across three unrelated lists, reporting 12 bullets for a
+# list of seven.
+STATED_COUNT = re.compile(
+    r"\*\*(" + "|".join(COUNT_WORDS) + r")\*\*[^\n]*(?:\n[^\n]+)*?:\n\n"
+    r"((?:- [^\n]*\n(?:  [^\n]*\n)*)+)",
+    re.I,
+)
+
+
+def _stated_counts(doc: Path) -> list[tuple[int, str, int, int]]:
+    """Every `**N**: <bullets>` claim, as (line, word, claimed, actual)."""
+    text = doc.read_text(encoding="utf-8")
+    found = []
+    for m in STATED_COUNT.finditer(text):
+        word = m.group(1).lower()
+        found.append(
+            (
+                text[: m.start()].count("\n") + 1,
+                word,
+                COUNT_WORDS[word],
+                len(re.findall(r"^- ", m.group(2), re.M)),
+            )
+        )
+    return found
+
+
+@pytest.mark.parametrize("doc", _governed_files(), ids=lambda p: p.name)
+def test_a_stated_count_matches_the_list_it_introduces(doc: Path) -> None:
+    """ "There are **seven**:" followed by six bullets is the shape that keeps happening.
+
+    The number is not independently measurable -- it IS the list -- so the only thing
+    that can hold it is the list itself. Scoped to a bolded word immediately introducing
+    a bullet block, which is where the reader re-derives the number and gets a different
+    one; a count elsewhere in prose is a different problem with a different fix.
+    """
+    wrong = [
+        (line, word, claimed, actual)
+        for line, word, claimed, actual in _stated_counts(doc)
+        if claimed != actual
+    ]
+    assert wrong == [], (
+        f"{doc.name}: a stated count disagrees with its own list (line, word, claimed, actual): {wrong}"
+    )
+
+
+def test_the_stated_count_pattern_still_matches_something() -> None:
+    """The floor. A pattern that matches nothing passes the test above vacuously.
+
+    The same failure the vocabulary walk in `ROADMAP.md` R17 records: a regex that found
+    9 of 11 constraints and reported no error. If every claim is legitimately rewritten
+    away this fails and the pattern should be deleted rather than left inert.
+    """
+    total = sum(len(_stated_counts(doc)) for doc in _governed_files())
+    assert total >= 1, "STATED_COUNT matches nothing; it cannot be enforcing anything"
