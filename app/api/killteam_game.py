@@ -59,8 +59,18 @@ from app.core.services.service_killteam_game import EQUIPMENT_LIMIT, KTGameServi
 router = APIRouter(prefix="/me/kill-team/games", tags=["kill team games"])
 
 
-def get_game_service(session: Session = Depends(get_session)) -> KTGameService:
-    return KTGameService(session)
+def get_game_service(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> KTGameService:
+    """The service, carrying who is calling so every event it writes names its actor (#70).
+
+    The caller is supplied here rather than on each operation, because all twelve writing
+    operations need it and none has a reason to differ. `get_owned_game` depends on this
+    and on `get_current_user` as well; FastAPI resolves a dependency once per request, so
+    the token is decoded once whichever path reaches it first.
+    """
+    return KTGameService(session, actor=current_user)
 
 
 def get_owned_game(
@@ -168,6 +178,15 @@ class KTGameEvent_Read(SQLModel):
     #: Set once something reverted this entry, so a reader can show the history rather
     #: than a hole.
     undone_by: UUID | None
+    #: Which half of the game this entry belongs to, or null where it is about the game
+    #: itself -- the clock, the status, the initiative (#94).
+    side: str | None
+    #: WHO wrote it, which is a different question from `side` (#70). Both are null only
+    #: for entries written before the columns existed; every new one carries them.
+    actor_user_id: UUID | None
+    #: The actor's name as it stood when the entry was written, stored rather than joined
+    #: because no route resolves a user id to a name (#70).
+    actor_display_name: str | None
     created_at: datetime
 
 

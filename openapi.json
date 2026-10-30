@@ -4534,6 +4534,40 @@
             ],
             "title": "Undone By"
           },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "actor_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Display Name"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -4547,6 +4581,9 @@
           "type",
           "turning_point",
           "undone_by",
+          "side",
+          "actor_user_id",
+          "actor_display_name",
           "created_at"
         ],
         "title": "KTGameEvent_Read",

@@ -324,6 +324,46 @@ def test_undoing_a_removal_puts_the_side_back(session, battle):
     assert restored.side == "player"
 
 
+def test_an_event_names_who_wrote_it(session, battle):
+    """Decision #70: with two writers the log could not say who did anything.
+
+    The display name is STORED rather than joined, because no route resolves a user id to
+    a name -- `GET /me` is self-only and `PATCH /users/{user_id}` is admin-gated. Storing
+    it also means a later rename leaves old entries reading as they did when written.
+    """
+    b = battle()
+    svc = KTGameService(session, actor=b["user"])
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=4)
+
+    entry = session.exec(
+        select(KTGameEvent).where(KTGameEvent.game_id == game.id).order_by(KTGameEvent.sequence.desc())
+    ).first()
+    assert entry.actor_user_id == b["user"].id
+    #: The `username`, which #70 calls an interim: `users` holds no display name until DM2.
+    assert entry.actor_display_name == b["user"].username
+
+
+def test_a_service_with_no_actor_still_writes_the_log(session, battle):
+    """Both actor columns are nullable, and this is the case that justifies the default.
+
+    A seed or a console has no caller. #70 makes the columns nullable for entries written
+    before they existed; the constructor's default is for a writer with no request behind
+    it, NOT for a route that forgot to pass one --
+    `test_every_event_a_route_writes_names_its_actor` is what holds that shut.
+    """
+    b = battle()
+    svc = KTGameService(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=4)
+
+    entry = session.exec(
+        select(KTGameEvent).where(KTGameEvent.game_id == game.id).order_by(KTGameEvent.sequence.desc())
+    ).first()
+    assert entry.actor_user_id is None
+    assert entry.actor_display_name is None
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()

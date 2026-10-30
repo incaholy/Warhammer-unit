@@ -37,6 +37,39 @@ def _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative, n=3
 # --- the write surface, and the catalog's lack of one ------------------------
 
 
+def test_every_event_a_route_writes_names_its_actor(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Decision #70's "every new event records one", held where it can be.
+
+    The service's `actor` defaults to None so a seed or a console can construct it, and
+    that default must never reach a route. Every game route authenticates and
+    `get_game_service` supplies the caller, so this walks several writing operations and
+    asserts the log has no unattributed entry.
+
+    It reads the log through `GET /{game_id}`, which nests it: #72's dedicated events path
+    is K9, so the game detail is where a client sees the log today.
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    game = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
+    gid = game["id"]
+
+    auth_client.patch(f"/api/v1/me/kill-team/games/{gid}", json={"command_points": 5})
+    auth_client.patch(
+        f"/api/v1/me/kill-team/games/{gid}/operatives/{game['operatives'][0]['id']}",
+        json={"current_wounds": 7},
+    )
+    auth_client.post(f"/api/v1/me/kill-team/games/{gid}/advance")
+    auth_client.post(f"/api/v1/me/kill-team/games/{gid}/undo")
+
+    events = auth_client.get(f"/api/v1/me/kill-team/games/{gid}").json()["events"]
+    assert len(events) >= 4, events
+    unattributed = [e["type"] for e in events if e["actor_user_id"] is None]
+    assert unattributed == []
+    assert {e["actor_user_id"] for e in events} == {str(auth_client.user.id)}
+    assert {e["actor_display_name"] for e in events} == {auth_client.user.username}
+
+
 def test_adding_games_did_not_give_the_catalog_a_write_route():
     # Decision #21 asserted again with a THIRD router mounted: the catalog stays
     # read-only however many writing halves grow beside it.

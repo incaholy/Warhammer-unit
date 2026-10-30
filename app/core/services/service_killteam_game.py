@@ -121,8 +121,19 @@ class KTGameService:
     _ORDERS = {"engage", "conceal"}
     _SOURCES = {"roster", "equipment", "rule"}
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, actor: User | None = None):
         self.session = session
+        #: Who is writing, recorded on every event this service appends (#70). The log
+        #: could not say who did anything with two writers, which made undo "a button
+        #: with an invisible target" -- and #70's answer is the actor column plus a label
+        #: rather than a second undo stack, because the defect was never SHARED undo but
+        #: INVISIBLE shared undo.
+        #:
+        #: Optional so the service is constructible without a request -- a seed or a
+        #: console has no caller -- and NOT because a route may omit it. Every game route
+        #: authenticates, `get_game_service` supplies the caller, and
+        #: `test_every_event_a_route_writes_names_its_actor` is what holds that shut.
+        self.actor = actor
 
     # ------------------------------- games -------------------------------
 
@@ -862,6 +873,15 @@ class KTGameService:
             game_id=game.id,
             sequence=self._next_sequence(game.id),
             side=side if side is not None else self._scope_of(game.id, touched),
+            actor_user_id=self.actor.id if self.actor else None,
+            # STORED, not joined (#70): no route resolves a UUID to a name -- `GET /me` is
+            # self-only and `PATCH /users/{user_id}` is admin-gated -- so a client holding
+            # a bare id could not satisfy the contract. Storing it also means a later
+            # rename leaves old entries reading as they did when they were written.
+            #
+            # `username` is the INTERIM, not the answer. `users` holds no display name
+            # until DM2 adds one, and this is the single line that changes when it does.
+            actor_display_name=self.actor.username if self.actor else None,
             type=event_type,
             turning_point=game.turning_point,
             payload=payload,
