@@ -1296,8 +1296,8 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 5 of the
-seven below are committed there; `main` has none of them, so K8 is not `built`.
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 6 of the
+eight below are committed there; `main` has none of them, so K8 is not `built`.
 Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
@@ -1336,6 +1336,25 @@ reference though, and says nothing against a leg to the SIDE, which involves no 
 gives the event log. Found by writing the models. The widening is also why this cannot be a widened where-clause: `kill_team_id` sits
 inside the current triple and `kt_games` holds exactly one, so a second team's operative
 fails the insert rather than slipping past a missing check.
+
+**Moving that leg cost `kt_game_operatives` its link to `kt_games`, and no schema check
+saw it.** The composite leg WAS the only foreign key between the two tables, and
+`KTGame.operatives` derived its join condition from it, so the widened leg left SQLAlchemy
+with nothing to join on and `NoForeignKeysError` on first use. `compare_metadata` agreed
+before and after, and the Postgres parity tier passed, because the break sits in the ORM
+mapping rather than the DDL — the default tier is what caught it. The fix is the shape
+`kt_game_equipment` and `kt_game_events` already carry: a simple `game_id` key beside the
+composite one, which also keeps game deletion a one-hop cascade. **DDL parity is not
+behavioural parity**, and R6's check cannot be read as if it were.
+
+**And the widened leg is unenforceable until `side` is NOT NULL, which is measured rather
+than argued.** Under MATCH SIMPLE the whole four-column check is skipped when `side` is
+NULL, so an operative owned by a stranger inserts cleanly — the hazard
+`fk_kt_game_roster`'s comment records, reached for real.
+`tests/test_models_killteam.py::test_a_null_side_skips_the_whole_ownership_leg` asserts
+that gap, and MUST be inverted when step 8 closes it. The column cannot become NOT NULL
+earlier: the service does not write `side` yet, so NOT NULL would refuse every insert
+until K8's code half lands in the same deploy.
 
 `kt_game_events` gains `side` with it (#94), and that is part of the move rather than an
 extra. Shifting `command_points`, `victory_points`, `ploys_used` and `choices` onto the side
@@ -1393,7 +1412,7 @@ one operation against one CP pool, and there are now two.
 
 ### The revision chain
 
-K8 ships as seven Alembic revisions, not one, under the small-and-incremental convention
+K8 ships as eight Alembic revisions, not one, under the small-and-incremental convention
 in `ARCHITECTURE.md` §4. This table is the ONLY place the count lives. A revision names
 its own step and points here, so adding a step edits one list rather than every file.
 
@@ -1404,25 +1423,30 @@ its own step and points here, so adding a step edits one list rather than every 
 | 3 | `d3e6a9c7b521` | Adds `side` to three child tables, and the two actor columns to the log | Committed on `kill-team-opponent` |
 | 4 | `e4f7b1d8c635` | Backfills `side = 'player'` on the operatives and equipment that already exist | Committed on `kill-team-opponent` |
 | 5 | `f5a8c2e9d743` | Sets `side` on the historical events that belong to one half (#96) | Committed on `kill-team-opponent` |
-| 6 | — | Widens `kt_game_operatives`' ownership leg, and the equipment unique | Planned |
-| 7 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned |
+| 6 | `a6b9d3f1e825` | Widens the operative ownership leg onto the side, and restores its simple game key | Committed on `kill-team-opponent` |
+| 7 | — | Swaps the equipment unique to name `side` | Planned |
+| 8 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned |
 
-The chain was planned as six. Step 5 was added at step 3, once writing the models showed
-that the event log keeps rows written before `side` existed. Its scope then narrowed at the
-keyboard: the step was meant to inject a `target_id` too, and #96 refuses that, so what
-remains is scope alone and the real repair moved into step 7's code. Seven
+The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was
+added at step 3, once writing the models showed that the event log keeps rows written
+before `side` existed; its scope then narrowed, because the step was meant to inject a
+`target_id` too and #96 refuses that. The eighth step appeared at step 6, when the two
+constraint swaps turned out to sit on two tables, which `ARCHITECTURE.md` section 4
+separates: "a slice that changes four tables is several revisions". Seven
 statements across two revision files had restated that six, either as `K8 n/6` or by
 naming the last step `6/6`, and all seven were wrong the moment step 5 appeared. Count
 them in the diff of the commit that centralised the number here.
 
 Reversibility splits three ways, and only the last one loses data.
 
-- Steps 1 to 5 reverse cleanly. `kt_games` keeps the six moved columns and the opponent
-  pair, so nothing a reverse needs has gone.
-- Step 6 reverses without losing data, but MAY be REFUSED. Narrowing
+- Steps 1 to 6 reverse cleanly. `kt_games` keeps the six moved columns and the opponent
+  pair, so nothing a reverse needs has gone. Step 6's reverse NARROWS its leg, dropping a
+  column from the check rather than adding one, so no row that satisfied the wide leg can
+  fail the narrow one.
+- Step 7 reverses without losing data, but MAY be REFUSED. Narrowing
   `UNIQUE(game_id, side, equipment_id)` back to `UNIQUE(game_id, equipment_id)` fails if
-  both sides took the same equipment, which is a state step 6 is what first permits.
-- Step 7 is lossy by construction, because it drops the columns a reverse would read.
+  both sides took the same equipment, which is a state step 7 is what first permits.
+- Step 8 is lossy by construction, because it drops the columns a reverse would read.
 
 ### What this breaks
 
@@ -1432,8 +1456,8 @@ written, four after `UNIQUE(game_id, side)` was added at `f5c8d11` without it mo
 until writing the model found the parent unique below. Count the bullets rather than
 trusting the number; it has grown every time someone looked at the migration properly:
 
-- `uq_kt_game_owner_team_id` is the provably-unique parent every composite leg into
-  `kt_games` targets. The child leg moves to the side, so the target moves with it — a
+- `uq_kt_game_owner_team_id` was the provably-unique parent every composite leg into
+  `kt_games` targeted. The child leg moves to the side, so the target moves with it — a
   new unique on `kt_game_sides(owner_user_id, game_id, side, kill_team_id)`.
 - **`kt_games` needs a second unique, `(owner_user_id, id)`, and this entry did not say so.**
   The side's OWN leg into the game is `(owner_user_id, game_id)`, and Postgres requires a

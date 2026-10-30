@@ -1002,16 +1002,36 @@ class KTGameOperative(TimestampMixin, table=True):
 
     __tablename__ = "kt_game_operatives"
     __table_args__ = (
-        # Three columns into the game, exactly the roster's shape (#54): a row can only
-        # sit in a game its own owner owns, and `kill_team_id` is shared with the leg
-        # below, so it can only name a datacard of that game's kill team. Together they
-        # make "an operative from someone else's game, or another team's card"
-        # unrepresentable rather than merely checked.
+        # FOUR columns into the SIDE, widened from the three into the game that this
+        # started as (#67). The guarantee is the same in shape and stronger in reach: a
+        # row can only sit in a side of a game its own owner owns, and `kill_team_id` is
+        # shared with the leg below, so it can only name a datacard of THAT SIDE's team.
+        # Three columns could only say "of the GAME's team", which stops being the right
+        # question the moment a game has two. `uq_kt_game_side_owner_team_id` is the
+        # parent it points at, and the referenced order differs from that constraint's
+        # declared order, which Postgres pairs positionally and accepts.
+        #
+        # This is also the table's ONLY path to `kt_games`: there is no simple `game_id`
+        # key beside it. Deleting a game therefore cascades in two hops now -- game to
+        # side through `fk_kt_game_side_game`, side to operative through this one -- where
+        # it used to be one. Verified: the game's operatives still go.
+        #
+        # The CASCADE here is the weakest of the side's three children and is reached last.
+        # `fk_kt_game_event_side` and `fk_kt_game_equipment_side` carry no `ondelete`, so a
+        # side an event or a piece of equipment still names cannot be deleted at all --
+        # which is what #94 means by "deleting would be refused by this key". So this
+        # cascade fires only for a side nothing else references, and #92's replace MUST be
+        # an UPDATE because the delete half would be REFUSED, not because it would cascade.
         ForeignKeyConstraint(
-            ["owner_user_id", "kill_team_id", "game_id"],
-            ["kt_games.owner_user_id", "kt_games.kill_team_id", "kt_games.id"],
+            ["owner_user_id", "kill_team_id", "game_id", "side"],
+            [
+                "kt_game_sides.owner_user_id",
+                "kt_game_sides.kill_team_id",
+                "kt_game_sides.game_id",
+                "kt_game_sides.side",
+            ],
             ondelete="CASCADE",
-            name="fk_kt_game_operative_game",
+            name="fk_kt_game_operative_side",
         ),
         ForeignKeyConstraint(
             ["kill_team_id", "operative_id"],
@@ -1050,7 +1070,15 @@ class KTGameOperative(TimestampMixin, table=True):
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    game_id: UUID = Field(index=True)
+    # A SIMPLE key to the game beside the composite leg to the side, which is the shape
+    # `kt_game_equipment` and `kt_game_events` already use. It was not needed while the
+    # composite leg pointed at `kt_games`: that leg WAS this table's link to the game, and
+    # `KTGame.operatives` derived its join condition from it. Once the leg moved to
+    # `kt_game_sides` the ORM had no foreign key between the two tables and raised
+    # `NoForeignKeysError` on first use -- a break the DDL cannot show, because
+    # `compare_metadata` agreed throughout. It also keeps the one-hop CASCADE on game
+    # deletion rather than leaving it to travel through the side row.
+    game_id: UUID = Field(foreign_key="kt_games.id", ondelete="CASCADE", index=True)
     # The catalog card this is a snapshot OF. It moves on a transform (#19), which is why
     # the snapshot columns below are the authority on what the card says and this is only
     # a pointer back to where it came from.

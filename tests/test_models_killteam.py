@@ -848,14 +848,18 @@ def test_a_game_is_created_from_a_roster_with_its_owner_and_team(session, make_k
 
 
 def test_a_game_operative_cannot_sit_in_another_players_game(
-    session, make_user, make_kt_game, make_kt_operative
+    session, make_user, make_kt_game, make_kt_game_side, make_kt_operative
 ):
-    """The owner leg of `fk_kt_game_operative_game` — #54's pattern, applied to a game.
+    """The owner leg of `fk_kt_game_operative_side` — #54's pattern, applied to a side.
 
-    Every other column is valid: the datacard really belongs to the game's kill team.
-    Only `owner_user_id` names someone else, so the triple has no match on `kt_games`.
+    Every other column is valid: the datacard really belongs to the side's kill team, and
+    the side row exists. Only `owner_user_id` names someone else, so the four columns have
+    no match on `kt_game_sides`.
+
+    The row carries `side` because the leg is skipped without it — see the test below.
     """
     game = make_kt_game()
+    make_kt_game_side(game=game)
     operative = make_kt_operative(kill_team=game.kill_team)
     stranger = make_user(username="gatecrasher", email="gatecrasher@test.invalid")
     session.add(
@@ -864,6 +868,7 @@ def test_a_game_operative_cannot_sit_in_another_players_game(
             operative_id=operative.id,
             kill_team_id=game.kill_team_id,
             owner_user_id=stranger.id,
+            side="player",
             name=operative.name,
             apl=operative.apl,
             move=operative.move,
@@ -875,6 +880,44 @@ def test_a_game_operative_cannot_sit_in_another_players_game(
 
     with pytest.raises(IntegrityError, match="(?i)foreign key"):
         session.commit()
+
+
+def test_a_null_side_skips_the_whole_ownership_leg(
+    session, make_user, make_kt_game, make_kt_game_side, make_kt_operative
+):
+    """A MATCH SIMPLE composite key is skipped ENTIRELY when any of its columns is NULL.
+
+    This is the same row the test above refuses, with `side` left unset. It is ACCEPTED,
+    so an operative belonging to a stranger sits in this game unchallenged. The gap is
+    real rather than theoretical, which is why it is asserted instead of described.
+
+    It is inherent to expand-migrate-contract rather than a defect in the revision that
+    widened the leg. `side` cannot be NOT NULL until the service writes it, and that code
+    lands with K8's last revisions in the same deploy. When it does, this test MUST be
+    inverted to expect an `IntegrityError` — the hazard `fk_kt_game_roster`'s own comment
+    records, caught here in the one place it can be measured.
+    """
+    game = make_kt_game()
+    make_kt_game_side(game=game)
+    operative = make_kt_operative(kill_team=game.kill_team)
+    stranger = make_user(username="ghost", email="ghost@test.invalid")
+    row = KTGameOperative(
+        game_id=game.id,
+        operative_id=operative.id,
+        kill_team_id=game.kill_team_id,
+        owner_user_id=stranger.id,
+        name=operative.name,
+        apl=operative.apl,
+        move=operative.move,
+        save=operative.save,
+        wounds=operative.wounds,
+        current_wounds=operative.wounds,
+    )
+    session.add(row)
+    session.commit()
+
+    assert row.side is None
+    assert session.get(KTGameOperative, row.id) is not None
 
 
 def test_a_game_operative_cannot_name_another_teams_datacard(

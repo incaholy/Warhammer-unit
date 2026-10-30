@@ -30,6 +30,7 @@ from app.core.db.models_killteam import (
     KTGameEquipment,
     KTGameEvent,
     KTGameOperative,
+    KTGameSide,
     KTOperative,
     KTPloy,
     KTRoster,
@@ -482,6 +483,35 @@ def make_kt_game(session, make_kt_roster):
         session.commit()
         session.refresh(game)
         return game
+
+    return _make
+
+
+@pytest.fixture
+def make_kt_game_side(session, make_kt_game):
+    """One side of a game. Pass `side="opponent"` for the other half.
+
+    `owner_user_id` is the GAME's owner on both sides, not the occupant: the side's
+    four-column leg targets `kt_games(owner_user_id, id)`, so the creator is the only
+    value that row can hold (#74). `kill_team_id` defaults to the game's, which is right
+    for the player and is what a child row's four-column leg needs to match. Pass
+    `kill_team_id=None` for the team-less opponent #77 backfills.
+    """
+
+    def _make(game=None, side="player", **overrides):
+        game = game or make_kt_game()
+        data = dict(kill_team_id=game.kill_team_id, occupant_user_id=game.owner_user_id)
+        data.update(overrides)
+        row = KTGameSide(
+            game_id=game.id,
+            owner_user_id=game.owner_user_id,
+            side=side,
+            **data,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
 
     return _make
 
