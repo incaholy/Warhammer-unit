@@ -112,7 +112,16 @@ class KTGameService:
     # than restated, the way `KTRosterService` does it, so a column that becomes
     # nullable cannot leave a stale name behind. `initiative` is deliberately absent
     # from the game's set: it IS nullable, because null means "not rolled yet" (#62).
-    _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE)
+    # Derived from BOTH tables, because `_UPDATABLE`'s fields no longer live on one.
+    # `not_nullable_fields` SKIPS a name that is not a column on the model it is given,
+    # so deriving from `KTGame` alone would quietly stop covering the four that moved
+    # the moment the last revision drops them -- and a PATCH sending null would reach
+    # the database's NOT NULL as a 500 instead of being refused as a 400. The union is
+    # correct while both tables carry them too: a field NOT NULL on either is one this
+    # service must refuse a null for.
+    _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE) | not_nullable_fields(
+        KTGameSide, _UPDATABLE
+    )
     _OPERATIVE_NOT_NULLABLE = not_nullable_fields(KTGameOperative, _OPERATIVE_UPDATABLE)
 
     _STATUSES = {"setup", "in_progress", "finished"}
@@ -234,7 +243,12 @@ class KTGameService:
         statement = (
             select(KTGame)
             .where(KTGame.owner_user_id == user_id)
-            .options(selectinload(KTGame.kill_team))  # type: ignore[arg-type]
+            .options(
+                selectinload(KTGame.kill_team),  # type: ignore[arg-type]
+                # Eager, because `_listed` reads the player side's `victory_points`: one
+                # query for the page rather than one per game.
+                selectinload(KTGame.sides),  # type: ignore[arg-type]
+            )
             .order_by(KTGame.created_at.desc(), KTGame.id)  # type: ignore[attr-defined]
             .offset(offset)
             .limit(limit)
@@ -252,7 +266,7 @@ class KTGameService:
             raise KTGameValidationError("fields", f"cannot update {sorted(unknown)}")
         self._validate_game_fields(game, fields)
 
-        touched = self._apply(game, fields)
+        touched = self._apply_routed(game, fields)
         self._write(game, "game_updated", touched)
         return game
 
@@ -439,18 +453,24 @@ class KTGameService:
         if ploy is None:
             raise KTGameValidationError("name", f"{name!r} is not one of this game's ploys")
 
+        # The SIDE's pool. #65's argument is that spending a ploy is one operation against
+        # ONE CP pool, and after #67 there are two -- so the question "has the CP" has to
+        # name whose. The message still says "the game has", which is what a one-sided
+        # battle means to a player; it becomes the side's name when the opponent can spend.
         cost = ploy.get("cp_cost") or 0
-        if cost > game.command_points:
+        if cost > side.command_points:
             raise KTGameValidationError(
                 "command_points",
-                f"{name!r} costs {cost} CP and the game has {game.command_points}",
+                f"{name!r} costs {cost} CP and the game has {side.command_points}",
             )
 
-        touched = self._apply(
+        # Routed rather than applied to the game, so the two fields land on the side and
+        # `undo` takes them off the same row -- `_undo_fields` uses the same `_owner_of`.
+        touched = self._apply_routed(
             game,
             {
-                "command_points": game.command_points - cost,
-                "ploys_used": [*game.ploys_used, {"name": name, "turning_point": game.turning_point}],
+                "command_points": side.command_points - cost,
+                "ploys_used": [*side.ploys_used, {"name": name, "turning_point": game.turning_point}],
             },
         )
         self._write(game, "ploy_used", touched)
@@ -895,6 +915,48 @@ class KTGameService:
         self.session.flush()
         return event
 
+    def _owner_of(self, game: KTGame, field: str):
+        """The ROW that holds a field, which is a different question from its scope.
+
+        `_scope_of` answers which side an event is ABOUT; this answers which row the
+        column is ON. They differ during the move: a write to `opponent_victory_points` is
+        about the opponent, and still lands on `kt_games` because that column has not
+        moved yet. Conflating them would send a write to a row that has no such column.
+
+        `OPPONENT_FIELDS` are deliberately absent. They move onto the opponent side when
+        #92's `PUT` exists to create one -- until then there is often no row to write to,
+        and #74 makes that the ordinary state rather than an error.
+        """
+        if field in PLAYER_FIELDS:
+            return self.player_side(game)
+        return game
+
+    def _apply_routed(self, game: KTGame, changes: dict[str, Any]) -> dict[str, Any]:
+        """Apply each field to the row that owns it, and return ONE merged payload (#96).
+
+        The payload stays flat and keyed by field name, exactly as a single-row write
+        produced, so the log's shape is unchanged by the move and an event written before
+        K8 reads the same as one written after.
+
+        This is the forward half of #96's per-field routing; `_undo_fields` is the reverse
+        half and uses the same `_owner_of`, because a field restored to a different row
+        from the one it was taken off is the defect that made #96 necessary.
+        """
+        by_owner: list[tuple[Any, dict[str, Any]]] = []
+        for field, after in changes.items():
+            owner = self._owner_of(game, field)
+            for row, subset in by_owner:
+                if row is owner:
+                    subset[field] = after
+                    break
+            else:
+                by_owner.append((owner, {field: after}))
+
+        touched: dict[str, Any] = {}
+        for row, subset in by_owner:
+            touched.update(self._apply(row, subset))
+        return touched
+
     def _scope_of(self, game_id: UUID, touched: dict[str, Any]) -> str | None:
         """Which side a game-level write belongs to, or None for the game itself (#94).
 
@@ -989,12 +1051,35 @@ class KTGameService:
         return self.session.exec(statement).first()
 
     def _undo_fields(self, game: KTGame, event: KTGameEvent) -> None:
+        """Put each field's `before` value back on the row that HOLDS it (#96).
+
+        One target per event was the old shape and cannot survive #67. `_UPDATABLE`'s
+        fields land in more than one place now, so a single `PATCH` setting `status` and
+        `command_points` produced ONE event spanning two rows -- and `setattr` for a
+        column the target does not have raises a bare `ValueError`, which is not a
+        `CodedError`, so `app/main.py` has no handler and the player gets an unexplained
+        500. #96 records why a migration could not fix this: the data is not broken, the
+        reader was too narrow.
+
+        An event aimed at a ROW still resolves that row, and `_owner_of` is not consulted
+        for it -- an operative's `current_wounds` belongs to the operative, not to a side.
+        The routing applies to the game-level write, which is the only kind whose fields
+        were split.
+        """
         target = self._event_target(game, event)
+        # A LIST with an identity check, not a set: a SQLModel row is not hashable, so
+        # `set()` raised `TypeError: unhashable type` for every undo that reached here.
+        touched_rows: list[Any] = []
         for field, change in event.payload.items():
             if field in {"op", "target_id", "row"} or not isinstance(change, dict):
                 continue
-            setattr(target, field, change["before"])
-        self.session.add(target)
+            row = self._owner_of(game, field) if target is game else target
+            setattr(row, field, change["before"])
+            if not any(seen is row for seen in touched_rows):
+                touched_rows.append(row)
+        # `target` when nothing was touched, so an event carrying no field changes still
+        # marks its row -- the shape the single-target version had.
+        self.session.add_all(touched_rows or [target])
 
     def _undo_created(self, event: KTGameEvent) -> None:
         target_id = UUID(event.payload["target_id"])

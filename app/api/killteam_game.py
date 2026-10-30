@@ -300,7 +300,7 @@ class KTGamePloy_Use(WriteSchema):
     name: Name
 
 
-def _listed(game: KTGame) -> KTGame_ListRead:
+def _listed(game: KTGame, player: KTGameSide) -> KTGame_ListRead:
     return KTGame_ListRead(
         id=game.id,
         created_at=game.created_at,
@@ -311,7 +311,7 @@ def _listed(game: KTGame) -> KTGame_ListRead:
         kill_team_id=game.kill_team_id,
         kill_team_name=game.kill_team.name,
         faction_name=game.kill_team.faction.name,
-        victory_points=game.victory_points,
+        victory_points=player.victory_points,
         opponent_victory_points=game.opponent_victory_points,
     )
 
@@ -344,12 +344,15 @@ def _detail(game: KTGame, player: KTGameSide) -> KTGame_Read:
         turning_point=game.turning_point,
         phase=game.phase,
         initiative=game.initiative,
-        command_points=game.command_points,
-        victory_points=game.victory_points,
+        # The SIDE's four. `markers` stays the GAME's -- #67 keeps it shared, because a
+        # marker is on the board rather than in a team's hands -- and the opponent's score
+        # stays on the game until there is an opponent row to hold it.
+        command_points=player.command_points,
+        victory_points=player.victory_points,
         opponent_victory_points=game.opponent_victory_points,
         markers=game.markers,
-        ploys_used=game.ploys_used,
-        choices=game.choices,
+        ploys_used=player.ploys_used,
+        choices=player.choices,
         version=game.version,
         operatives=[
             KTGameOperative_Read.model_validate(row, from_attributes=True) for row in game.operatives
@@ -391,7 +394,11 @@ def list_games(
 ) -> Page[KTGame_ListRead]:
     """The caller's games, newest first. Only ever the caller's."""
     games = service.list_games(current_user.id, limit=page.limit, offset=page.offset)
-    return paginate([_listed(game) for game in games], service.count_games(current_user.id), page)
+    return paginate(
+        [_listed(game, service.player_side(game)) for game in games],
+        service.count_games(current_user.id),
+        page,
+    )
 
 
 @router.get("/{game_id}", response_model=KTGame_Read)

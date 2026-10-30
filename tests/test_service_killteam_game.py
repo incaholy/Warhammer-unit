@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import select
 
+from app.core.db.columns import not_nullable_fields
 from app.core.db.models_killteam import (
     KTGame,
     KTGameEquipment,
@@ -385,8 +386,8 @@ def test_the_sides_snapshot_is_what_a_ploy_is_checked_against(session, battle):
     svc.use_ploy(game.id, "Side Only")
     # `ploys_used` and `command_points` are still written to the GAME; they move onto the
     # side with the next change. What this asserts is which snapshot was CONSULTED.
-    assert [entry["name"] for entry in game.ploys_used] == ["Side Only"]
-    assert game.command_points == 4
+    assert [entry["name"] for entry in _player(session, game).ploys_used] == ["Side Only"]
+    assert _player(session, game).command_points == 4
 
     with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
         svc.use_ploy(game.id, "Game Only")
@@ -430,6 +431,62 @@ def test_a_game_with_no_player_side_is_a_broken_invariant_not_a_404(session, bat
 
     with pytest.raises(LookupError, match="no player side"):
         svc.player_side(svc.get_game(game_id))
+
+
+def test_one_patch_spanning_two_rows_lands_on_both_and_undoes_from_both(session, battle):
+    """Decision #96, which is the whole reason the routing exists.
+
+    `_UPDATABLE`'s fields no longer live on one row. One `PATCH` setting `status` and
+    `command_points` is ONE event spanning the game and its player side, and the old
+    shape -- resolve one target, `setattr` every field onto it -- would call `setattr` for
+    a column the target does not have. That raises a bare `ValueError`, which is not a
+    `CodedError`, so the player gets an unexplained 500.
+
+    The event payload stays FLAT and keyed by field name, exactly as a single-row write
+    produced, so the log reads the same before and after the move.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    svc.update_game(game.id, None, status="in_progress", command_points=6)
+
+    assert game.status == "in_progress", "the game's own field stayed on the game"
+    assert svc.player_side(game).command_points == 6, "the moved field went to the side"
+
+    entry = session.exec(
+        select(KTGameEvent).where(KTGameEvent.game_id == game.id).order_by(KTGameEvent.sequence.desc())
+    ).first()
+    assert set(entry.payload) == {"op", "status", "command_points"}
+
+    svc.undo(game.id)
+    assert game.status == "setup", "the game's field came back to the game"
+    assert svc.player_side(game).command_points == 0, "the side's field came back to the side"
+
+
+def test_the_moved_fields_not_null_rule_survives_losing_the_game_columns(session, battle):
+    """`_NOT_NULLABLE` is derived from BOTH tables, and this asserts the half that lasts.
+
+    `not_nullable_fields` SKIPS a name that is not a column on the model it is given. The
+    four moved fields are still columns on `KTGame` today, so a derivation from the game
+    alone covers them and the union looks redundant -- reverting it passes every other
+    test in this suite. It stops being redundant at the last revision, when those columns
+    go and the game half starts returning three names instead of seven.
+
+    So this asserts the SIDE half directly, which is the half that survives the drop: a
+    null in any of the four is refused by this service rather than reaching the database's
+    NOT NULL as an unexplained 500.
+    """
+    moved = {"command_points", "victory_points", "ploys_used", "choices"}
+    assert moved <= not_nullable_fields(KTGameSide, KTGameService._UPDATABLE)
+    assert moved <= KTGameService._NOT_NULLABLE
+
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    for field in sorted(moved):
+        with pytest.raises(KTGameValidationError):
+            svc.update_game(game.id, None, **{field: None})
 
 
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
@@ -481,6 +538,17 @@ def test_creating_a_game_needs_a_user_and_a_roster_that_exist(session, battle):
         svc.create_game(uuid.uuid4(), b["roster"].id)
     with pytest.raises(NotFoundError, match="roster"):
         svc.create_game(b["user"].id, uuid.uuid4())
+
+
+def _player(session, game):
+    """The game's player side, which is where the four mutable numbers live after #67.
+
+    Tests read through this rather than off the game, because `kt_games` keeps those
+    columns until the last revision and they go STALE from the moment the writes move. An
+    assertion against the game would pass today, for the wrong reason, and start failing
+    at the drop.
+    """
+    return KTGameService(session).player_side(game)
 
 
 def _touch_whole_game(game):
@@ -655,7 +723,7 @@ def test_a_stale_version_is_a_conflict_rather_than_an_overwrite(session, battle)
 
     with pytest.raises(ConflictError, match="version"):
         svc.update_game(game.id, stale, command_points=99)
-    assert game.command_points == 1, "the second write was answered, not applied"
+    assert _player(session, game).command_points == 1, "the second write was answered, not applied"
 
 
 def test_every_mutation_moves_the_version(session, battle):
@@ -747,7 +815,7 @@ def test_victory_points_must_be_counts_even_though_the_sources_are_not_ours(sess
     game = svc.create_game(b["user"].id, b["roster"].id)
 
     svc.update_game(game.id, victory_points={"crit_op": 4, "tac_op_1": 2})
-    assert game.victory_points == {"crit_op": 4, "tac_op_1": 2}
+    assert _player(session, game).victory_points == {"crit_op": 4, "tac_op_1": 2}
 
     for bad in ({"crit_op": -1}, {"crit_op": "lots"}, {"crit_op": True}, []):
         with pytest.raises(KTGameValidationError, match="victory_points"):
@@ -1019,7 +1087,7 @@ def test_undo_walks_back_rather_than_toggling(session, battle):
     svc.undo(game.id)
     svc.undo(game.id)
 
-    assert game.command_points == 0
+    assert _player(session, game).command_points == 0
     log = session.exec(select(KTGameEvent).order_by(KTGameEvent.sequence)).all()
     assert [e.type for e in log] == ["game_updated", "game_updated", "undone", "undone"]
     assert [e.undone_by is not None for e in log] == [True, True, False, False]
@@ -1259,8 +1327,9 @@ def test_using_a_ploy_records_it_and_pays_for_it(session, battle):
 
     svc.use_ploy(game.id, ploy["name"])
 
-    assert game.ploys_used == [{"name": ploy["name"], "turning_point": 1}]
-    assert game.command_points == 3 - ploy["cp_cost"]
+    side = _player(session, game)
+    assert side.ploys_used == [{"name": ploy["name"], "turning_point": 1}]
+    assert side.command_points == 3 - ploy["cp_cost"]
 
 
 def test_undoing_a_ploy_restores_the_cp_and_the_entry_together(session, battle):
@@ -1279,8 +1348,9 @@ def test_undoing_a_ploy_restores_the_cp_and_the_entry_together(session, battle):
 
     svc.undo(game.id)
 
-    assert game.ploys_used == []
-    assert game.command_points == 4
+    side = _player(session, game)
+    assert side.ploys_used == []
+    assert side.command_points == 4
 
 
 def test_a_ploy_this_game_does_not_have_is_refused(session, battle):
@@ -1316,8 +1386,9 @@ def test_the_same_ploy_twice_is_accepted_because_that_is_a_rule(session, battle)
     svc.use_ploy(game.id, ploy["name"])
     svc.use_ploy(game.id, ploy["name"])
 
-    assert len(game.ploys_used) == 2
-    assert game.command_points == 5 - 2 * ploy["cp_cost"]
+    side = _player(session, game)
+    assert len(side.ploys_used) == 2
+    assert side.command_points == 5 - 2 * ploy["cp_cost"]
 
 
 def test_a_universal_ploy_can_be_spent_like_the_teams_own(session, battle):
@@ -1331,7 +1402,7 @@ def test_a_universal_ploy_can_be_spent_like_the_teams_own(session, battle):
 
     svc.use_ploy(game.id, universal["name"])
 
-    assert game.ploys_used[0]["name"] == universal["name"]
+    assert _player(session, game).ploys_used[0]["name"] == universal["name"]
 
 
 def test_setting_ploys_used_directly_is_checked_against_the_snapshot(session, battle):
@@ -1350,7 +1421,7 @@ def test_setting_ploys_used_directly_is_checked_against_the_snapshot(session, ba
         svc.update_game(game.id, ploys_used=[{"name": "Teleportarium", "turning_point": 1}])
 
     svc.update_game(game.id, ploys_used=[{"name": real, "turning_point": 1}])
-    assert game.ploys_used == [{"name": real, "turning_point": 1}]
+    assert _player(session, game).ploys_used == [{"name": real, "turning_point": 1}]
 
 
 # --- withdrawn rows and a battle (#55, K7) ----------------------------------
