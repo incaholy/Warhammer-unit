@@ -215,6 +215,22 @@ class KTGame_ListRead(SQLModel):
     opponent_victory_points: int
 
 
+class KTGameSide_Put(WriteSchema):
+    """Describe one side of a battle (#92): name it, and give it a team if it has none.
+
+    `display_name` is the only field a body must carry, which is what lets this one
+    operation serve both halves. Naming your OWN side is `{display_name}` alone -- #76
+    fixes the creator's team at creation, so there is no value to echo back from the read.
+
+    `kill_team_id` is settable once. A side with no team takes the one given; naming a
+    different team on a side that already has one is a 409 rather than a rewrite, because
+    that side's operatives and equipment are keyed to it through the four-column leg.
+    """
+
+    display_name: Name
+    kill_team_id: UUID | None = None
+
+
 class KTGame_Read(SQLModel):
     """A battle whole — everything the screen needs, and no catalog call (#24)."""
 
@@ -418,6 +434,33 @@ def update_game(
     """CP, VP, markers, the ploys spent. 409 if `version` is behind (#9)."""
     fields = payload.model_dump(exclude_unset=True)
     service.update_game(game.id, fields.pop("version", None), **fields)
+    return _read(service, game.id)
+
+
+@router.put("/{game_id}/sides/{side}", response_model=KTGame_Read)
+def establish_side(
+    side: str,
+    payload: KTGameSide_Put,
+    game: KTGame = Depends(get_owned_game),
+    service: KTGameService = Depends(get_game_service),
+) -> KTGame_Read:
+    """Name a side, and give it a team if it has none (#92).
+
+    `PUT` rather than `POST` because the side is addressed by `{side}`, so the request is
+    create-or-replace rather than append. Replace is an UPDATE: #94 points events at this
+    row, so deleting it would be refused and cascading would destroy log rows.
+
+    Owner-only, which `get_owned_game` already gives. #92 splits this from
+    `PATCH .../sides/{side}` on authorization: describing a side is the HOST's act, where
+    updating a score is either occupant's once K9 lands.
+    """
+    fields = payload.model_dump(exclude_unset=True)
+    service.establish_side(
+        game.id,
+        side,
+        display_name=fields["display_name"],
+        kill_team_id=fields.get("kill_team_id"),
+    )
     return _read(service, game.id)
 
 

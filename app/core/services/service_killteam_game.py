@@ -57,6 +57,11 @@ EQUIPMENT_LIMIT = 4
 LAST_TURNING_POINT = 4
 PHASES = ("strategy", "firefight")
 
+#: The two sides of a battle (#68). ONE set serves both this and `initiative`, because
+#: #68's whole point is that `initiative` names a side row rather than carrying a loose
+#: label -- two sets with the same contents is the shape that agrees until one is edited.
+SIDES = frozenset({"player", "opponent"})
+
 #: Which SIDE each of `_UPDATABLE`'s fields belongs to after #67. One map, because two
 #: callers need the same answer: `_write` scopes a `game_updated` event with it, and
 #: #96's per-field undo routing will send each field to its own row with it. Keeping them
@@ -119,13 +124,11 @@ class KTGameService:
     # the database's NOT NULL as a 500 instead of being refused as a 400. The union is
     # correct while both tables carry them too: a field NOT NULL on either is one this
     # service must refuse a null for.
-    _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE) | not_nullable_fields(
-        KTGameSide, _UPDATABLE
-    )
+    _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE) | not_nullable_fields(KTGameSide, _UPDATABLE)
     _OPERATIVE_NOT_NULLABLE = not_nullable_fields(KTGameOperative, _OPERATIVE_UPDATABLE)
 
     _STATUSES = {"setup", "in_progress", "finished"}
-    _INITIATIVE = {"player", "opponent"}
+    _INITIATIVE = SIDES  # #68: initiative names a side, so it is the same vocabulary
     _OPERATIVE_STATUSES = {"reserve", "on_board", "incapacitated"}
     _ORDERS = {"engage", "conceal"}
     _SOURCES = {"roster", "equipment", "rule"}
@@ -277,6 +280,77 @@ class KTGameService:
         self.session.flush()
 
     # ---------------------------- operatives -----------------------------
+
+    def establish_side(
+        self,
+        game_id: UUID,
+        side: str,
+        *,
+        display_name: str,
+        kill_team_id: UUID | None = None,
+    ) -> KTGame:
+        """Describe one side of a battle: give it a name, and a team if it has none (#92).
+
+        The operation K8 was missing. #67's reason to exist is "an opponent with no account
+        whose side is filled in by hand", and the slice as specified moved `opponent_name`
+        off the game while naming no operation that writes it -- so the hand-filled
+        opponent was deleted with no replacement. This is the replacement, and it is also
+        what sets the PLAYER row's `display_name`, which #77 leaves NULL at creation.
+
+        A team is settable ONCE. A side with none takes the one given; a `PUT` naming a
+        DIFFERENT team on a side that already has one is a conflict rather than a rewrite.
+        #76 fixes the creator's team at creation, and an established opponent's team is
+        what their operatives and equipment are keyed to through the four-column leg -- so
+        changing it would be refused by the database anyway, once that side holds a row.
+        Refusing it here means the answer is a 409 naming the field rather than whatever
+        the constraint happens to raise.
+
+        Omitting `kill_team_id` is therefore the ordinary way to RENAME a side, including
+        your own, with no value to echo back from the read.
+
+        Replace is an UPDATE, never a delete-and-insert (#92): #94 points events at this
+        row, so deleting it would be refused and cascading the delete would destroy log
+        rows #8 and #58 forbid losing.
+        """
+        game = self._require_game(game_id)
+        if side not in SIDES:
+            raise KTGameValidationError("side", f"must be one of {sorted(SIDES)}")
+
+        if kill_team_id is not None:
+            team = self.session.get(KillTeam, kill_team_id)
+            if team is None:
+                raise NotFoundError(f"kill team {kill_team_id} not found")
+            # The FIFTH write path to need this. A withdrawn team is still resolvable for
+            # the games and rosters that already name it -- that is the point of flagging
+            # rather than deleting -- but it cannot be NEWLY taken up (#55).
+            if team.withdrawn:
+                raise NotFoundError(f"kill team {kill_team_id} is no longer in the catalog")
+
+        row = self._side_row(game_id, side)
+        if row is None:
+            # `occupant_user_id` and `roster_id` stay NULL: no account holds a
+            # hand-described side (#74), and the opponent's roster is provenance that only
+            # a join can supply (#69, #86).
+            row = KTGameSide(game_id=game.id, owner_user_id=game.owner_user_id, side=side)
+            self.session.add(row)
+            self.session.flush()
+        elif kill_team_id is not None and row.kill_team_id not in (None, kill_team_id):
+            raise ConflictError(
+                f"side {side!r} already fields kill team {row.kill_team_id}",
+                field="kill_team_id",
+            )
+
+        changes: dict[str, Any] = {"display_name": display_name}
+        if kill_team_id is not None:
+            changes["kill_team_id"] = kill_team_id
+
+        # `op="fields"`, not `"created"`, even on the first write. Undoing an
+        # establishment restores both columns to what they were -- NULL, which is #77's
+        # own backfilled shape -- and LEAVES the row, because `_undo_created` deletes its
+        # target and deleting this row is what #92 refuses.
+        touched = self._apply(row, changes)
+        self._write(game, "side_updated", touched, target_id=row.id, side=side)
+        return game
 
     def add_operative(self, game_id: UUID, operative_id: UUID, source: str) -> KTGameOperative:
         """Field a datacard the battle produced — not one the roster brought.

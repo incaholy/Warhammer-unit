@@ -37,6 +37,54 @@ def _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative, n=3
 # --- the write surface, and the catalog's lack of one ------------------------
 
 
+def test_putting_a_side_names_an_opponent_who_holds_no_account(
+    session, auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Decision #92 end to end: the capability #67 cites as its reason to exist.
+
+    Two calls rather than one, which #98 records as the cost of keeping this `PUT` the
+    only writer of an opponent's name: creation names the creator's half, and the opponent
+    is described here.
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    theirs = make_kill_team(faction=make_kt_faction(name="Leagues"), name="Hearthkyn")
+    created = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
+
+    r = auth_client.put(
+        f"/api/v1/me/kill-team/games/{created['id']}/sides/opponent",
+        json={"display_name": "Dave", "kill_team_id": str(theirs.id)},
+    )
+    assert r.status_code == 200, r.text
+
+    game = session.get(KTGame, uuid.UUID(created["id"]))
+    opponent = next(row for row in game.sides if row.side == "opponent")
+    assert (opponent.display_name, opponent.kill_team_id) == ("Dave", theirs.id)
+
+    # The log says who, and which half.
+    entry = r.json()["events"][-1]
+    assert entry["type"] == "side_updated"
+    assert entry["side"] == "opponent"
+    assert entry["actor_display_name"] == auth_client.user.username
+
+
+def test_putting_a_side_without_a_team_renames_it(
+    auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """`kill_team_id` MAY be omitted, which is how a side is renamed (#92).
+
+    Naming your own half needs no team: #76 fixes the creator's at creation, so there is
+    nothing to echo back. A body with neither field is refused by `display_name` alone
+    being mandatory.
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    created = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
+    base = f"/api/v1/me/kill-team/games/{created['id']}/sides"
+
+    assert auth_client.put(f"{base}/player", json={"display_name": "My Ravagers"}).status_code == 200
+    assert auth_client.put(f"{base}/player", json={}).status_code == 422
+    assert auth_client.put(f"{base}/player", json={"display_name": "x", "nope": 1}).status_code == 422
+
+
 def test_the_detail_publishes_the_sides_snapshots_not_the_games(
     session, auth_client, make_kill_team, make_kt_faction, make_kt_operative
 ):
@@ -120,13 +168,14 @@ def test_adding_games_did_not_give_the_catalog_a_write_route():
 def test_every_game_route_needs_a_token(client):
     paths = [p for p in app.openapi()["paths"] if "/me/kill-team/games" in p]
     operations = sum(len(app.openapi()["paths"][p]) for p in paths)
-    assert (len(paths), operations) == (11, 15), f"{len(paths)} paths, {operations} operations"
+    assert (len(paths), operations) == (12, 16), f"{len(paths)} paths, {operations} operations"
 
     assert client.get(BASE).status_code == 401
     assert client.post(BASE, json={"roster_id": str(uuid.uuid4())}).status_code == 401
     assert client.get(f"{BASE}/{uuid.uuid4()}").status_code == 401
     assert client.post(f"{BASE}/{uuid.uuid4()}/advance").status_code == 401
     assert client.post(f"{BASE}/{uuid.uuid4()}/undo").status_code == 401
+    assert client.put(f"{BASE}/{uuid.uuid4()}/sides/opponent", json={"display_name": "x"}).status_code == 401
 
 
 # --- creating and reading ---------------------------------------------------

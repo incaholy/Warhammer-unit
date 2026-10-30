@@ -547,6 +547,130 @@ def test_undoing_a_side_scoped_event_writes_back_onto_the_side(session, battle):
     assert svc.player_side(game).command_points == 0
 
 
+def test_a_side_can_be_established_by_hand_for_an_opponent_with_no_account(session, battle, make_kill_team):
+    """Decision #92: the operation K8 was missing.
+
+    #67's reason to exist is "an opponent with no account whose side is filled in by
+    hand", and the slice moved `opponent_name` off the game while naming no operation that
+    writes it. `occupant_user_id` and `roster_id` stay NULL -- no account holds a
+    hand-described side (#74), and the opponent's roster is provenance only a join can
+    supply (#69, #86).
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    row = svc._side_row(game.id, "opponent")
+    assert row.display_name == "Dave"
+    assert row.kill_team_id == theirs.id
+    assert row.occupant_user_id is None
+    assert row.roster_id is None
+
+
+def test_naming_your_own_side_needs_no_team(session, battle):
+    """#77 leaves the player row's `display_name` NULL and says this `PUT` sets it.
+
+    Which is why `kill_team_id` may be omitted: #76 fixes the creator's team at creation,
+    so a rename has no value to echo back from the read.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    assert svc.player_side(game).display_name is None
+
+    svc.establish_side(game.id, "player", display_name="My Ravagers")
+
+    row = svc.player_side(game)
+    assert row.display_name == "My Ravagers"
+    assert row.kill_team_id == game.kill_team_id, "the team was not touched"
+
+
+def test_a_sides_team_is_settable_once_and_never_changed(session, battle, make_kill_team):
+    """#76's immutability as a stated refusal rather than a constraint's accident.
+
+    An established side's team is what its operatives and equipment are keyed to through
+    the four-column leg, so changing it would be refused by the database once that side
+    holds a row. Refusing it here means a 409 naming the field instead of whatever the
+    constraint happens to raise -- and it refuses even for a side with no rows yet, which
+    is this game's opponent.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    someone_else = make_kill_team(faction=b["team"].faction, name="Blooded")
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    # The SAME team again is not a change, so it is accepted and renames the side.
+    svc.establish_side(game.id, "opponent", display_name="Dave Again", kill_team_id=theirs.id)
+    assert svc._side_row(game.id, "opponent").display_name == "Dave Again"
+
+    # A DIFFERENT team is refused, and the refusal names the field.
+    with pytest.raises(ConflictError, match="already fields kill team"):
+        svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=someone_else.id)
+    assert svc._side_row(game.id, "opponent").kill_team_id == theirs.id
+
+
+def test_establishing_a_side_is_undone_as_fields_and_leaves_the_row(session, battle, make_kill_team):
+    """#92: replace is an UPDATE, so undo must not delete the row either.
+
+    #94 points events at this row. `_undo_created` deletes its target, so an establishment
+    written as `op: 'created'` would make undo destroy a row the log references. It is
+    written as `op: 'fields'`, so undo restores both columns to NULL -- which is #77's own
+    backfilled shape -- and the row stays.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+    row_id = svc._side_row(game.id, "opponent").id
+
+    entry = session.exec(
+        select(KTGameEvent).where(KTGameEvent.game_id == game.id).order_by(KTGameEvent.sequence.desc())
+    ).first()
+    assert entry.type == "side_updated"
+    assert entry.payload["op"] == "fields"
+    assert entry.side == "opponent"
+    assert entry.payload["target_id"] == str(row_id)
+
+    svc.undo(game.id)
+
+    survivor = session.get(KTGameSide, row_id)
+    assert survivor is not None, "undo must not delete a row the log points at"
+    assert survivor.display_name is None
+    assert survivor.kill_team_id is None
+
+
+def test_an_unknown_side_name_is_refused_by_the_vocabulary(session, battle):
+    """One vocabulary for sides and `initiative` (#68), so this is the same set."""
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="must be one of"):
+        svc.establish_side(game.id, "banana", display_name="x")
+
+
+def test_a_withdrawn_kill_team_cannot_newly_field_a_side(session, battle, make_kill_team):
+    """The FIFTH write path to need this (#55).
+
+    A withdrawn team stays resolvable for the games and rosters that already name it --
+    that is the point of flagging rather than deleting -- but it cannot be newly taken up.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    gone = make_kill_team(faction=b["team"].faction, name="Retired", withdrawn=True)
+
+    with pytest.raises(NotFoundError, match="no longer in the catalog"):
+        svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=gone.id)
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()

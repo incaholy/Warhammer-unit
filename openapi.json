@@ -3253,6 +3253,74 @@
         }
       }
     },
+    "/api/v1/me/kill-team/games/{game_id}/sides/{side}": {
+      "put": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Establish Side",
+        "description": "Name a side, and give it a team if it has none (#92).\n\n`PUT` rather than `POST` because the side is addressed by `{side}`, so the request is\ncreate-or-replace rather than append. Replace is an UPDATE: #94 points events at this\nrow, so deleting it would be refused and cascading would destroy log rows.\n\nOwner-only, which `get_owned_game` already gives. #92 splits this from\n`PATCH .../sides/{side}` on authorization: describing a side is the HOST's act, where\nupdating a score is either occupant's once K9 lands.",
+        "operationId": "establish_side_api_v1_me_kill_team_games__game_id__sides__side__put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "side",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Side"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameSide_Put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/kill-team/games/{game_id}/operatives": {
       "post": {
         "tags": [
@@ -4924,6 +4992,35 @@
           "description"
         ],
         "title": "KTGameRule_Read"
+      },
+      "KTGameSide_Put": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "kill_team_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kill Team Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "display_name"
+        ],
+        "title": "KTGameSide_Put",
+        "description": "Describe one side of a battle (#92): name it, and give it a team if it has none.\n\n`display_name` is the only field a body must carry, which is what lets this one\noperation serve both halves. Naming your OWN side is `{display_name}` alone -- #76\nfixes the creator's team at creation, so there is no value to echo back from the read.\n\n`kill_team_id` is settable once. A side with no team takes the one given; naming a\ndifferent team on a side that already has one is a 409 rather than a rewrite, because\nthat side's operatives and equipment are keyed to it through the four-column leg."
       },
       "KTGameWeapon_Read": {
         "properties": {

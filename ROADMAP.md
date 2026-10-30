@@ -1468,7 +1468,7 @@ side operations.
 | 2 | Every write records its `side`; every event records its actor (#70, #94, #96) | Committed on `kill-team-opponent` |
 | 3 | The six moved columns are read and written on the side (#67) | Committed on `kill-team-opponent` |
 | 4 | `_event_target` resolves a side row (#94) | Committed on `kill-team-opponent` |
-| 5 | `PUT .../sides/{side}` establishes a side (#92) | Planned |
+| 5 | `PUT .../sides/{side}` establishes a side (#92) | Committed on `kill-team-opponent` |
 | 6 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Planned |
 | 7 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Planned |
 | 8 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
