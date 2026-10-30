@@ -1296,7 +1296,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 6 of the
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 7 of the
 eight below are committed there; `main` has none of them, so K8 is not `built`.
 Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
@@ -1424,7 +1424,7 @@ its own step and points here, so adding a step edits one list rather than every 
 | 4 | `e4f7b1d8c635` | Backfills `side = 'player'` on the operatives and equipment that already exist | Committed on `kill-team-opponent` |
 | 5 | `f5a8c2e9d743` | Sets `side` on the historical events that belong to one half (#96) | Committed on `kill-team-opponent` |
 | 6 | `a6b9d3f1e825` | Widens the operative ownership leg onto the side, and restores its simple game key | Committed on `kill-team-opponent` |
-| 7 | — | Swaps the equipment unique to name `side` | Planned |
+| 7 | `b7c1e4a9f336` | Swaps the equipment unique to name `side` | Committed on `kill-team-opponent` |
 | 8 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned |
 
 The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was
@@ -1443,9 +1443,12 @@ Reversibility splits three ways, and only the last one loses data.
   pair, so nothing a reverse needs has gone. Step 6's reverse NARROWS its leg, dropping a
   column from the check rather than adding one, so no row that satisfied the wide leg can
   fail the narrow one.
-- Step 7 reverses without losing data, but MAY be REFUSED. Narrowing
-  `UNIQUE(game_id, side, equipment_id)` back to `UNIQUE(game_id, equipment_id)` fails if
-  both sides took the same equipment, which is a state step 7 is what first permits.
+- Step 7 reverses without losing data, but IS REFUSED once two sides hold the same
+  piece. Narrowing `UNIQUE(game_id, side, equipment_id)` back to
+  `UNIQUE(game_id, equipment_id)` then fails with `could not create unique index`,
+  measured against Postgres 16 rather than argued. Nothing is done about it deliberately:
+  a reverse that deleted one of the two rows would be choosing which side loses its
+  equipment, and a loud failure lets an operator choose instead.
 - Step 8 is lossy by construction, because it drops the columns a reverse would read.
 
 ### What this breaks

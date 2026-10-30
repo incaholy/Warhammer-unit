@@ -1163,7 +1163,20 @@ class KTGameEquipment(TimestampMixin, table=True):
 
     __tablename__ = "kt_game_equipment"
     __table_args__ = (
-        UniqueConstraint("game_id", "equipment_id", name="uq_kt_game_equipment"),
+        # One piece per SIDE per game, widened from one per game (#67). Each side picks
+        # its own equipment, and the universal list belongs to no team (#48), so the two
+        # sides taking the same piece is an ordinary case rather than a duplicate. The
+        # name is kept: it still names this table's uniqueness rule, and a violation
+        # message that reads `uq_kt_game_equipment` is still true.
+        #
+        # It is WEAKER than what it replaces while `side` is nullable. Postgres treats two
+        # NULLs as distinct, so `(game_id, NULL, equipment_id)` twice is accepted and this
+        # constraint refuses nothing until the last revision sets NOT NULL -- the same
+        # property `uq_kt_game_side` relies on deliberately, here working against us.
+        # `KTGameService.add_equipment` is the narrower gate in the meantime: it refuses a
+        # piece already in the GAME, so nothing reaches the widened constraint to exploit
+        # it until that check narrows to the side.
+        UniqueConstraint("game_id", "side", "equipment_id", name="uq_kt_game_equipment"),
         CheckConstraint("position >= 0", name="ck_kt_game_equipment_position"),
         # Two columns into the side, so a piece cannot name a side the game does not
         # have. This table never had an ownership leg -- the docstring above says why,

@@ -998,17 +998,20 @@ def test_a_games_vocabulary_is_closed(session, make_kt_game, field, value, const
         session.commit()
 
 
-def test_the_same_equipment_cannot_be_taken_twice_in_one_game(
-    session, make_kt_game, make_kt_equipment, make_kt_game_equipment
+def test_the_same_equipment_cannot_be_taken_twice_by_one_side(
+    session, make_kt_game, make_kt_game_side, make_kt_equipment, make_kt_game_equipment
 ):
-    # Decision #17's one schema-enforced equipment rule. The ALLOWANCE is not enforced
-    # at all (#57) -- a game may take a fifth piece.
+    # Decision #17's one schema-enforced equipment rule, widened by #67 to name the side.
+    # The ALLOWANCE is not enforced at all (#57) -- a side may take a fifth piece.
     game = make_kt_game()
+    make_kt_game_side(game=game)
     item = make_kt_equipment()
-    make_kt_game_equipment(game=game, equipment=item)
+    make_kt_game_equipment(game=game, equipment=item, side="player")
 
-    make_kt_game_equipment(game=game, equipment=make_kt_equipment(name="Something Else"))
-    session.add(KTGameEquipment(game_id=game.id, equipment_id=item.id, name=item.name, text="x"))
+    make_kt_game_equipment(game=game, equipment=make_kt_equipment(name="Something Else"), side="player")
+    session.add(
+        KTGameEquipment(game_id=game.id, equipment_id=item.id, side="player", name=item.name, text="x")
+    )
 
     # `(?i)unique`, not the constraint name: SQLite names the COLUMNS in a unique
     # violation where Postgres names the constraint, so matching the name would
@@ -1016,6 +1019,52 @@ def test_the_same_equipment_cannot_be_taken_twice_in_one_game(
     # unique violation from a CHECK, a NOT NULL or a foreign key.
     with pytest.raises(IntegrityError, match="(?i)unique"):
         session.commit()
+
+
+def test_both_sides_may_take_the_same_piece_of_equipment(
+    session, make_kt_game, make_kt_game_side, make_kt_equipment, make_kt_game_equipment
+):
+    """The capability the widened unique exists FOR, asserted rather than implied.
+
+    The universal list belongs to no kill team (#48), so two sides reaching for the same
+    piece is an ordinary case. `UNIQUE(game_id, equipment_id)` called it a duplicate,
+    which was right while a game had one side and wrong the moment it had two.
+    """
+    game = make_kt_game()
+    make_kt_game_side(game=game, side="player")
+    make_kt_game_side(game=game, side="opponent")
+    item = make_kt_equipment()
+
+    mine = make_kt_game_equipment(game=game, equipment=item, side="player")
+    theirs = make_kt_game_equipment(game=game, equipment=item, side="opponent")
+
+    assert mine.id != theirs.id
+    assert {mine.side, theirs.side} == {"player", "opponent"}
+    assert mine.equipment_id == theirs.equipment_id
+
+
+def test_a_null_side_voids_the_equipment_unique(
+    session, make_kt_game, make_kt_equipment, make_kt_game_equipment
+):
+    """A unique containing a nullable column refuses NOTHING while that column is NULL.
+
+    Postgres and SQLite both treat two NULLs as distinct, so the same piece twice with no
+    side is ACCEPTED -- the property `uq_kt_game_side` relies on deliberately (#77), here
+    working against us. The constraint is strictly weaker than the
+    `UNIQUE(game_id, equipment_id)` it replaced until the column is NOT NULL.
+
+    `KTGameService.add_equipment` is what keeps this unreachable through the API: it
+    refuses a piece already in the GAME, so nothing gets as far as the constraint. This
+    test asserts the SCHEMA's behaviour, and MUST be inverted when the last revision sets
+    `side` NOT NULL.
+    """
+    game = make_kt_game()
+    item = make_kt_equipment()
+    first = make_kt_game_equipment(game=game, equipment=item)
+    second = make_kt_game_equipment(game=game, equipment=item)
+
+    assert first.side is None and second.side is None
+    assert first.id != second.id
 
 
 def test_a_games_event_sequence_is_unique_so_the_last_event_is_a_fact(
