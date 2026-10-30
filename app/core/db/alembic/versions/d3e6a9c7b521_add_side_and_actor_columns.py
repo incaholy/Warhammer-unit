@@ -4,7 +4,8 @@ Revision ID: d3e6a9c7b521
 Revises: c2d5f8b3a417
 Create Date: 2026-10-29 00:20:00.000000
 
-K8 3/6 (ROADMAP K8, decisions #67, #70, #94).
+K8's third revision (ROADMAP K8, decisions #67, #70, #94; the chain's steps are listed
+under "The revision chain" there, which is the only place their count lives).
 
 Purely additive: five nullable columns and two composite foreign keys. Nothing reads
 them yet and no existing column changes, so the current code runs unaffected.

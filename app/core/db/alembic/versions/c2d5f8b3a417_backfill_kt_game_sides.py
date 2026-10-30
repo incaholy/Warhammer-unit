@@ -4,14 +4,15 @@ Revision ID: c2d5f8b3a417
 Revises: b1c4e7a2f309
 Create Date: 2026-10-29 00:10:00.000000
 
-K8 2/6 (ROADMAP K8, decision #77). Data only -- no DDL, no model change, so
-`compare_metadata` is untouched by this revision.
+K8's second revision (ROADMAP K8, decision #77; the chain's steps are listed under
+"The revision chain" there, which is the only place their count lives). Data only -- no
+DDL, no model change, so `compare_metadata` is untouched by this revision.
 
 Its own reverse is CLEAN, which is worth stating because #77 calls K8's reverse
-"lossy by construction". That is true of 6/6, which drops `opponent_name` and
-`opponent_victory_points`. Here the source columns are all still on `kt_games`, so
+"lossy by construction". That is true of the LAST revision, which drops `opponent_name`
+and `opponent_victory_points`. Here the source columns are all still on `kt_games`, so
 deleting the rows loses nothing. One big migration would have made the whole slice
-irreversible; six isolate the lossiness to the last one.
+irreversible; a chain isolates the lossiness to its last step.
 """
 
 from typing import Sequence, Union
@@ -24,8 +25,12 @@ down_revision: Union[str, Sequence[str], None] = "b1c4e7a2f309"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# One `player` row per game, carrying the six columns 6/6 will drop. `occupant_user_id`
-# is the owner: whoever created a game was playing its player side. `display_name` stays
+# One `player` row per game, carrying the six columns the last revision will drop.
+# `kill_team_id` and `roster_id` are copied rather than moved: #76 keeps `kt_games`'
+# pair as the creator's, so both tables declare them with different meanings.
+#
+# `occupant_user_id` is the owner: whoever created a game was playing its player side.
+# `display_name` stays
 # NULL -- the game never named a side, #92's `PUT` is what sets one, and the team's name
 # is already reachable through `kill_team_id`. `markers` is NOT copied; it stays shared
 # on the game (#67). `created_at`/`updated_at` carry a server default.
@@ -87,7 +92,7 @@ def downgrade() -> None:
     Clean at this point in the chain: `kt_games` still holds the columns these rows were
     built from, so nothing is unrecoverable. It deletes ALL rows rather than only the
     ones this revision inserted, because an insert-for-every-game has no narrower
-    reverse -- and putting side data back onto `kt_games` is 6/6's problem, not this
-    revision's, since 6/6 is what removed the columns to put it in.
+    reverse -- and putting side data back onto `kt_games` is the LAST revision's problem,
+    not this one's, since that is the revision which removed the columns to put it in.
     """
     op.execute("DELETE FROM kt_game_sides")

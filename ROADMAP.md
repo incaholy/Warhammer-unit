@@ -1296,7 +1296,9 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: Not started.** Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94.
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 3 of the
+seven below are committed there; `main` has none of them, so K8 is not `built`.
+Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -1309,9 +1311,21 @@ is filled in at the table. Build that case first and the shared-session slice be
 authorization change on a model that already fits. Build it second and the obvious
 shortcut — key the operatives off `user_id` — makes the common case unrepresentable.
 
-The migration is the slice. `kt_game_sides` arrives carrying what moves off `kt_games`:
-`kill_team_id`, `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`,
-`choices` and a display name. `kt_game_operatives` and `kt_game_equipment` gain `side`,
+The migration is the slice. `kt_game_sides` arrives carrying the six columns that move off
+`kt_games`: `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used` and
+`choices`. The same six are the "Moves to its side (6)" row of the read-model table below.
+
+Two columns that the side ALSO declares do not move. `kill_team_id` and `roster_id` stay
+on `kt_games` by #76, meaning the creator's team and the creator's roster, while the side's
+pair means that side's. They appear on both `KTGame` and `KTGameSide` in
+`models_killteam.py`, so the model alone cannot tell this deliberate pair from a move
+half-finished — only #76 can. An earlier draft of this paragraph listed `kill_team_id`
+among what moves, which contradicted both #76 and the table below.
+
+`display_name` moves nothing either. It arrives new on the side, and takes
+`opponent_name`'s value for the opponents #77 backfills.
+
+`kt_game_operatives` and `kt_game_equipment` gain `side`,
 and the ownership leg widens from three columns to four so it names the SIDE rather than
 the game (#67) — **on `kt_game_operatives`, which is the only one of the two that has such
 a leg.** `kt_game_equipment` reaches its game through a single `game_id` key and never had
@@ -1361,6 +1375,37 @@ and no equipment, so no composite leg exists on them to skip. The invariant is "
 children has a team", not "the column is NOT NULL". And `use_ploy` becomes side-scoped
 (`POST .../sides/{side}/ploys`), because #65's whole argument is that spending a ploy is
 one operation against one CP pool, and there are now two.
+
+### The revision chain
+
+K8 ships as seven Alembic revisions, not one, under the small-and-incremental convention
+in `ARCHITECTURE.md` §4. This table is the ONLY place the count lives. A revision names
+its own step and points here, so adding a step edits one list rather than every file.
+
+| Step | Revision | What it does | State |
+|---|---|---|---|
+| 1 | `b1c4e7a2f309` | Creates `kt_game_sides` and the `kt_games` unique its composite leg targets | Committed on `kill-team-opponent` |
+| 2 | `c2d5f8b3a417` | Backfills one `player` row per game, and an `opponent` row where #77 requires one | Committed on `kill-team-opponent` |
+| 3 | `d3e6a9c7b521` | Adds `side` to three child tables, and the two actor columns to the log | Committed on `kill-team-opponent` |
+| 4 | — | Backfills `side = 'player'` on the operatives and equipment that already exist | Planned |
+| 5 | — | Repairs historical events: sets `side`, and injects `target_id` into the payload | Planned |
+| 6 | — | Widens `kt_game_operatives`' ownership leg, and the equipment unique | Planned |
+| 7 | — | Drops the six moved columns and the opponent pair, and sets `side` NOT NULL | Planned |
+
+The chain was planned as six. Step 5 was added at step 3, once writing the models showed
+that historical event rows carry no `target_id` and so cannot name a side. Seven
+statements across two revision files had restated that six, either as `K8 n/6` or by
+naming the last step `6/6`, and all seven were wrong the moment step 5 appeared. Count
+them in the diff of the commit that centralised the number here.
+
+Reversibility splits three ways, and only the last one loses data.
+
+- Steps 1 to 5 reverse cleanly. `kt_games` keeps the six moved columns and the opponent
+  pair, so nothing a reverse needs has gone.
+- Step 6 reverses without losing data, but MAY be REFUSED. Narrowing
+  `UNIQUE(game_id, side, equipment_id)` back to `UNIQUE(game_id, equipment_id)` fails if
+  both sides took the same equipment, which is a state step 6 is what first permits.
+- Step 7 is lossy by construction, because it drops the columns a reverse would read.
 
 ### What this breaks
 
