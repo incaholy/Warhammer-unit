@@ -750,16 +750,13 @@ class KTGame(TimestampMixin, table=True):
 
     __tablename__ = "kt_games"
     __table_args__ = (
-        # The FK target for `KTGameOperative`'s composite leg, carrying the owner and the
-        # kill team for the same reasons `uq_kt_roster_owner_team_id` does (#54): a game
-        # operative can then only sit in a game its own owner owns, and can only name a
-        # datacard of that game's team.
-        UniqueConstraint("owner_user_id", "kill_team_id", "id", name="uq_kt_game_owner_team_id"),
-        # The parent `KTGameSide`'s own leg points at (#67). It CANNOT reuse the unique
-        # above: a side carries its OWN `kill_team_id`, which for the opponent is a
-        # different team from the game's and may be NULL for a backfilled one (#77), so a
-        # leg through that column would be checking the wrong thing. Same purpose as the
-        # one above and the one on `kt_rosters` -- give a composite key a provably unique
+        # The parent `KTGameSide`'s own leg points at (#67). `uq_kt_game_owner_team_id`
+        # stood here until K8 and could not serve: a side carries its OWN `kill_team_id`,
+        # which for the opponent is a different team from the game's and may be NULL for a
+        # backfilled one (#77), so a leg through that column would be checking the wrong
+        # thing. That unique is gone now -- it existed for `KTGameOperative`'s three-column
+        # leg, which #67 moved onto `kt_game_sides`, leaving it with zero dependents.
+        # Same purpose as the one on `kt_rosters`: give a composite key a provably unique
         # parent -- which is why it looks redundant beside the primary key and is not.
         UniqueConstraint("owner_user_id", "id", name="uq_kt_game_owner_id"),
         # Three columns into the roster, so a game cannot name a roster of another player

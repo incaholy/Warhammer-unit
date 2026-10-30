@@ -98,8 +98,9 @@ def downgrade() -> None:
     """Narrow the leg back to the game.
 
     Clean: `kt_games` still carries `owner_user_id` and `kill_team_id`, and
-    `uq_kt_game_owner_team_id` is still there to be pointed at -- the last revision is
-    what drops that unique, and only because this revision is what stops using it.
+    `uq_kt_game_owner_team_id` is still there to be pointed at -- `c8d2f5b1a749` is what
+    drops that unique, and only because this revision is what stops using it. So reversing
+    this one requires reversing that one first, which Alembic's order already guarantees.
 
     Unlike the equipment unique's reverse, this one cannot be REFUSED by existing data.
     Narrowing drops a column from the check rather than adding one, so every row that

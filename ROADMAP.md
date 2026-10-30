@@ -1296,8 +1296,8 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 7 of the
-eight below are committed there; `main` has none of them, so K8 is not `built`.
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 8 of the
+nine below are committed there; `main` has none of them, so K8 is not `built`.
 Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
@@ -1352,7 +1352,8 @@ than argued.** Under MATCH SIMPLE the whole four-column check is skipped when `s
 NULL, so an operative owned by a stranger inserts cleanly — the hazard
 `fk_kt_game_roster`'s comment records, reached for real.
 `tests/test_models_killteam.py::test_a_null_side_skips_the_whole_ownership_leg` asserts
-that gap, and MUST be inverted when step 8 closes it. The column cannot become NOT NULL
+that gap, and MUST be inverted when step 9 closes it. Its equipment twin is
+`test_a_null_side_voids_the_equipment_unique`. The column cannot become NOT NULL
 earlier: the service does not write `side` yet, so NOT NULL would refuse every insert
 until K8's code half lands in the same deploy.
 
@@ -1412,7 +1413,7 @@ one operation against one CP pool, and there are now two.
 
 ### The revision chain
 
-K8 ships as eight Alembic revisions, not one, under the small-and-incremental convention
+K8 ships as nine Alembic revisions, not one, under the small-and-incremental convention
 in `ARCHITECTURE.md` §4. This table is the ONLY place the count lives. A revision names
 its own step and points here, so adding a step edits one list rather than every file.
 
@@ -1425,7 +1426,8 @@ its own step and points here, so adding a step edits one list rather than every 
 | 5 | `f5a8c2e9d743` | Sets `side` on the historical events that belong to one half (#96) | Committed on `kill-team-opponent` |
 | 6 | `a6b9d3f1e825` | Widens the operative ownership leg onto the side, and restores its simple game key | Committed on `kill-team-opponent` |
 | 7 | `b7c1e4a9f336` | Swaps the equipment unique to name `side` | Committed on `kill-team-opponent` |
-| 8 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned |
+| 8 | `c8d2f5b1a749` | Retires `uq_kt_game_owner_team_id`, which step 6 orphaned | Committed on `kill-team-opponent` |
+| 9 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned, and GATED on K8's code half |
 
 The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was
 added at step 3, once writing the models showed that the event log keeps rows written
@@ -1439,17 +1441,19 @@ them in the diff of the commit that centralised the number here.
 
 Reversibility splits three ways, and only the last one loses data.
 
-- Steps 1 to 6 reverse cleanly. `kt_games` keeps the six moved columns and the opponent
-  pair, so nothing a reverse needs has gone. Step 6's reverse NARROWS its leg, dropping a
-  column from the check rather than adding one, so no row that satisfied the wide leg can
-  fail the narrow one.
+- Steps 1 to 6 and step 8 reverse cleanly. `kt_games` keeps the six moved columns and
+  the opponent pair, so nothing a reverse needs has gone. Step 6's reverse NARROWS its
+  leg, dropping a column from the check rather than adding one, so no row that satisfied
+  the wide leg can fail the narrow one. Step 8's reverse CREATES rather than destroys,
+  which is unique in this chain, and the order holds: reversing 8 restores the unique
+  that reversing 6 then points its narrowed leg at, measured against Postgres 16.
 - Step 7 reverses without losing data, but IS REFUSED once two sides hold the same
   piece. Narrowing `UNIQUE(game_id, side, equipment_id)` back to
   `UNIQUE(game_id, equipment_id)` then fails with `could not create unique index`,
   measured against Postgres 16 rather than argued. Nothing is done about it deliberately:
   a reverse that deleted one of the two rows would be choosing which side loses its
   equipment, and a loud failure lets an operator choose instead.
-- Step 8 is lossy by construction, because it drops the columns a reverse would read.
+- Step 9 is lossy by construction, because it drops the columns a reverse would read.
 
 ### What this breaks
 
