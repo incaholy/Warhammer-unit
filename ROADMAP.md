@@ -1455,6 +1455,29 @@ Reversibility splits three ways, and only the last one loses data.
   equipment, and a loud failure lets an operator choose instead.
 - Step 9 is lossy by construction, because it drops the columns a reverse would read.
 
+### The code half
+
+The revisions reshape the schema; this moves the logic onto it. Recorded here for the
+same reason the chain above is: an order that lives only in a conversation drifts, and
+this one already did -- #98 was numbered after the read reshape and belongs before the
+side operations.
+
+| Piece | What | State |
+|---|---|---|
+| 1 | `create_game` inserts the player side row (#97) | Committed on `kill-team-opponent` |
+| 2 | Every write records its `side`; every event records its actor (#70, #94, #96) | Committed on `kill-team-opponent` |
+| 3 | The six moved columns are read and written on the side (#67) | Committed on `kill-team-opponent` |
+| 4 | `_event_target` resolves a side row (#94) | Committed on `kill-team-opponent` |
+| 5 | `PUT .../sides/{side}` establishes a side (#92) | Planned |
+| 6 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Planned |
+| 7 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Planned |
+| 8 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
+
+Piece 8 is the only breaking contract change, and everything before it is additive on
+purpose: the three nullable fields on `KTGameEvent_Read` are all a client has seen so
+far. Step 9 of the chain lands after piece 8, because a column cannot be dropped before
+the code stops reading it.
+
 ### What this breaks
 
 The earlier version of this entry named two constraints. There are **seven**, and one of
@@ -1545,6 +1568,13 @@ more of the nine — `opponent_name` and `opponent_victory_points` — are REMOV
 moved, which is why this is four and not six. The count is `MVP.md`'s to state; this cites
 it, because the copy that was restated here is the one that rotted. The router's docstring lists four of the nine and is wrong
 today, independently of this slice.
+
+**`POST /me/kill-team/games` narrows the same way (#98).** `KTGame_Create` declares
+`roster_id` and `opponent_name`; the second is dropped, so creation names only the
+creator's half and the opponent is described by `PUT .../sides/opponent`. With
+`opponent_name` also leaving `_UPDATABLE`, that `PUT` becomes its ONLY writer, which is
+what #92 centralised. The field MUST NOT go before the `PUT` exists. No document covered
+creation, and the omission was found by reading the schema rather than in review.
 
 **This is a breaking change to a contract the other repo consumes**, and it lands as a
 lockstep change rather than an `/api/v2`. The client is pre-release on an unmerged
