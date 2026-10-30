@@ -57,6 +57,18 @@ EQUIPMENT_LIMIT = 4
 LAST_TURNING_POINT = 4
 PHASES = ("strategy", "firefight")
 
+#: Which SIDE each of `_UPDATABLE`'s fields belongs to after #67. One map, because two
+#: callers need the same answer: `_write` scopes a `game_updated` event with it, and
+#: #96's per-field undo routing will send each field to its own row with it. Keeping them
+#: apart would be two lists that agree until one is edited.
+#:
+#: The fields named in neither set belong to NO side -- `status`, `initiative` and
+#: `markers` stay on `kt_games` (#76) -- which is why they are absent rather than listed
+#: against the game. A field that is simply forgotten would read the same as one
+#: deliberately game-level, so `_validate_game_fields` is what refuses an unknown name.
+PLAYER_FIELDS = frozenset({"command_points", "victory_points", "ploys_used", "choices"})
+OPPONENT_FIELDS = frozenset({"opponent_name", "opponent_victory_points"})
+
 #: The event type `undo` writes. The walk-back skips these, so undo never reverts its
 #: own work -- there is no redo (#58).
 UNDO_EVENT = "undone"
@@ -290,6 +302,7 @@ class KTGameService:
             {"operative": {"before": None, "after": operative.name}},
             target_id=row.id,
             op="created",
+            side=row.side,
         )
         self.session.refresh(row)
         return row
@@ -322,7 +335,7 @@ class KTGameService:
             changes["current_wounds"] = becomes.wounds
 
         touched = self._apply(row, changes)
-        self._write(game, "operative_transformed", touched, target_id=row.id)
+        self._write(game, "operative_transformed", touched, target_id=row.id, side=row.side)
         return row
 
     def update_operative(
@@ -356,7 +369,7 @@ class KTGameService:
             fields.setdefault("status", "on_board")
 
         touched = self._apply(row, fields)
-        self._write(game, "operative_updated", touched, target_id=row.id)
+        self._write(game, "operative_updated", touched, target_id=row.id, side=row.side)
         return row
 
     def activate_operative(self, game_id: UUID, row_id: UUID) -> KTGameOperative:
@@ -384,7 +397,7 @@ class KTGameService:
             )
 
         touched = self._apply(row, {"activated_in_turning_point": game.turning_point})
-        self._write(game, "operative_activated", touched, target_id=row.id)
+        self._write(game, "operative_activated", touched, target_id=row.id, side=row.side)
         return row
 
     def use_ploy(self, game_id: UUID, name: str) -> KTGame:
@@ -456,6 +469,11 @@ class KTGameService:
         row = KTGameEquipment(
             game_id=game.id,
             equipment_id=item.id,
+            # The creator's half, for the same reason `_new_operative` says: no operation
+            # takes equipment for the opponent yet. `uq_kt_game_equipment` now names
+            # `side`, so this is also what makes the duplicate check below meaningful --
+            # without it every row would collide on NULL being distinct from nothing.
+            side="player",
             name=item.name,
             text=item.description,
             position=self._next_equipment_position(game.id),
@@ -468,6 +486,7 @@ class KTGameService:
             {"equipment": {"before": None, "after": item.name}},
             target_id=row.id,
             op="created",
+            side=row.side,
         )
         self.session.refresh(row)
         return row
@@ -477,7 +496,7 @@ class KTGameService:
         game = self._require_game(game_id)
         row = self._require_equipment(game_id, row_id)
         touched = self._apply(row, {"revealed": True})
-        self._write(game, "equipment_revealed", touched, target_id=row.id)
+        self._write(game, "equipment_revealed", touched, target_id=row.id, side=row.side)
         return row
 
     def remove_equipment(self, game_id: UUID, row_id: UUID) -> None:
@@ -487,6 +506,11 @@ class KTGameService:
         row = self._require_equipment(game_id, row_id)
         snapshot = {
             "equipment_id": str(row.equipment_id),
+            # Carried because `_undo_deleted` rebuilds the row from this and nothing else
+            # remembers it. Without it undo recreated an UNSIDED piece, which voids
+            # `uq_kt_game_equipment` while `side` is nullable and fails outright once the
+            # last revision makes it NOT NULL.
+            "side": row.side,
             "name": row.name,
             "text": row.text,
             "revealed": row.revealed,
@@ -495,7 +519,14 @@ class KTGameService:
         self.session.delete(row)
         self.session.flush()
         self._forget_collections(game)
-        self._write(game, "equipment_removed", {"row": snapshot}, target_id=row_id, op="deleted")
+        self._write(
+            game,
+            "equipment_removed",
+            {"row": snapshot},
+            target_id=row_id,
+            op="deleted",
+            side=snapshot["side"],
+        )
 
     # ------------------------------- flow --------------------------------
 
@@ -753,9 +784,14 @@ class KTGameService:
         return KTGameOperative(
             game_id=game.id,
             operative_id=operative.id,
-            # Both reached by the composite legs, so both must match the game's.
+            # All three reached by the four-column leg into `kt_game_sides`, so all three
+            # must match that side's row. `side` is `'player'` because every operative the
+            # service creates is the creator's: `add_operative` refuses `source='roster'`
+            # and refuses a datacard of another team, and #93's `'opponent'` source is not
+            # built. When it is, this becomes a parameter rather than a constant.
             kill_team_id=game.kill_team_id,
             owner_user_id=game.owner_user_id,
+            side="player",
             position=position,
             source=source,
             added_in_turning_point=added_in_turning_point,
@@ -794,6 +830,7 @@ class KTGameService:
         *,
         target_id: UUID | None = None,
         op: str = "fields",
+        side: str | None = None,
     ) -> KTGameEvent | None:
         """Record what happened and bump the game's version.
 
@@ -824,6 +861,7 @@ class KTGameService:
         event = KTGameEvent(
             game_id=game.id,
             sequence=self._next_sequence(game.id),
+            side=side if side is not None else self._scope_of(game.id, touched),
             type=event_type,
             turning_point=game.turning_point,
             payload=payload,
@@ -832,6 +870,51 @@ class KTGameService:
         self.session.add_all([event, game])
         self.session.flush()
         return event
+
+    def _scope_of(self, game_id: UUID, touched: dict[str, Any]) -> str | None:
+        """Which side a game-level write belongs to, or None for the game itself (#94).
+
+        The same rule the historical backfill applied, so a log written before and after
+        K8 reads one way. A write naming only player fields is the player's; only opponent
+        fields, the opponent's; and a write naming BOTH stays None, because `side` holds
+        one value and #94 already reads None as "about the GAME" -- the honest description
+        of one call that moved both halves.
+
+        The axis is player against OPPONENT, not player against game. `status`,
+        `initiative` and `markers` belong to no side, so they do not compete: a write
+        touching `command_points` and `status` is the player's, because exactly one SIDE
+        appears in it.
+
+        A side this game has no ROW for scopes to None, and that guard is load-bearing
+        rather than defensive. `opponent_name` and `opponent_victory_points` are writable
+        today on a game with no opponent side (#97 creates only the player's), so without
+        it `fk_kt_game_event_side` refuses the event and a shipped operation starts
+        failing. It is also honest: those two are still columns on `kt_games` until the
+        last revision drops them, so until an opponent side exists the write really IS
+        about the game. The same guard sits in the backfill revision, for the same reason.
+
+        Callers that already KNOW the side pass it instead, which is every write aimed at
+        a row -- a row carries its own `side` and needs no inference.
+        """
+        mine = not PLAYER_FIELDS.isdisjoint(touched)
+        theirs = not OPPONENT_FIELDS.isdisjoint(touched)
+        if mine == theirs:
+            return None
+        side = "player" if mine else "opponent"
+        return side if self._side_row(game_id, side) is not None else None
+
+    def _side_row(self, game_id: UUID, side: str) -> KTGameSide | None:
+        """One side of a game, or None where that half has no row yet.
+
+        The opponent's is absent until #92's `PUT` or #86's join creates it, which is the
+        ordinary state rather than an error -- #74 makes `KTGame_Read.opponent` null until
+        then.
+        """
+        statement = select(KTGameSide).where(
+            KTGameSide.game_id == game_id,
+            KTGameSide.side == side,
+        )
+        return self.session.exec(statement).first()
 
     def _forget_collections(self, game: KTGame) -> None:
         """Expire the game's loaded collections after a row was DELETED.
@@ -887,6 +970,11 @@ class KTGameService:
                 id=UUID(event.payload["target_id"]),
                 game_id=game.id,
                 equipment_id=UUID(row["equipment_id"]),
+                # `event.side` is the fallback for an event written before the snapshot
+                # carried one. It is the RIGHT fallback rather than a convenient one: the
+                # backfill scoped every historical `equipment_removed` to `'player'`, which
+                # is the side the removed piece belonged to. Scope earns its keep here.
+                side=row.get("side") or event.side,
                 name=row["name"],
                 text=row["text"],
                 revealed=row["revealed"],

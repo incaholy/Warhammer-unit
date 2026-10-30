@@ -17,7 +17,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import select
 
-from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative, KTGameSide
+from app.core.db.models_killteam import (
+    KTGame,
+    KTGameEquipment,
+    KTGameEvent,
+    KTGameOperative,
+    KTGameSide,
+)
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_killteam_game import (
     EQUIPMENT_LIMIT,
@@ -206,6 +212,116 @@ def test_a_new_games_operative_cannot_name_the_absent_opponent_side(session, bat
     session.add(row)
     with pytest.raises(IntegrityError, match="(?i)foreign key"):
         session.commit()
+
+
+def test_every_child_row_a_game_creates_names_its_side(session, battle):
+    """Decision #67: an operative and a piece of equipment both belong to a SIDE.
+
+    Every row the service creates is the creator's. `add_operative` refuses
+    `source='roster'` and refuses a datacard of another team, and #93's `'opponent'`
+    source is not built, so `'player'` is a statement about what the code can produce
+    rather than a default.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    assert {row.side for row in game.operatives} == {"player"}
+
+    granted = svc.add_operative(game.id, b["cards"][0].id, source="rule")
+    assert granted.side == "player"
+
+    piece = svc.add_equipment(game.id, b["kit"].id)
+    assert piece.side == "player"
+
+
+def _scopes(session, game_id):
+    log = session.exec(
+        select(KTGameEvent).where(KTGameEvent.game_id == game_id).order_by(KTGameEvent.sequence)
+    ).all()
+    return [(row.type, row.side) for row in log]
+
+
+def test_an_event_about_a_row_takes_that_rows_side(session, battle):
+    """A write aimed at a row passes the row's own side rather than inferring one (#94)."""
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    row = game.operatives[0]
+
+    svc.update_operative(game.id, row.id, None, current_wounds=5)
+    svc.activate_operative(game.id, row.id)
+    svc.add_equipment(game.id, b["kit"].id)
+
+    assert _scopes(session, game.id) == [
+        ("operative_updated", "player"),
+        ("operative_activated", "player"),
+        ("equipment_added", "player"),
+    ]
+
+
+def test_a_ploy_is_the_players_and_the_clock_is_the_games(session, battle):
+    """Two derivations, and they must differ.
+
+    `use_ploy` moves `command_points` and `ploys_used`, both the player's after #67, so
+    the event is the player's. `advance` moves `turning_point`, `phase`, `status` and
+    `initiative`, which stay on `kt_games` (#76), so it belongs to no side and NULL says
+    so. Both match what the historical backfill wrote, so one log reads one way.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=5, status="in_progress")
+    svc.use_ploy(game.id, game.ploys[0]["name"])
+    svc.advance(game.id)
+
+    assert _scopes(session, game.id)[-2:] == [("ploy_used", "player"), ("advanced", None)]
+
+
+def test_a_write_naming_the_absent_opponent_scopes_to_the_game(session, battle):
+    """The guard that keeps a SHIPPED operation working.
+
+    `opponent_victory_points` is writable today on a game with no opponent side, since
+    #97 creates only the player's. Scoping the event `'opponent'` would make
+    `fk_kt_game_event_side` refuse it and break the write. NULL is also the honest answer:
+    that column is still on `kt_games` until the last revision, so the write really is
+    about the game. The backfill revision carries the same guard.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    svc.update_game(game.id, None, opponent_victory_points=3)
+    svc.update_game(game.id, None, command_points=7)
+    svc.update_game(game.id, None, status="in_progress")
+
+    assert _scopes(session, game.id) == [
+        ("game_updated", None),
+        ("game_updated", "player"),
+        ("game_updated", None),
+    ]
+
+
+def test_undoing_a_removal_puts_the_side_back(session, battle):
+    """`_undo_deleted` rebuilds the row from the event, so the event must carry its side.
+
+    Without it undo recreated an UNSIDED piece: harmless-looking while `side` is nullable,
+    a void `uq_kt_game_equipment` in the meantime, and a NOT NULL failure once the last
+    revision lands.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    piece = svc.add_equipment(game.id, b["kit"].id)
+    piece_id = piece.id
+
+    svc.remove_equipment(game.id, piece_id)
+    assert session.get(KTGameEquipment, piece_id) is None
+
+    svc.undo(game.id)
+    restored = session.get(KTGameEquipment, piece_id)
+    assert restored is not None
+    assert restored.side == "player"
 
 
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
