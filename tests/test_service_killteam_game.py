@@ -851,6 +851,86 @@ def test_a_side_patch_needs_the_side_to_exist(session, battle):
         svc.update_side(game.id, "opponent", None, command_points=1)
 
 
+def test_a_sides_ploy_is_paid_for_out_of_that_sides_own_pool(session, battle, make_kill_team, make_kt_ploy):
+    """Decisions #65 and #67: one operation against ONE CP pool, and there are now two.
+
+    The defect this guards is a routing one rather than an arithmetic one. `_apply_routed`
+    sends `PLAYER_FIELDS` to the PLAYER's side, which is right for a write that named no
+    side and wrong for one that did -- it would spend the creator's CP to pay for the
+    opponent's ploy and leave the opponent's pool untouched. So the two pools are given
+    DIFFERENT starting values here: a test with both on the same number would pass either
+    way.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    make_kt_ploy(kill_team=theirs, name="Bolstered Resolve", cp_cost=1, position=0)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+    svc.update_side(game.id, "player", None, command_points=7)
+    svc.update_side(game.id, "opponent", None, command_points=4)
+
+    svc.use_ploy(game.id, "Bolstered Resolve", "opponent")
+
+    assert svc._side_row(game.id, "opponent").command_points == 3, "theirs paid"
+    assert svc.player_side(game).command_points == 7, "the creator's pool is untouched"
+    assert [e["name"] for e in svc._side_row(game.id, "opponent").ploys_used] == ["Bolstered Resolve"]
+    assert svc.player_side(game).ploys_used == []
+
+
+def test_undoing_a_sides_ploy_restores_that_sides_cp_and_entry(session, battle, make_kill_team, make_kt_ploy):
+    """#65's "one event, one undo", still true once the event names a row.
+
+    The event carries that side's `target_id`, so `_undo_fields` takes its ROW branch and
+    `_owner_of` is never consulted -- which is what keeps the reversal on the side that
+    paid rather than on the creator's.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    make_kt_ploy(kill_team=theirs, name="Bolstered Resolve", cp_cost=1, position=0)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+    svc.update_side(game.id, "opponent", None, command_points=4)
+    svc.use_ploy(game.id, "Bolstered Resolve", "opponent")
+
+    svc.undo(game.id)
+
+    row = svc._side_row(game.id, "opponent")
+    assert row.command_points == 4
+    assert row.ploys_used == []
+
+
+def test_a_ploy_must_be_in_the_snapshot_of_the_side_spending_it(
+    session, battle, make_kill_team, make_kt_ploy
+):
+    """The snapshot is checked per side, so a name from the wrong list is refused."""
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    make_kt_ploy(kill_team=theirs, name="Bolstered Resolve", cp_cost=0, position=0)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+    mine = next(p["name"] for p in svc.player_side(game).ploys if not p["universal"])
+
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.use_ploy(game.id, mine, "opponent")
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.use_ploy(game.id, "Bolstered Resolve", "player")
+
+
+def test_a_ploy_cannot_be_spent_for_a_side_that_does_not_exist(session, battle):
+    """An unestablished opponent has no pool to spend from, and no snapshot to check."""
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="no opponent side yet"):
+        svc.use_ploy(game.id, "anything", "opponent")
+    with pytest.raises(KTGameValidationError, match="must be one of"):
+        svc.use_ploy(game.id, "anything", "banana")
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()
@@ -1724,15 +1804,16 @@ def test_a_ploy_this_game_does_not_have_is_refused(session, battle):
         svc.use_ploy(game.id, "Teleportarium")
 
 
-def test_a_ploy_cannot_be_spent_on_cp_the_game_does_not_have(session, battle):
+def test_a_ploy_cannot_be_spent_on_cp_the_side_does_not_have(session, battle):
     # Bookkeeping the CHECK would refuse anyway, caught here so the message names the
-    # ploy and the shortfall rather than arriving as an IntegrityError.
+    # ploy and the shortfall rather than arriving as an IntegrityError. The message names
+    # WHOSE pool fell short, because after #67 a game has two of them.
     b = battle()
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
-    ploy = next(p for p in game.ploys if p["cp_cost"] > 0)
+    ploy = next(p for p in svc.player_side(game).ploys if p["cp_cost"] > 0)
 
-    with pytest.raises(KTGameValidationError, match="costs 1 CP and the game has 0"):
+    with pytest.raises(KTGameValidationError, match="costs 1 CP and the player side has 0"):
         svc.use_ploy(game.id, ploy["name"])
 
 

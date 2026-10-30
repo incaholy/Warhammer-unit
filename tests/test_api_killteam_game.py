@@ -170,7 +170,7 @@ def test_every_game_route_needs_a_token(client):
     operations = sum(len(app.openapi()["paths"][p]) for p in paths)
     # 12 paths and 17 operations: `PATCH .../sides/{side}` added an OPERATION to a path
     # that already existed, which is the distinction `CLAUDE.md` fixes those two terms for.
-    assert (len(paths), operations) == (12, 17), f"{len(paths)} paths, {operations} operations"
+    assert (len(paths), operations) == (13, 18), f"{len(paths)} paths, {operations} operations"
 
     assert client.get(BASE).status_code == 401
     assert client.post(BASE, json={"roster_id": str(uuid.uuid4())}).status_code == 401
@@ -180,6 +180,7 @@ def test_every_game_route_needs_a_token(client):
     assert client.put(f"{BASE}/{uuid.uuid4()}/sides/opponent", json={"display_name": "x"}).status_code == 401
     sides = f"{BASE}/{uuid.uuid4()}/sides/opponent"
     assert client.patch(sides, json={"command_points": 1}).status_code == 401
+    assert client.post(f"{sides}/ploys", json={"name": "x"}).status_code == 401
 
 
 # --- creating and reading ---------------------------------------------------

@@ -3816,7 +3816,7 @@
           "kill team games"
         ],
         "summary": "Use Ploy",
-        "description": "Spend a ploy: record it and deduct its CP in one operation.\n\nThe cost comes from the game's own snapshot, so a client does not supply it and\ncannot forget to. One operation because it is one event -- `undo` then restores the\nCP and removes the entry together, where two PATCHes would let one be undone without\nthe other.\n\n400 for a ploy this game's snapshot does not list, or if the CP will not cover it.\nHow many ploys a turning point allows is the players' (#1). Returns the game whole,\nbecause two of its fields moved.",
+        "description": "Spend a ploy: record it and deduct its CP in one operation.\n\nThe cost comes from the game's own snapshot, so a client does not supply it and\ncannot forget to. One operation because it is one event -- `undo` then restores the\nCP and removes the entry together, where two PATCHes would let one be undone without\nthe other.\n\n400 for a ploy this game's snapshot does not list, or if the CP will not cover it.\nHow many ploys a turning point allows is the players' (#1). Returns the game whole,\nbecause two of its fields moved.\n\nSpends the CREATOR's pool. `POST .../sides/{side}/ploys` is what names a side (#65,\n#67), and this path is kept beside it so no shipped call breaks before the one\nbreaking change. It is #77's \"`use_ploy` becomes `POST .../sides/{side}/ploys`\" that\nretires it.",
         "operationId": "use_ploy_api_v1_me_kill_team_games__game_id__ploys_post",
         "security": [
           {
@@ -3824,6 +3824,74 @@
           }
         ],
         "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGamePloy_Use"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/kill-team/games/{game_id}/sides/{side}/ploys": {
+      "post": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Use Side Ploy",
+        "description": "Spend one of a side's ploys, from that side's own pool (#65, #67).\n\n#65's argument is that spending a ploy is ONE operation against ONE CP pool, and\nafter #67 a game has two -- so the pool, the snapshot it is checked against and the\nshortfall message all name whose. Either participant may do it for either side, for\nthe reason #87 gives.\n\n400 for a side this game has not described yet, for a ploy that side's snapshot does\nnot list, or if that side's CP will not cover it.",
+        "operationId": "use_side_ploy_api_v1_me_kill_team_games__game_id__sides__side__ploys_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "side",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Side"
+            }
+          },
           {
             "name": "game_id",
             "in": "path",

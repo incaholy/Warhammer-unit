@@ -605,7 +605,7 @@ class KTGameService:
         self._write(game, "operative_activated", touched, target_id=row.id, side=row.side)
         return row
 
-    def use_ploy(self, game_id: UUID, name: str) -> KTGame:
+    def use_ploy(self, game_id: UUID, name: str, side: str = "player") -> KTGame:
         """Spend a ploy: record it AND deduct its CP, in one operation.
 
         The two halves were separate fields a caller set independently, which meant a
@@ -625,34 +625,42 @@ class KTGameService:
         `ploys_used` and `command_points` stay directly writable for a custom game.
         """
         game = self._require_game(game_id)
-        # The SIDE's snapshot, not the game's. Both hold the same list today -- #97 copies
-        # it at creation -- and only one of them survives the last revision.
-        side = self.player_side(game)
-        ploy = next((p for p in side.ploys if p.get("name") == name), None)
+        if side not in SIDES:
+            raise KTGameValidationError("side", f"must be one of {sorted(SIDES)}")
+        # The NAMED side's snapshot and the NAMED side's pool. #65's argument is that
+        # spending a ploy is one operation against ONE CP pool, and after #67 there are
+        # two -- so every part of this has to say whose. Both the game and the player side
+        # still hold the same list today, which is why reading the wrong one would look
+        # right for the creator's half and be wrong for the opponent's.
+        row = self._side_row(game_id, side)
+        if row is None:
+            raise KTGameValidationError(
+                "side", f"this game has no {side} side yet -- describe it first"
+            )
+        ploy = next((p for p in row.ploys if p.get("name") == name), None)
         if ploy is None:
             raise KTGameValidationError("name", f"{name!r} is not one of this game's ploys")
 
-        # The SIDE's pool. #65's argument is that spending a ploy is one operation against
-        # ONE CP pool, and after #67 there are two -- so the question "has the CP" has to
-        # name whose. The message still says "the game has", which is what a one-sided
-        # battle means to a player; it becomes the side's name when the opponent can spend.
         cost = ploy.get("cp_cost") or 0
-        if cost > side.command_points:
+        if cost > row.command_points:
             raise KTGameValidationError(
                 "command_points",
-                f"{name!r} costs {cost} CP and the game has {side.command_points}",
+                f"{name!r} costs {cost} CP and the {side} side has {row.command_points}",
             )
 
-        # Routed rather than applied to the game, so the two fields land on the side and
-        # `undo` takes them off the same row -- `_undo_fields` uses the same `_owner_of`.
-        touched = self._apply_routed(
-            game,
+        # Applied to the row directly rather than routed. `_apply_routed` sends
+        # `PLAYER_FIELDS` to the PLAYER's side, which is right for a write that named no
+        # side and wrong for one that did -- it would spend the creator's CP to pay for
+        # the opponent's ploy. `undo` still reverses it correctly, because the event
+        # carries this row's `target_id` and `_undo_fields` takes its row branch.
+        touched = self._apply(
+            row,
             {
-                "command_points": side.command_points - cost,
-                "ploys_used": [*side.ploys_used, {"name": name, "turning_point": game.turning_point}],
+                "command_points": row.command_points - cost,
+                "ploys_used": [*row.ploys_used, {"name": name, "turning_point": game.turning_point}],
             },
         )
-        self._write(game, "ploy_used", touched)
+        self._write(game, "ploy_used", touched, target_id=row.id, side=side)
         return game
 
     # ----------------------------- equipment -----------------------------

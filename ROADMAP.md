@@ -1475,7 +1475,7 @@ side operations.
 | 5 | `PUT .../sides/{side}` establishes a side (#92) | Committed on `kill-team-opponent` |
 | 6 | A hand-entered operative carries `source: 'opponent'` (#93) | Committed on `kill-team-opponent` |
 | 7 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Committed on `kill-team-opponent` |
-| 8 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Planned |
+| 8 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Committed on `kill-team-opponent` |
 | 9 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
 
 Piece 9 is the only breaking contract change, and everything before it is additive on

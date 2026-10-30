@@ -637,8 +637,34 @@ def use_ploy(
     400 for a ploy this game's snapshot does not list, or if the CP will not cover it.
     How many ploys a turning point allows is the players' (#1). Returns the game whole,
     because two of its fields moved.
+
+    Spends the CREATOR's pool. `POST .../sides/{side}/ploys` is what names a side (#65,
+    #67), and this path is kept beside it so no shipped call breaks before the one
+    breaking change. It is #77's "`use_ploy` becomes `POST .../sides/{side}/ploys`" that
+    retires it.
     """
     service.use_ploy(game.id, payload.name)
+    return _read(service, game.id)
+
+
+@router.post("/{game_id}/sides/{side}/ploys", response_model=KTGame_Read)
+def use_side_ploy(
+    side: str,
+    payload: KTGamePloy_Use,
+    game: KTGame = Depends(get_owned_game),
+    service: KTGameService = Depends(get_game_service),
+) -> KTGame_Read:
+    """Spend one of a side's ploys, from that side's own pool (#65, #67).
+
+    #65's argument is that spending a ploy is ONE operation against ONE CP pool, and
+    after #67 a game has two -- so the pool, the snapshot it is checked against and the
+    shortfall message all name whose. Either participant may do it for either side, for
+    the reason #87 gives.
+
+    400 for a side this game has not described yet, for a ploy that side's snapshot does
+    not list, or if that side's CP will not cover it.
+    """
+    service.use_ploy(game.id, payload.name, side)
     return _read(service, game.id)
 
 
