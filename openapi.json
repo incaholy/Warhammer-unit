@@ -3327,7 +3327,7 @@
           "kill team games"
         ],
         "summary": "Add Operative",
-        "description": "Field a datacard the battle produced \u2014 Gellerpox's vermin, a rule's grant (#18).",
+        "description": "Field a datacard the battle produced \u2014 Gellerpox's vermin, a rule's grant (#18).\n\nOr one the host typed in for an opponent who holds no account (#93), which is what\n`side` selects. A body that omits it means the creator's half, so this stays additive.",
         "operationId": "add_operative_api_v1_me_kill_team_games__game_id__operatives_post",
         "security": [
           {
@@ -4668,6 +4668,12 @@
             "type": "string",
             "maxLength": 16,
             "title": "Source"
+          },
+          "side": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Side",
+            "default": "player"
           }
         },
         "additionalProperties": false,

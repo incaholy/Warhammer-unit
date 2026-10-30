@@ -131,7 +131,12 @@ class KTGameService:
     _INITIATIVE = SIDES  # #68: initiative names a side, so it is the same vocabulary
     _OPERATIVE_STATUSES = {"reserve", "on_board", "incapacitated"}
     _ORDERS = {"engage", "conceal"}
-    _SOURCES = {"roster", "equipment", "rule"}
+    #: Why a row is in a game. `'opponent'` means the host typed it in for a side that
+    #: holds no account (#93) -- a different answer from `'equipment'` or `'rule'`, which
+    #: is why it is a value of its own rather than a reuse. It is NOT correlated with
+    #: `side`: an opponent may reveal equipment that grants models, so `'equipment'` on
+    #: the opponent's half is ordinary, and nothing here forbids the mirror case.
+    _SOURCES = {"roster", "equipment", "rule", "opponent"}
 
     def __init__(self, session: Session, actor: User | None = None):
         self.session = session
@@ -178,11 +183,16 @@ class KTGameService:
         )
         self.session.add(game)
         self.session.flush()
-        self.session.add(self._new_player_side(game))
+        player = self._new_player_side(game)
+        self.session.add(player)
         self.session.flush()
 
         for row in roster.operatives:
-            self.session.add(self._new_operative(game, row.operative, source="roster", position=row.position))
+            self.session.add(
+                self._new_operative(
+                    game, row.operative, side=player, source="roster", position=row.position
+                )
+            )
         self.session.flush()
         self.session.refresh(game)
         return game
@@ -352,7 +362,9 @@ class KTGameService:
         self._write(game, "side_updated", touched, target_id=row.id, side=side)
         return game
 
-    def add_operative(self, game_id: UUID, operative_id: UUID, source: str) -> KTGameOperative:
+    def add_operative(
+        self, game_id: UUID, operative_id: UUID, source: str, side: str = "player"
+    ) -> KTGameOperative:
         """Field a datacard the battle produced — not one the roster brought.
 
         Decision #18: the set is not fixed at creation. Revealing Gellerpox's MUTOID
@@ -364,20 +376,48 @@ class KTGameService:
         An `in_battle` datacard may only arrive this way (#20); the converse does not
         hold, and a `roster` one may be added too -- a rule that grants a second of
         something the roster already fields is a real case.
+
+        `side` defaults to the creator's half, so the shipped call is unchanged. Naming
+        the opponent's is what #93 adds: a host who described an opponent (#92) can now
+        field that opponent's models, with `source = 'opponent'` recording that the host
+        typed them in.
         """
         game = self._require_game(game_id)
         if source == "roster":
             raise KTGameValidationError("source", "a roster's operatives arrive with the game")
         if source not in self._SOURCES - {"roster"}:
             raise KTGameValidationError("source", f"must be one of {sorted(self._SOURCES)}")
+        if side not in SIDES:
+            raise KTGameValidationError("side", f"must be one of {sorted(SIDES)}")
+
+        # Both preconditions are the four-column leg's, stated here so the caller gets a
+        # message rather than a constraint violation. The leg needs
+        # `(owner_user_id, kill_team_id, game_id, side)` to name a real row, and under
+        # MATCH SIMPLE a NULL anywhere in it skips the check entirely -- so a side with no
+        # team would take the row silently and leave it unprotected.
+        target = self._side_row(game_id, side)
+        if target is None:
+            raise KTGameValidationError(
+                "side", f"this game has no {side} side yet -- describe it first"
+            )
+        if target.kill_team_id is None:
+            raise KTGameValidationError(
+                "side", f"the {side} side has no kill team yet -- give it one first"
+            )
 
         operative = self.session.get(KTOperative, operative_id)
         if operative is None:
             raise NotFoundError(f"operative {operative_id} not found")
-        # Referential, not legal: the composite foreign key would refuse this row
-        # anyway. Checked here so the caller gets a 404 naming the problem.
-        if operative.kill_team_id != game.kill_team_id:
-            raise NotFoundError(f"operative {operative_id} is not one of kill team {game.kill_team_id}'s")
+        # Against the SIDE's team, not the game's (#93). The game's is the creator's (#76),
+        # so comparing against it rejected every datacard belonging to the other team --
+        # correct while a game held one team, and the exact guard that refused the case
+        # #67 exists to serve. Referential rather than legal: the composite foreign key
+        # would refuse the row anyway, and this is here so the caller gets a 404 that
+        # names the problem.
+        if operative.kill_team_id != target.kill_team_id:
+            raise NotFoundError(
+                f"operative {operative_id} is not one of kill team {target.kill_team_id}'s"
+            )
         # Refused if the catalog has WITHDRAWN it (#55): the source no longer names this
         # row, so a picker that offered it was stale. Rows already in a game or on a
         # roster are untouched and keep resolving -- that is the whole reason #55 flags
@@ -390,6 +430,7 @@ class KTGameService:
         row = self._new_operative(
             game,
             operative,
+            side=target,
             source=source,
             position=self._next_position(game.id),
             added_in_turning_point=game.turning_point,
@@ -885,6 +926,7 @@ class KTGameService:
         game: KTGame,
         operative: KTOperative,
         *,
+        side: KTGameSide,
         source: str,
         position: int,
         added_in_turning_point: int | None = None,
@@ -894,13 +936,18 @@ class KTGameService:
             game_id=game.id,
             operative_id=operative.id,
             # All three reached by the four-column leg into `kt_game_sides`, so all three
-            # must match that side's row. `side` is `'player'` because every operative the
-            # service creates is the creator's: `add_operative` refuses `source='roster'`
-            # and refuses a datacard of another team, and #93's `'opponent'` source is not
-            # built. When it is, this becomes a parameter rather than a constant.
-            kill_team_id=game.kill_team_id,
+            # are taken FROM that row rather than from the game. `kill_team_id` is the
+            # SIDE's, which is the change #93 calls for: the game's is the creator's (#76)
+            # and comparing against it rejected every datacard of the other team -- right
+            # while a game held one team, wrong the moment it holds two.
+            #
+            # `owner_user_id` stays the GAME's owner, which is also what the side row
+            # holds: #74 makes that column the creator on BOTH halves, because the
+            # four-column leg targets a `kt_games` row and an account-less opponent has no
+            # id to put there.
+            kill_team_id=side.kill_team_id,
             owner_user_id=game.owner_user_id,
-            side="player",
+            side=side.side,
             position=position,
             source=source,
             added_in_turning_point=added_in_turning_point,

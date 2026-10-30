@@ -288,9 +288,13 @@ class KTGame_Update(WriteSchema):
 
 class KTGameOperative_Add(WriteSchema):
     operative_id: UUID
-    #: `equipment` or `rule` (decision #18). `roster` is refused: those arrive with the
-    #: game rather than during it.
+    #: `equipment`, `rule`, or `opponent` for a model the host typed in (#18, #93).
+    #: `roster` is refused: those arrive with the game rather than during it.
     source: str = Field(max_length=16)
+    #: Which half fields it (#67). Defaults to the creator's, so a call written before
+    #: K8 means what it always meant. The named side must already exist and field a team,
+    #: which `PUT .../sides/{side}` is what does (#92).
+    side: str = Field(default="player", max_length=16)
 
 
 class KTGameOperative_Update(WriteSchema):
@@ -486,8 +490,12 @@ def add_operative(
     game: KTGame = Depends(get_owned_game),
     service: KTGameService = Depends(get_game_service),
 ) -> KTGameOperative_Read:
-    """Field a datacard the battle produced — Gellerpox's vermin, a rule's grant (#18)."""
-    row = service.add_operative(game.id, payload.operative_id, payload.source)
+    """Field a datacard the battle produced — Gellerpox's vermin, a rule's grant (#18).
+
+    Or one the host typed in for an opponent who holds no account (#93), which is what
+    `side` selects. A body that omits it means the creator's half, so this stays additive.
+    """
+    row = service.add_operative(game.id, payload.operative_id, payload.source, payload.side)
     return KTGameOperative_Read.model_validate(row, from_attributes=True)
 
 

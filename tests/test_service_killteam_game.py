@@ -671,20 +671,86 @@ def test_a_withdrawn_kill_team_cannot_newly_field_a_side(session, battle, make_k
         svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=gone.id)
 
 
-def test_the_service_still_refuses_an_opponent_source(session, battle):
-    """The other half of the chain's ninth revision, asserted from this side.
+def test_a_host_can_field_the_opponents_models_by_hand(session, battle, make_kill_team, make_kt_operative):
+    """Decision #93, and the inversion of the test that held its window open.
 
-    The CHECK admits `'opponent'` now; `_SOURCES` does not, so `add_operative` refuses it
-    and no route can write one. This test MUST be inverted when #93's piece lands, and it
-    exists so that the window between the two is a stated state rather than an oversight.
+    The capability #67 exists for: #92 lets a host describe an opponent with no account,
+    and this lets them field that opponent's models. Both of `add_operative`'s guards
+    refused it before -- `'roster'` outright, and a team check against the GAME's
+    `kill_team_id`, which rejected every datacard belonging to the other team.
     """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    card = make_kt_operative(kill_team=theirs, name="Theyn", wounds=9)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    row = svc.add_operative(game.id, card.id, source="opponent", side="opponent")
+
+    assert (row.side, row.source) == ("opponent", "opponent")
+    assert row.kill_team_id == theirs.id, "the SIDE's team, not the game's"
+    assert row.owner_user_id == game.owner_user_id, "#74: the creator on both halves"
+
+
+def test_a_datacard_must_belong_to_the_side_it_is_added_to(
+    session, battle, make_kill_team, make_kt_operative
+):
+    """The team check moved to the side, so it now cuts BOTH ways (#93).
+
+    Your own team's datacard on the opponent's half is refused, which the old check could
+    not express -- it compared against the game's team, so it accepted exactly the wrong
+    one of these two and rejected the other.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    their_card = make_kt_operative(kill_team=theirs, name="Theyn", wounds=9)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    with pytest.raises(NotFoundError, match="is not one of kill team"):
+        svc.add_operative(game.id, b["cards"][0].id, source="opponent", side="opponent")
+    with pytest.raises(NotFoundError, match="is not one of kill team"):
+        svc.add_operative(game.id, their_card.id, source="rule", side="player")
+
+
+def test_an_operative_needs_a_side_that_exists_and_fields_a_team(
+    session, battle, make_kill_team, make_kt_operative
+):
+    """Both preconditions of the four-column leg, reported rather than left to the leg.
+
+    Under MATCH SIMPLE a NULL anywhere in that leg skips the whole check, so a side with
+    no team would take the row SILENTLY and leave it unprotected -- which is why the
+    second refusal is here rather than trusted to the database.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    card = make_kt_operative(kill_team=theirs, name="Theyn", wounds=9)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="no opponent side yet"):
+        svc.add_operative(game.id, card.id, source="opponent", side="opponent")
+
+    # #77's backfilled shape: a row with a name and no team.
+    session.add(
+        KTGameSide(game_id=game.id, owner_user_id=game.owner_user_id, side="opponent", display_name="Dave")
+    )
+    session.commit()
+
+    with pytest.raises(KTGameValidationError, match="has no kill team yet"):
+        svc.add_operative(game.id, card.id, source="opponent", side="opponent")
+
+
+def test_an_unknown_side_is_refused_when_adding_an_operative(session, battle):
+    """Same vocabulary as everywhere else (#68)."""
     b = battle()
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
 
-    assert "opponent" not in svc._SOURCES
     with pytest.raises(KTGameValidationError, match="must be one of"):
-        svc.add_operative(game.id, b["cards"][0].id, source="opponent")
+        svc.add_operative(game.id, b["cards"][0].id, source="rule", side="banana")
 
 
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
