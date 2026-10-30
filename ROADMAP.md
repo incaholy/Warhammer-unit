@@ -1476,7 +1476,7 @@ side operations.
 | 6 | A hand-entered operative carries `source: 'opponent'` (#93) | Committed on `kill-team-opponent` |
 | 7 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Committed on `kill-team-opponent` |
 | 8 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Committed on `kill-team-opponent` |
-| 9 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
+| 9 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Committed on `kill-team-opponent` |
 
 Piece 9 is the only breaking contract change, and everything before it is additive on
 purpose: three nullable fields on `KTGameEvent_Read` and one new path are all a client
@@ -1565,7 +1565,14 @@ nothing about the read models, which is where a client meets the change.
 | Unchanged by #76 | `kill_team_id`, `kill_team_name`, `faction_name`, `roster_id` — these would all have gone if the column had moved |
 
 **`KTGame_ListRead`** — loses `opponent_name`, `opponent_victory_points` and
-`victory_points`. Names **both** teams and gains `your_side` (#75).
+`victory_points`. Names **both** teams, so a row reads as a matchup.
+
+**`your_side` is NOT part of K8**, although an earlier draft of this entry said it was.
+#75 is `Planned (K9)` and that is the right slice: in K8 every game is created by the
+caller and `list_games` filters on `owner_user_id`, so the value would always be
+`'player'` — a field that never varies, telling a client it does. It becomes meaningful
+when #86's join lets someone occupy a game they did not create. The same goes for #75's
+widening of `list_games` itself.
 
 **`KTGameOperative_Read`** and **`KTGameEquipment_Read`** — each gains `side`.
 

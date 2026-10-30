@@ -993,6 +993,11 @@ class KTGameSide(TimestampMixin, table=True):
     choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
 
     game: "KTGame" = Relationship(back_populates="sides")
+    #: This side's team, so a read can NAME it. The opponent's name is otherwise
+    #: unreachable: the game's `kill_team` is the creator's (#76), and #89 needs a row to
+    #: distinguish an established opponent from #77's team-less record -- which it does by
+    #: `kill_team_id`, so the name has to travel with it.
+    kill_team: KillTeam | None = Relationship()
 
 
 class KTGameOperative(TimestampMixin, table=True):

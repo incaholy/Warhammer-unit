@@ -3810,73 +3810,14 @@
         }
       }
     },
-    "/api/v1/me/kill-team/games/{game_id}/ploys": {
-      "post": {
-        "tags": [
-          "kill team games"
-        ],
-        "summary": "Use Ploy",
-        "description": "Spend a ploy: record it and deduct its CP in one operation.\n\nThe cost comes from the game's own snapshot, so a client does not supply it and\ncannot forget to. One operation because it is one event -- `undo` then restores the\nCP and removes the entry together, where two PATCHes would let one be undone without\nthe other.\n\n400 for a ploy this game's snapshot does not list, or if the CP will not cover it.\nHow many ploys a turning point allows is the players' (#1). Returns the game whole,\nbecause two of its fields moved.\n\nSpends the CREATOR's pool. `POST .../sides/{side}/ploys` is what names a side (#65,\n#67), and this path is kept beside it so no shipped call breaks before the one\nbreaking change. It is #77's \"`use_ploy` becomes `POST .../sides/{side}/ploys`\" that\nretires it.",
-        "operationId": "use_ploy_api_v1_me_kill_team_games__game_id__ploys_post",
-        "security": [
-          {
-            "OAuth2PasswordBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "game_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Game Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KTGamePloy_Use"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KTGame_Read"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/me/kill-team/games/{game_id}/sides/{side}/ploys": {
       "post": {
         "tags": [
           "kill team games"
         ],
-        "summary": "Use Side Ploy",
+        "summary": "Use Ploy",
         "description": "Spend one of a side's ploys, from that side's own pool (#65, #67).\n\n#65's argument is that spending a ploy is ONE operation against ONE CP pool, and\nafter #67 a game has two -- so the pool, the snapshot it is checked against and the\nshortfall message all name whose. Either participant may do it for either side, for\nthe reason #87 gives.\n\n400 for a side this game has not described yet, for a ploy that side's snapshot does\nnot list, or if that side's CP will not cover it.",
-        "operationId": "use_side_ploy_api_v1_me_kill_team_games__game_id__sides__side__ploys_post",
+        "operationId": "use_ploy_api_v1_me_kill_team_games__game_id__sides__side__ploys_post",
         "security": [
           {
             "OAuth2PasswordBearer": []
@@ -4686,6 +4627,17 @@
           "position": {
             "type": "integer",
             "title": "Position"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
           }
         },
         "type": "object",
@@ -4932,6 +4884,17 @@
               }
             ],
             "title": "Added In Turning Point"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Side"
           }
         },
         "type": "object",
@@ -5055,39 +5018,6 @@
         "type": "object",
         "title": "KTGameOperative_Update"
       },
-      "KTGamePloy_Read": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
-          },
-          "cp_cost": {
-            "type": "integer",
-            "title": "Cp Cost"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "universal": {
-            "type": "boolean",
-            "title": "Universal"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "kind",
-          "cp_cost",
-          "description",
-          "universal"
-        ],
-        "title": "KTGamePloy_Read"
-      },
       "KTGamePloy_Use": {
         "properties": {
           "name": {
@@ -5103,35 +5033,6 @@
           "name"
         ],
         "title": "KTGamePloy_Use"
-      },
-      "KTGameRule_Read": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "description": {
-            "type": "string",
-            "title": "Description"
-          },
-          "group": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "description"
-        ],
-        "title": "KTGameRule_Read"
       },
       "KTGameSide_Put": {
         "properties": {
@@ -5161,6 +5062,108 @@
         ],
         "title": "KTGameSide_Put",
         "description": "Describe one side of a battle (#92): name it, and give it a team if it has none.\n\n`display_name` is the only field a body must carry, which is what lets this one\noperation serve both halves. Naming your OWN side is `{display_name}` alone -- #76\nfixes the creator's team at creation, so there is no value to echo back from the read.\n\n`kill_team_id` is settable once. A side with no team takes the one given; naming a\ndifferent team on a side that already has one is a 409 rather than a rewrite, because\nthat side's operatives and equipment are keyed to it through the four-column leg."
+      },
+      "KTGameSide_Read": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "kill_team_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kill Team Id"
+          },
+          "kill_team_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kill Team Name"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "command_points": {
+            "type": "integer",
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Victory Points",
+            "default": {}
+          },
+          "ploys_used": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ploys Used",
+            "default": []
+          },
+          "choices": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Choices",
+            "default": {}
+          },
+          "rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rules",
+            "default": []
+          },
+          "ploys": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ploys",
+            "default": []
+          },
+          "equipment_limit": {
+            "type": "integer",
+            "title": "Equipment Limit",
+            "default": 4
+          }
+        },
+        "type": "object",
+        "required": [
+          "side",
+          "kill_team_id",
+          "kill_team_name",
+          "display_name",
+          "command_points"
+        ],
+        "title": "KTGameSide_Read",
+        "description": "One half of a battle (#67), as a client reads it.\n\n`kill_team_id` is the DISCRIMINATOR #89's states turn on, which is why the name\ntravels with it rather than being looked up: an established opponent carries a team,\nand #77's backfilled record carries none. A client distinguishes the two WITHOUT this\nobject being absent -- absence is the third state, \"no opponent yet\" (#74), and\n`KTGame_Read.opponent` being null is what says so.\n\n`equipment_limit` sits here rather than on the game (#57): each side has its own\nallowance. It is the constant `EQUIPMENT_LIMIT`, reported and never enforced, so a\nside may take a fifth piece and the number exists so a client does not hold the rule."
       },
       "KTGameSide_Update": {
         "properties": {
@@ -5294,19 +5297,6 @@
             "type": "string",
             "format": "uuid",
             "title": "Roster Id"
-          },
-          "opponent_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Opponent Name"
           }
         },
         "additionalProperties": false,
@@ -5327,17 +5317,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
-          },
-          "opponent_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Opponent Name"
           },
           "status": {
             "type": "string",
@@ -5364,31 +5343,39 @@
             "type": "string",
             "title": "Faction Name"
           },
-          "victory_points": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "Victory Points",
-            "default": {}
+          "opponent_kill_team_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Kill Team Name"
           },
-          "opponent_victory_points": {
-            "type": "integer",
-            "title": "Opponent Victory Points"
+          "opponent_display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Display Name"
           }
         },
         "type": "object",
         "required": [
           "id",
           "created_at",
-          "opponent_name",
           "status",
           "turning_point",
           "phase",
           "kill_team_id",
           "kill_team_name",
-          "faction_name",
-          "opponent_victory_points"
+          "faction_name"
         ],
         "title": "KTGame_ListRead",
         "description": "A row of the game listing: enough to choose one, and none of the bundle.\n\nCarries the score, because \"which game was that?\" is answered by who and how it\nwent. Deliberately NOT the operatives: a game stores the roster detail's 24-42 KB\nas JSON (#52), so a page of fifty would be megabytes.\n\nNames the kill team and its faction for the same reason `KTRoster_ListRead` does --\na deliberate exception to #46, since a player's own game list should not require\nfetching the catalog to render \"Raveners, Tyranids\"."
@@ -5423,17 +5410,6 @@
             "type": "string",
             "title": "Faction Name"
           },
-          "opponent_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Opponent Name"
-          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -5457,22 +5433,6 @@
             ],
             "title": "Initiative"
           },
-          "command_points": {
-            "type": "integer",
-            "title": "Command Points"
-          },
-          "victory_points": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "Victory Points",
-            "default": {}
-          },
-          "opponent_victory_points": {
-            "type": "integer",
-            "title": "Opponent Victory Points"
-          },
           "markers": {
             "items": {
               "type": "string"
@@ -5481,29 +5441,22 @@
             "title": "Markers",
             "default": []
           },
-          "ploys_used": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Ploys Used",
-            "default": []
-          },
-          "choices": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Choices",
-            "default": {}
-          },
           "version": {
             "type": "integer",
             "title": "Version"
           },
-          "equipment_limit": {
-            "type": "integer",
-            "title": "Equipment Limit",
-            "default": 4
+          "player": {
+            "$ref": "#/components/schemas/KTGameSide_Read"
+          },
+          "opponent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KTGameSide_Read"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "operatives": {
             "items": {
@@ -5519,22 +5472,6 @@
             },
             "type": "array",
             "title": "Equipment",
-            "default": []
-          },
-          "rules": {
-            "items": {
-              "$ref": "#/components/schemas/KTGameRule_Read"
-            },
-            "type": "array",
-            "title": "Rules",
-            "default": []
-          },
-          "ploys": {
-            "items": {
-              "$ref": "#/components/schemas/KTGamePloy_Read"
-            },
-            "type": "array",
-            "title": "Ploys",
             "default": []
           },
           "events": {
@@ -5554,14 +5491,12 @@
           "kill_team_id",
           "kill_team_name",
           "faction_name",
-          "opponent_name",
           "status",
           "turning_point",
           "phase",
           "initiative",
-          "command_points",
-          "opponent_victory_points",
-          "version"
+          "version",
+          "player"
         ],
         "title": "KTGame_Read",
         "description": "A battle whole \u2014 everything the screen needs, and no catalog call (#24)."
@@ -5580,19 +5515,6 @@
               }
             ],
             "title": "Version"
-          },
-          "opponent_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 128,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Opponent Name"
           },
           "status": {
             "anyOf": [
@@ -5618,46 +5540,6 @@
             ],
             "title": "Initiative"
           },
-          "command_points": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 2147483647.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Command Points"
-          },
-          "victory_points": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Victory Points"
-          },
-          "opponent_victory_points": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 2147483647.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Opponent Victory Points"
-          },
           "markers": {
             "anyOf": [
               {
@@ -5671,33 +5553,6 @@
               }
             ],
             "title": "Markers"
-          },
-          "ploys_used": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ploys Used"
-          },
-          "choices": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Choices"
           }
         },
         "additionalProperties": false,

@@ -156,7 +156,9 @@ class KTGameOperative_Read(SQLModel):
     actions_used: list[dict[str, Any]] = []
     source: str
     added_in_turning_point: int | None
-
+    #: Which half fields it (#67). A roster's models are the creator's;
+    #: #93's are whichever side the host typed them in for.
+    side: str | None = None
 
 class KTGameEquipment_Read(SQLModel):
     id: UUID
@@ -165,7 +167,9 @@ class KTGameEquipment_Read(SQLModel):
     text: str
     revealed: bool
     position: int
-
+    #: Which half took it (#67). Each side picks its own, and the universal
+    #: list belongs to no team (#48), so both may hold the same piece.
+    side: str | None = None
 
 class KTGameEvent_Read(SQLModel):
     """One entry in the log (#8, #58), which is also what `undo` walks back over."""
@@ -204,16 +208,20 @@ class KTGame_ListRead(SQLModel):
 
     id: UUID
     created_at: datetime
-    opponent_name: str | None
     status: str
     turning_point: int
     phase: str
     kill_team_id: UUID
     kill_team_name: str
     faction_name: str
-    victory_points: dict[str, int] = {}
-    opponent_victory_points: int
-
+    #: The other half's team and name, so a row reads as a MATCHUP rather than as your
+    #: team alone. Both null where no opponent side exists, and `opponent_kill_team_name`
+    #: alone is null on #77's backfilled record, which named an opponent without a team.
+    #:
+    #: `your_side` is NOT here: #75 puts it in K9, where a second account can occupy a
+    #: game it did not create and the value can actually vary.
+    opponent_kill_team_name: str | None = None
+    opponent_display_name: str | None = None
 
 class KTGameSide_Put(WriteSchema):
     """Describe one side of a battle (#92): name it, and give it a team if it has none.
@@ -246,6 +254,35 @@ class KTGameSide_Update(WriteSchema):
     choices: dict[str, Any] | None = None
 
 
+class KTGameSide_Read(SQLModel):
+    """One half of a battle (#67), as a client reads it.
+
+    `kill_team_id` is the DISCRIMINATOR #89's states turn on, which is why the name
+    travels with it rather than being looked up: an established opponent carries a team,
+    and #77's backfilled record carries none. A client distinguishes the two WITHOUT this
+    object being absent -- absence is the third state, "no opponent yet" (#74), and
+    `KTGame_Read.opponent` being null is what says so.
+
+    `equipment_limit` sits here rather than on the game (#57): each side has its own
+    allowance. It is the constant `EQUIPMENT_LIMIT`, reported and never enforced, so a
+    side may take a fifth piece and the number exists so a client does not hold the rule.
+    """
+
+    side: str
+    kill_team_id: UUID | None
+    kill_team_name: str | None
+    #: What this side is CALLED, which #92's `PUT` sets. Null until someone sets one, and
+    #: null on a backfilled record the game never named (#77).
+    display_name: str | None
+    command_points: int
+    victory_points: dict[str, int] = {}
+    ploys_used: list[dict[str, Any]] = []
+    choices: dict[str, Any] = {}
+    rules: list[dict[str, Any]] = []
+    ploys: list[dict[str, Any]] = []
+    equipment_limit: int = EQUIPMENT_LIMIT
+
+
 class KTGame_Read(SQLModel):
     """A battle whole — everything the screen needs, and no catalog call (#24)."""
 
@@ -255,34 +292,30 @@ class KTGame_Read(SQLModel):
     kill_team_id: UUID
     kill_team_name: str
     faction_name: str
-    opponent_name: str | None
     status: str
     turning_point: int
     phase: str
     #: NULL means nobody has rolled for it in this turning point (#62) -- never "the
     #: opponent has it".
     initiative: str | None
-    command_points: int
-    victory_points: dict[str, int] = {}
-    opponent_victory_points: int
     markers: list[str] = []
-    ploys_used: list[dict[str, Any]] = []
-    choices: dict[str, Any] = {}
     #: Decision #9: send this back on a write and a stale one answers 409 rather than
     #: overwriting what the other tab did.
     version: int
-    #: Decision #57: REPORTED, never enforced. `equipment` may be longer than this.
-    equipment_limit: int = EQUIPMENT_LIMIT
+    #: The creator's half, which every game has (#97).
+    player: KTGameSide_Read
+    #: The other half, or NULL where the game has no opponent side at all -- which is
+    #: #89's first state, "no opponent yet", and is why this is nullable rather than an
+    #: object with empty fields. A side that exists without a team is the THIRD state and
+    #: arrives as an object whose `kill_team_id` is null.
+    opponent: KTGameSide_Read | None = None
     operatives: list[KTGameOperative_Read] = []
     equipment: list[KTGameEquipment_Read] = []
-    rules: list[KTGameRule_Read] = []
-    ploys: list[KTGamePloy_Read] = []
     events: list[KTGameEvent_Read] = []
 
 
 class KTGame_Create(WriteSchema):
     roster_id: UUID
-    opponent_name: Name | None = None
 
 
 class KTGame_Update(WriteSchema):
@@ -290,15 +323,9 @@ class KTGame_Update(WriteSchema):
     # which applies the resets that go with them (#61, #62), and a direct set would skip
     # those. `version` is not a field being set -- it is what this write expects to find.
     version: int | None = Field(default=None, ge=1, le=INT32_MAX)
-    opponent_name: Name | None = None
     status: str | None = Field(default=None, max_length=16)
     initiative: str | None = Field(default=None, max_length=16)
-    command_points: int | None = Field(default=None, ge=0, le=INT32_MAX)
-    victory_points: dict[str, int] | None = None
-    opponent_victory_points: int | None = Field(default=None, ge=0, le=INT32_MAX)
     markers: list[str] | None = None
-    ploys_used: list[dict[str, Any]] | None = None
-    choices: dict[str, Any] | None = None
 
 
 class KTGameOperative_Add(WriteSchema):
@@ -335,7 +362,27 @@ class KTGamePloy_Use(WriteSchema):
     name: Name
 
 
-def _listed(game: KTGame, player: KTGameSide) -> KTGame_ListRead:
+def _side(row: KTGameSide) -> KTGameSide_Read:
+    """One side, with its team NAMED rather than left as an id.
+
+    `kill_team` is eager-loaded with the side, so this costs no query -- the game's own
+    `kill_team` is the creator's (#76) and could not answer for the opponent.
+    """
+    return KTGameSide_Read(
+        side=row.side,
+        kill_team_id=row.kill_team_id,
+        kill_team_name=row.kill_team.name if row.kill_team else None,
+        display_name=row.display_name,
+        command_points=row.command_points,
+        victory_points=row.victory_points,
+        ploys_used=row.ploys_used,
+        choices=row.choices,
+        rules=row.rules,
+        ploys=row.ploys,
+    )
+
+
+def _listed(game: KTGame, opponent: KTGameSide | None) -> KTGame_ListRead:
     return KTGame_ListRead(
         id=game.id,
         created_at=game.created_at,
@@ -346,8 +393,10 @@ def _listed(game: KTGame, player: KTGameSide) -> KTGame_ListRead:
         kill_team_id=game.kill_team_id,
         kill_team_name=game.kill_team.name,
         faction_name=game.kill_team.faction.name,
-        victory_points=player.victory_points,
-        opponent_victory_points=game.opponent_victory_points,
+        opponent_kill_team_name=(
+            opponent.kill_team.name if opponent is not None and opponent.kill_team else None
+        ),
+        opponent_display_name=opponent.display_name if opponent is not None else None,
     )
 
 
@@ -361,10 +410,10 @@ def _read(service: KTGameService, game_id: UUID) -> KTGame_Read:
     helper picking the row out of a list would be re-deciding it here.
     """
     game = service.get_game(game_id)
-    return _detail(game, service.player_side(game))
+    return _detail(game, service.player_side(game), service.opponent_side(game))
 
 
-def _detail(game: KTGame, player: KTGameSide) -> KTGame_Read:
+def _detail(game: KTGame, player: KTGameSide, opponent: KTGameSide | None) -> KTGame_Read:
     """A battle whole. No catalog service is injected here, deliberately — everything
     this response carries was snapshotted into the game itself (#22, #24)."""
     return KTGame_Read(
@@ -379,25 +428,16 @@ def _detail(game: KTGame, player: KTGameSide) -> KTGame_Read:
         turning_point=game.turning_point,
         phase=game.phase,
         initiative=game.initiative,
-        # The SIDE's four. `markers` stays the GAME's -- #67 keeps it shared, because a
-        # marker is on the board rather than in a team's hands -- and the opponent's score
-        # stays on the game until there is an opponent row to hold it.
-        command_points=player.command_points,
-        victory_points=player.victory_points,
-        opponent_victory_points=game.opponent_victory_points,
+        # `markers` stays the GAME's: #67 keeps it shared, because a marker is on the
+        # board rather than in a team's hands.
         markers=game.markers,
-        ploys_used=player.ploys_used,
-        choices=player.choices,
         version=game.version,
         operatives=[
             KTGameOperative_Read.model_validate(row, from_attributes=True) for row in game.operatives
         ],
         equipment=[KTGameEquipment_Read.model_validate(row, from_attributes=True) for row in game.equipment],
-        # The SIDE's snapshots. Both rows hold the same lists today -- #97 copies them at
-        # creation -- and only the side's survives the last revision. The response shape
-        # is unchanged: these stay top-level fields until the read is reshaped.
-        rules=player.rules,
-        ploys=player.ploys,
+        player=_side(player),
+        opponent=_side(opponent) if opponent is not None else None,
         events=[KTGameEvent_Read.model_validate(entry, from_attributes=True) for entry in game.events],
     )
 
@@ -417,7 +457,9 @@ def create_game(
     composite foreign key refuses a roster they do not own, so this cannot start a
     battle from a stranger's list even if the route forgot to look (#54).
     """
-    game = service.create_game(current_user.id, payload.roster_id, payload.opponent_name)
+    # No opponent name: #98 drops it from this body, so creation names only the creator's
+    # half and `PUT .../sides/opponent` describes the other.
+    game = service.create_game(current_user.id, payload.roster_id)
     return _read(service, game.id)
 
 
@@ -430,7 +472,7 @@ def list_games(
     """The caller's games, newest first. Only ever the caller's."""
     games = service.list_games(current_user.id, limit=page.limit, offset=page.offset)
     return paginate(
-        [_listed(game, service.player_side(game)) for game in games],
+        [_listed(game, service.opponent_side(game)) for game in games],
         service.count_games(current_user.id),
         page,
     )
@@ -621,34 +663,8 @@ def remove_equipment(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{game_id}/ploys", response_model=KTGame_Read)
-def use_ploy(
-    payload: KTGamePloy_Use,
-    game: KTGame = Depends(get_owned_game),
-    service: KTGameService = Depends(get_game_service),
-) -> KTGame_Read:
-    """Spend a ploy: record it and deduct its CP in one operation.
-
-    The cost comes from the game's own snapshot, so a client does not supply it and
-    cannot forget to. One operation because it is one event -- `undo` then restores the
-    CP and removes the entry together, where two PATCHes would let one be undone without
-    the other.
-
-    400 for a ploy this game's snapshot does not list, or if the CP will not cover it.
-    How many ploys a turning point allows is the players' (#1). Returns the game whole,
-    because two of its fields moved.
-
-    Spends the CREATOR's pool. `POST .../sides/{side}/ploys` is what names a side (#65,
-    #67), and this path is kept beside it so no shipped call breaks before the one
-    breaking change. It is #77's "`use_ploy` becomes `POST .../sides/{side}/ploys`" that
-    retires it.
-    """
-    service.use_ploy(game.id, payload.name)
-    return _read(service, game.id)
-
-
 @router.post("/{game_id}/sides/{side}/ploys", response_model=KTGame_Read)
-def use_side_ploy(
+def use_ploy(
     side: str,
     payload: KTGamePloy_Use,
     game: KTGame = Depends(get_owned_game),

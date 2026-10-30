@@ -98,15 +98,13 @@ class KTGameService:
     # on purpose: they move through `advance`, which applies the resets that go with
     # them, and letting a caller set them directly would skip those.
     _UPDATABLE = {
-        "opponent_name",
+        # Three, not nine. The four settable fields moved to `PATCH .../sides/{side}`
+        # (#87), and `opponent_name` with `opponent_victory_points` are REMOVED rather
+        # than moved (#77) -- which is why this is four fewer and not six. What is left
+        # is what belongs to the GAME: its status, its initiative roll, its markers.
         "status",
         "initiative",
-        "command_points",
-        "victory_points",
-        "opponent_victory_points",
         "markers",
-        "ploys_used",
-        "choices",
     }
     # What a PATCH on one operative may set. `activated_in_turning_point` is absent for
     # the same reason: `activate_operative` sets it to the game's OWN turning point, so
@@ -161,7 +159,7 @@ class KTGameService:
 
     # ------------------------------- games -------------------------------
 
-    def create_game(self, user_id: UUID, roster_id: UUID, opponent_name: str | None = None) -> KTGame:
+    def create_game(self, user_id: UUID, roster_id: UUID) -> KTGame:
         """Start a battle from a roster, copying everything it will need.
 
         The copy is the point (decisions #22, #24): one datacard snapshot per roster
@@ -184,7 +182,6 @@ class KTGameService:
             owner_user_id=user_id,
             kill_team_id=roster.kill_team_id,
             roster_id=roster.id,
-            opponent_name=opponent_name,
             rules=[self._rule_snapshot(rule) for rule in roster.kill_team.rules],
             ploys=[self._ploy_snapshot(ploy) for ploy in self._playable_ploys(roster.kill_team)],
         )
@@ -217,7 +214,7 @@ class KTGameService:
             .where(KTGame.id == game_id)
             .options(
                 selectinload(KTGame.kill_team),  # type: ignore[arg-type]
-                selectinload(KTGame.sides),  # type: ignore[arg-type]
+                selectinload(KTGame.sides).selectinload(KTGameSide.kill_team),  # type: ignore[arg-type]
                 selectinload(KTGame.operatives),  # type: ignore[arg-type]
                 selectinload(KTGame.equipment),  # type: ignore[arg-type]
                 selectinload(KTGame.events),  # type: ignore[arg-type]
@@ -265,7 +262,7 @@ class KTGameService:
                 selectinload(KTGame.kill_team),  # type: ignore[arg-type]
                 # Eager, because `_listed` reads the player side's `victory_points`: one
                 # query for the page rather than one per game.
-                selectinload(KTGame.sides),  # type: ignore[arg-type]
+                selectinload(KTGame.sides).selectinload(KTGameSide.kill_team),  # type: ignore[arg-type]
             )
             .order_by(KTGame.created_at.desc(), KTGame.id)  # type: ignore[attr-defined]
             .offset(offset)
@@ -605,7 +602,7 @@ class KTGameService:
         self._write(game, "operative_activated", touched, target_id=row.id, side=row.side)
         return row
 
-    def use_ploy(self, game_id: UUID, name: str, side: str = "player") -> KTGame:
+    def use_ploy(self, game_id: UUID, name: str, side: str) -> KTGame:
         """Spend a ploy: record it AND deduct its CP, in one operation.
 
         The two halves were separate fields a caller set independently, which meant a
@@ -1089,7 +1086,11 @@ class KTGameService:
         event = KTGameEvent(
             game_id=game.id,
             sequence=self._next_sequence(game.id),
-            side=side if side is not None else self._scope_of(game.id, touched),
+            # The caller's, or NULL for a write that belongs to no side. Narrowing
+            # `_UPDATABLE` to the game's own three fields removed the last way a
+            # side-less write could touch a side's column, so there is nothing left to
+            # derive -- `_scope_of` existed for that and went with it.
+            side=side,
             actor_user_id=self.actor.id if self.actor else None,
             # STORED, not joined (#70): no route resolves a UUID to a name -- `GET /me` is
             # self-only and `PATCH /users/{user_id}` is admin-gated -- so a client holding
@@ -1116,9 +1117,14 @@ class KTGameService:
         about the opponent, and still lands on `kt_games` because that column has not
         moved yet. Conflating them would send a write to a row that has no such column.
 
-        `OPPONENT_FIELDS` are deliberately absent. They move onto the opponent side when
-        #92's `PUT` exists to create one -- until then there is often no row to write to,
-        and #74 makes that the ordinary state rather than an error.
+        `OPPONENT_FIELDS` are deliberately absent, and that is now a GAP rather than a
+        wait. No new event can carry them -- they left `_UPDATABLE` with the read reshape
+        -- but a historical one can, and routing them needs a RENAME as well as a row:
+        `opponent_name` is the opponent side's `display_name` and
+        `opponent_victory_points` is their `victory_points`, keyed as #77 keys it. Until
+        that is settled, undoing such an event after the columns are DROPPED raises
+        `ValueError: "KTGame" object has no field ...` -- #96's unexplained 500, which is
+        why the drop is gated on it and not on this piece.
         """
         if field in PLAYER_FIELDS:
             return self.player_side(game)
@@ -1150,38 +1156,6 @@ class KTGameService:
             touched.update(self._apply(row, subset))
         return touched
 
-    def _scope_of(self, game_id: UUID, touched: dict[str, Any]) -> str | None:
-        """Which side a game-level write belongs to, or None for the game itself (#94).
-
-        The same rule the historical backfill applied, so a log written before and after
-        K8 reads one way. A write naming only player fields is the player's; only opponent
-        fields, the opponent's; and a write naming BOTH stays None, because `side` holds
-        one value and #94 already reads None as "about the GAME" -- the honest description
-        of one call that moved both halves.
-
-        The axis is player against OPPONENT, not player against game. `status`,
-        `initiative` and `markers` belong to no side, so they do not compete: a write
-        touching `command_points` and `status` is the player's, because exactly one SIDE
-        appears in it.
-
-        A side this game has no ROW for scopes to None, and that guard is load-bearing
-        rather than defensive. `opponent_name` and `opponent_victory_points` are writable
-        today on a game with no opponent side (#97 creates only the player's), so without
-        it `fk_kt_game_event_side` refuses the event and a shipped operation starts
-        failing. It is also honest: those two are still columns on `kt_games` until the
-        last revision drops them, so until an opponent side exists the write really IS
-        about the game. The same guard sits in the backfill revision, for the same reason.
-
-        Callers that already KNOW the side pass it instead, which is every write aimed at
-        a row -- a row carries its own `side` and needs no inference.
-        """
-        mine = not PLAYER_FIELDS.isdisjoint(touched)
-        theirs = not OPPONENT_FIELDS.isdisjoint(touched)
-        if mine == theirs:
-            return None
-        side = "player" if mine else "opponent"
-        return side if self._side_row(game_id, side) is not None else None
-
     def player_side(self, game: KTGame) -> KTGameSide:
         """The creator's half, which every game has.
 
@@ -1191,14 +1165,25 @@ class KTGameService:
         that -- a `NotFoundError` would answer 404 for a game that plainly exists.
 
         Reads the loaded collection when there is one, so `get_game`'s bundle stays a flat
-        number of queries. `get_game_shallow` loads no sides, and SQLAlchemy lazy-loads
-        them on first touch there, which is one query on a path that was already doing
-        several.
+        number of queries.
         """
         for row in game.sides:
             if row.side == "player":
                 return row
         raise LookupError(f"game {game.id} has no player side, which #97 makes impossible")
+
+    def opponent_side(self, game: KTGame) -> KTGameSide | None:
+        """The other half, or None where the game has no opponent row at all.
+
+        None is #89's FIRST state, "no opponent yet" (#74), and a client renders an
+        invitation prompt for it. A row that exists with no `kill_team_id` is the THIRD
+        state -- #77's backfilled record -- and is NOT None, which is the distinction #75
+        says a read MUST make.
+        """
+        for row in game.sides:
+            if row.side == "opponent":
+                return row
+        return None
 
     def _side_row(self, game_id: UUID, side: str) -> KTGameSide | None:
         """One side of a game, or None where that half has no row yet.
@@ -1363,13 +1348,6 @@ class KTGameService:
             raise KTGameValidationError(
                 "initiative", f"must be one of {sorted(self._INITIATIVE)}, or null until rolled"
             )
-        for field in ("command_points", "opponent_victory_points"):
-            if field in fields and (fields[field] is None or fields[field] < 0):
-                raise KTGameValidationError(field, "cannot be negative")
-        if "victory_points" in fields:
-            self._validate_victory_points(fields["victory_points"])
-        if "ploys_used" in fields:
-            self._validate_ploys_used(self.player_side(game).ploys, fields["ploys_used"])
 
     @staticmethod
     def _validate_ploys_used(snapshot: list, entries) -> None:

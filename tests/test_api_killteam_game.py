@@ -10,7 +10,7 @@ import uuid
 
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.core.db.models_killteam import KTGame
+from app.core.db.models_killteam import KTGame, KTGameSide
 from app.core.services.service_killteam_game import EQUIPMENT_LIMIT
 from app.main import app
 
@@ -115,8 +115,75 @@ def test_the_detail_publishes_the_sides_snapshots_not_the_games(
     session.commit()
 
     body = auth_client.get(f"/api/v1/me/kill-team/games/{created['id']}").json()
-    assert [rule["name"] for rule in body["rules"]] == ["Side Rule"]
-    assert [ploy["name"] for ploy in body["ploys"]] == ["Side Ploy"]
+    assert [rule["name"] for rule in body["player"]["rules"]] == ["Side Rule"]
+    assert [ploy["name"] for ploy in body["player"]["ploys"]] == ["Side Ploy"]
+
+
+def test_the_read_distinguishes_all_three_opponent_states(
+    session, auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """#89's three states, and #75's "a row MUST distinguish ABSENT from UNRECORDED".
+
+    The discriminator is the SIDE ROW, not the team name, and both of the last two name
+    no team -- so a shape that collapsed them would make the third state unrenderable:
+
+      no opponent yet   `opponent` is null (#74)          -> invitation prompt
+      a pre-K8 record   an object, `kill_team_id` null    -> the preserved score, labelled
+      established       an object with a team             -> the full panel
+
+    That is why `opponent` is nullable rather than an object with empty fields.
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    theirs = make_kill_team(faction=make_kt_faction(name="Leagues"), name="Hearthkyn")
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+
+    # 1. absent
+    assert auth_client.get(f"{BASE}/{gid}").json()["opponent"] is None
+
+    # 2. a record with no team, which is the shape #77's backfill writes
+    game = session.get(KTGame, uuid.UUID(gid))
+    session.add(
+        KTGameSide(
+            game_id=game.id,
+            owner_user_id=game.owner_user_id,
+            side="opponent",
+            display_name="Dave",
+            victory_points={"unrecorded": 3},
+        )
+    )
+    session.commit()
+    recorded = auth_client.get(f"{BASE}/{gid}").json()["opponent"]
+    assert recorded is not None, "a record is NOT the same as no opponent"
+    assert recorded["kill_team_id"] is None and recorded["kill_team_name"] is None
+    assert (recorded["display_name"], recorded["victory_points"]) == ("Dave", {"unrecorded": 3})
+
+    # 3. established, so the panel can render in full
+    auth_client.put(
+        f"{BASE}/{gid}/sides/opponent",
+        json={"display_name": "Dave", "kill_team_id": str(theirs.id)},
+    )
+    full = auth_client.get(f"{BASE}/{gid}").json()["opponent"]
+    assert full["kill_team_id"] == str(theirs.id)
+    assert full["kill_team_name"] == "Hearthkyn", "the NAME travels with the id"
+    assert full["equipment_limit"] == EQUIPMENT_LIMIT, "each side has its own allowance"
+
+
+def test_a_listing_row_reads_as_a_matchup(auth_client, make_kill_team, make_kt_faction, make_kt_operative):
+    """`KTGame_ListRead` names BOTH teams, so a row is a matchup rather than your half."""
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    theirs = make_kill_team(faction=make_kt_faction(name="Leagues"), name="Hearthkyn")
+    gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
+
+    row = auth_client.get(BASE).json()["items"][0]
+    assert row["kill_team_name"] == "Raveners"
+    assert row["opponent_kill_team_name"] is None and row["opponent_display_name"] is None
+
+    auth_client.put(
+        f"{BASE}/{gid}/sides/opponent",
+        json={"display_name": "Dave", "kill_team_id": str(theirs.id)},
+    )
+    row = auth_client.get(BASE).json()["items"][0]
+    assert (row["opponent_kill_team_name"], row["opponent_display_name"]) == ("Hearthkyn", "Dave")
 
 
 def test_every_event_a_route_writes_names_its_actor(
@@ -136,7 +203,7 @@ def test_every_event_a_route_writes_names_its_actor(
     game = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
     gid = game["id"]
 
-    auth_client.patch(f"/api/v1/me/kill-team/games/{gid}", json={"command_points": 5})
+    auth_client.patch(f"/api/v1/me/kill-team/games/{gid}/sides/player", json={"command_points": 5})
     auth_client.patch(
         f"/api/v1/me/kill-team/games/{gid}/operatives/{game['operatives'][0]['id']}",
         json={"current_wounds": 7},
@@ -168,9 +235,9 @@ def test_adding_games_did_not_give_the_catalog_a_write_route():
 def test_every_game_route_needs_a_token(client):
     paths = [p for p in app.openapi()["paths"] if "/me/kill-team/games" in p]
     operations = sum(len(app.openapi()["paths"][p]) for p in paths)
-    # 12 paths and 17 operations: `PATCH .../sides/{side}` added an OPERATION to a path
-    # that already existed, which is the distinction `CLAUDE.md` fixes those two terms for.
-    assert (len(paths), operations) == (13, 18), f"{len(paths)} paths, {operations} operations"
+    # 12 and 17, down one path and one operation from the peak: the side-scoped ploys
+    # path arrived and `POST /{game_id}/ploys` retired with the read reshape (#77).
+    assert (len(paths), operations) == (12, 17), f"{len(paths)} paths, {operations} operations"
 
     assert client.get(BASE).status_code == 401
     assert client.post(BASE, json={"roster_id": str(uuid.uuid4())}).status_code == 401
@@ -204,7 +271,7 @@ def test_a_game_is_created_from_a_roster_and_carries_its_whole_reference(
         make_kt_weapon(operative=card, name="Claws", position=0)
         make_kt_ability(operative=card, name="Pounce", position=0)
 
-    resp = auth_client.post(BASE, json={"roster_id": roster["id"], "opponent_name": "Bob"})
+    resp = auth_client.post(BASE, json={"roster_id": roster["id"]})
 
     assert resp.status_code == 201
     body = resp.json()
@@ -214,7 +281,9 @@ def test_a_game_is_created_from_a_roster_and_carries_its_whole_reference(
     assert body["initiative"] is None
     assert body["kill_team_name"] == "Raveners" and body["faction_name"] == "Tyranids"
     # Decision #57: reported, and the list may exceed it.
-    assert body["equipment_limit"] == EQUIPMENT_LIMIT
+    # Inside each side now (#57, as the read reshape relocates it): the allowance is
+    # per side, and both carry the same constant.
+    assert body["player"]["equipment_limit"] == EQUIPMENT_LIMIT
     assert len(body["operatives"]) == 3
     # The snapshot is typed in the response, not a bare object -- the frontend generates
     # its types from this document.
@@ -222,8 +291,8 @@ def test_a_game_is_created_from_a_roster_and_carries_its_whole_reference(
     assert first["weapons"][0]["name"] == "Claws"
     assert first["abilities"][0]["description"]
     assert first["current_wounds"] == first["wounds"] == 12
-    assert [r["name"] for r in body["rules"]] == ["Burrow"]
-    assert sum(1 for p in body["ploys"] if p["universal"]) == 1
+    assert [r["name"] for r in body["player"]["rules"]] == ["Burrow"]
+    assert sum(1 for p in body["player"]["ploys"] if p["universal"]) == 1
 
 
 def test_a_game_cannot_be_started_from_a_stranger_s_roster(
@@ -272,7 +341,7 @@ def test_a_stranger_s_game_is_a_404_not_a_403(
     row, kit = uuid.uuid4(), uuid.uuid4()
 
     assert auth_client.get(f"{BASE}/{gid}").status_code == 404
-    assert auth_client.patch(f"{BASE}/{gid}", json={"command_points": 1}).status_code == 404
+    assert auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 1}).status_code == 404
     assert auth_client.delete(f"{BASE}/{gid}").status_code == 404
     assert auth_client.post(f"{BASE}/{gid}/advance").status_code == 404
     assert auth_client.post(f"{BASE}/{gid}/undo").status_code == 404
@@ -286,15 +355,24 @@ def test_games_are_listed_leanly_and_only_for_the_caller(
     auth_client, make_kill_team, make_kt_faction, make_kt_operative
 ):
     _, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
-    auth_client.post(BASE, json={"roster_id": roster["id"], "opponent_name": "Bob"})
-    auth_client.post(BASE, json={"roster_id": roster["id"], "opponent_name": "Carol"})
+    auth_client.post(BASE, json={"roster_id": roster["id"]})
+    auth_client.post(BASE, json={"roster_id": roster["id"]})
 
     body = auth_client.get(BASE).json()
 
     assert body["total"] == 2
     row = body["items"][0]
     # The listing carries the score and the team's name, and NONE of the bundle.
-    assert {"opponent_name", "status", "turning_point", "victory_points", "kill_team_name"} <= set(row)
+    # A row reads as a MATCHUP now: both teams named, and the three fields that left
+    # (`opponent_name`, `opponent_victory_points`, `victory_points`) are gone.
+    assert {
+        "status",
+        "turning_point",
+        "kill_team_name",
+        "opponent_kill_team_name",
+        "opponent_display_name",
+    } <= set(row)
+    assert {"opponent_name", "victory_points", "opponent_victory_points"}.isdisjoint(row)
     assert "operatives" not in row and "events" not in row and "rules" not in row
 
 
@@ -348,14 +426,18 @@ def test_a_stale_version_answers_409(auth_client, make_kill_team, make_kt_factio
     stale = game["version"]
 
     assert (
-        auth_client.patch(f"{BASE}/{game['id']}", json={"version": stale, "command_points": 1}).status_code
+        auth_client.patch(
+            f"{BASE}/{game['id']}/sides/player", json={"version": stale, "command_points": 1}
+        ).status_code
         == 200
     )
-    resp = auth_client.patch(f"{BASE}/{game['id']}", json={"version": stale, "command_points": 9})
+    resp = auth_client.patch(
+        f"{BASE}/{game['id']}/sides/player", json={"version": stale, "command_points": 9}
+    )
 
     assert resp.status_code == 409
     assert resp.json()["field"] == "version"
-    assert auth_client.get(f"{BASE}/{game['id']}").json()["command_points"] == 1
+    assert auth_client.get(f"{BASE}/{game['id']}").json()["player"]["command_points"] == 1
 
 
 def test_a_write_without_a_version_is_accepted(
@@ -365,10 +447,10 @@ def test_a_write_without_a_version_is_accepted(
     _, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     game = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()
 
-    resp = auth_client.patch(f"{BASE}/{game['id']}", json={"command_points": 4})
+    resp = auth_client.patch(f"{BASE}/{game['id']}/sides/player", json={"command_points": 4})
 
     assert resp.status_code == 200
-    assert resp.json()["command_points"] == 4
+    assert resp.json()["player"]["command_points"] == 4
 
 
 def test_an_unknown_field_in_a_game_patch_is_a_422(
@@ -485,7 +567,7 @@ def test_undo_reverts_the_last_change_and_returns_the_game_whole(
     _, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     game = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()
     gid = game["id"]
-    auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3})
 
     resp = auth_client.post(f"{BASE}/{gid}/undo")
 
@@ -493,9 +575,9 @@ def test_undo_reverts_the_last_change_and_returns_the_game_whole(
     body = resp.json()
     # The whole game, not the event: an undo can move anything, so a client that got
     # only the event would have to re-read to know what changed.
-    assert body["command_points"] == 0
+    assert body["player"]["command_points"] == 0
     assert "operatives" in body and "events" in body
-    assert [e["type"] for e in body["events"]] == ["game_updated", "undone"]
+    assert [e["type"] for e in body["events"]] == ["side_updated", "undone"]
     assert body["events"][0]["undone_by"] == body["events"][1]["id"]
 
 
@@ -516,17 +598,17 @@ def test_spending_a_ploy_end_to_end(
     team, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     make_kt_ploy(kill_team=team, name="Predatory Instincts", cp_cost=1, position=0)
     gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
-    auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3})
 
-    resp = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": "Predatory Instincts"})
+    resp = auth_client.post(f"{BASE}/{gid}/sides/player/ploys", json={"name": "Predatory Instincts"})
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["command_points"] == 2, "the CP came out of the snapshot's cost"
-    assert body["ploys_used"] == [{"name": "Predatory Instincts", "turning_point": 1}]
+    assert body["player"]["command_points"] == 2, "the CP came out of the snapshot's cost"
+    assert body["player"]["ploys_used"] == [{"name": "Predatory Instincts", "turning_point": 1}]
 
     undone = auth_client.post(f"{BASE}/{gid}/undo").json()
-    assert (undone["command_points"], undone["ploys_used"]) == (3, [])
+    assert (undone["player"]["command_points"], undone["player"]["ploys_used"]) == (3, [])
 
 
 def test_a_ploy_the_team_does_not_have_is_a_400(
@@ -535,7 +617,7 @@ def test_a_ploy_the_team_does_not_have_is_a_400(
     _, _, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
 
-    resp = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": "Teleportarium"})
+    resp = auth_client.post(f"{BASE}/{gid}/sides/player/ploys", json={"name": "Teleportarium"})
 
     assert resp.status_code == 400
     assert resp.json()["field"] == "name"
@@ -552,8 +634,8 @@ def test_spending_a_ploy_needs_a_token_and_the_caller_s_own_game(
     session.add(theirs)
     session.commit()
 
-    assert client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 401
-    assert auth_client.post(f"{BASE}/{theirs.id}/ploys", json={"name": "x"}).status_code == 404
+    assert client.post(f"{BASE}/{theirs.id}/sides/player/ploys", json={"name": "x"}).status_code == 401
+    assert auth_client.post(f"{BASE}/{theirs.id}/sides/player/ploys", json={"name": "x"}).status_code == 404
 
 
 def test_a_write_that_changes_nothing_records_nothing_and_undo_still_works(
@@ -569,14 +651,14 @@ def test_a_write_that_changes_nothing_records_nothing_and_undo_still_works(
     """
     _team, _cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     gid = auth_client.post(BASE, json={"roster_id": roster["id"]}).json()["id"]
-    started_with = auth_client.get(f"{BASE}/{gid}").json()["command_points"]
+    started_with = auth_client.get(f"{BASE}/{gid}").json()["player"]["command_points"]
 
-    auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3})
     real = auth_client.get(f"{BASE}/{gid}").json()
-    assert real["command_points"] == 3
+    assert real["player"]["command_points"] == 3
 
     # The same value again: accepted, but nothing happened, so nothing is recorded.
-    again = auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3})
+    again = auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3})
     assert again.status_code == 200
     quiet = auth_client.get(f"{BASE}/{gid}").json()
     assert quiet["version"] == real["version"], "a no-op write moved the version"
@@ -584,7 +666,7 @@ def test_a_write_that_changes_nothing_records_nothing_and_undo_still_works(
 
     # So the one undo reaches the one real change, rather than the empty event above it.
     assert auth_client.post(f"{BASE}/{gid}/undo", json={}).status_code == 200
-    assert auth_client.get(f"{BASE}/{gid}").json()["command_points"] == started_with
+    assert auth_client.get(f"{BASE}/{gid}").json()["player"]["command_points"] == started_with
 
 
 def test_a_null_or_malformed_value_is_a_400_and_never_a_500(
@@ -613,24 +695,28 @@ def test_a_null_or_malformed_value_is_a_400_and_never_a_500(
     before = auth_client.get(f"{BASE}/{gid}").json()
     oid = before["operatives"][0]["id"]
 
-    for field in (
-        "status",
-        "command_points",
-        "victory_points",
-        "opponent_victory_points",
-        "markers",
-        "ploys_used",
-        "choices",
-    ):
+    # The game's own two, on the game's own path.
+    for field in ("status", "markers"):
         resp = auth_client.patch(f"{BASE}/{gid}", json={field: None})
         assert resp.status_code == 400, f"{field}: {resp.status_code} {resp.text[:120]}"
+
+    # And the four that moved, on the side's -- same rule, different row. The read
+    # reshape took them off `KTGame_Update`, so sending one there is now a 422 from the
+    # schema rather than a 400 from the service, which is the breaking change working.
+    for field in ("command_points", "victory_points", "ploys_used", "choices"):
+        resp = auth_client.patch(f"{BASE}/{gid}/sides/player", json={field: None})
+        assert resp.status_code == 400, f"{field}: {resp.status_code} {resp.text[:120]}"
+        assert auth_client.patch(f"{BASE}/{gid}", json={field: None}).status_code == 422
 
     for field in ("current_wounds", "order", "status", "tokens", "actions_used"):
         resp = auth_client.patch(f"{BASE}/{gid}/operatives/{oid}", json={field: None})
         assert resp.status_code == 400, f"operative {field}: {resp.status_code} {resp.text[:120]}"
 
     # A name that cannot go in a set: refused, rather than raising on the lookup.
-    assert auth_client.patch(f"{BASE}/{gid}", json={"ploys_used": [{"name": ["x"]}]}).status_code == 400
+    assert (
+        auth_client.patch(f"{BASE}/{gid}/sides/player", json={"ploys_used": [{"name": ["x"]}]}).status_code
+        == 400
+    )
     assert (
         auth_client.patch(
             f"{BASE}/{gid}/operatives/{oid}", json={"actions_used": [{"name": {"a": 1}}]}
@@ -675,9 +761,11 @@ def test_a_stale_write_from_the_database_is_a_clean_409(
             "UPDATE statement on table 'kt_games' expected to update 1 row(s); 0 were matched."
         )
 
-    monkeypatch.setattr(KTGameService, "update_game", moved_on)
+    # `update_side`, because that is the method the side path calls -- patching
+    # `update_game` would leave the request succeeding and prove nothing.
+    monkeypatch.setattr(KTGameService, "update_side", moved_on)
 
-    resp = auth_client.patch(f"{BASE}/{gid}", json={"command_points": 7})
+    resp = auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 7})
 
     assert resp.status_code == 409, resp.text
     body = resp.json()
@@ -705,12 +793,12 @@ def test_a_finished_game_refuses_every_write_but_stays_readable(
     whole = auth_client.get(f"{BASE}/{gid}").json()
     row_id = whole["operatives"][0]["id"]
     equipment = auth_client.post(f"{BASE}/{gid}/equipment", json={"equipment_id": str(kit.id)}).json()
-    ploy_name = whole["ploys"][0]["name"] if whole["ploys"] else None
+    ploy_name = whole["player"]["ploys"][0]["name"] if whole["player"]["ploys"] else None
 
     assert auth_client.patch(f"{BASE}/{gid}", json={"status": "finished"}).status_code == 200
 
     refused = {
-        "PATCH the game": auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}),
+        "PATCH the game": auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3}),
         "advance": auth_client.post(f"{BASE}/{gid}/advance", json={}),
         "add an operative": auth_client.post(
             f"{BASE}/{gid}/operatives", json={"operative_id": str(cards[0].id), "source": "rule"}
@@ -730,7 +818,7 @@ def test_a_finished_game_refuses_every_write_but_stays_readable(
         "remove equipment": auth_client.delete(f"{BASE}/{gid}/equipment/{equipment['id']}"),
     }
     if ploy_name:
-        refused["use a ploy"] = auth_client.post(f"{BASE}/{gid}/ploys", json={"name": ploy_name})
+        refused["use a ploy"] = auth_client.post(f"{BASE}/{gid}/sides/player/ploys", json={"name": ploy_name})
 
     for label, resp in refused.items():
         assert resp.status_code == 400, f"{label}: {resp.status_code} {resp.text[:140]}"
@@ -756,12 +844,12 @@ def test_undo_is_the_way_back_out_of_a_finished_game(
     before = auth_client.get(f"{BASE}/{gid}").json()["status"]
 
     auth_client.patch(f"{BASE}/{gid}", json={"status": "finished"})
-    assert auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}).status_code == 400
+    assert auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3}).status_code == 400
 
     assert auth_client.post(f"{BASE}/{gid}/undo", json={}).status_code == 200
 
     assert auth_client.get(f"{BASE}/{gid}").json()["status"] == before
-    assert auth_client.patch(f"{BASE}/{gid}", json={"command_points": 3}).status_code == 200
+    assert auth_client.patch(f"{BASE}/{gid}/sides/player", json={"command_points": 3}).status_code == 200
 
 
 def test_a_finished_game_can_still_be_deleted(
