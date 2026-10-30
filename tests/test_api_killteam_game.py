@@ -37,6 +37,40 @@ def _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative, n=3
 # --- the write surface, and the catalog's lack of one ------------------------
 
 
+def test_the_detail_publishes_the_sides_snapshots_not_the_games(
+    session, auth_client, make_kill_team, make_kt_faction, make_kt_operative
+):
+    """Decision #67: `rules` and `ploys` belong to the side, so the read serves the side's.
+
+    The two rows hold the SAME lists today -- #97 copies them at creation -- so a read
+    pointed at either would look correct. This makes them differ, which is the only way
+    to tell which one the response came from. The reverting mutation passed every other
+    test in the suite before this existed.
+
+    The response SHAPE is unchanged: both stay top-level fields until the read is
+    reshaped into `player` and `opponent` objects, so no client sees this move.
+    """
+    team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
+    created = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
+
+    game = session.get(KTGame, uuid.UUID(created["id"]))
+    player = next(row for row in game.sides if row.side == "player")
+    player.rules = [{"name": "Side Rule", "description": "from the side", "group": None}]
+    player.ploys = [
+        {"name": "Side Ploy", "kind": "strategic", "cp_cost": 1, "description": "x", "universal": False}
+    ]
+    game.rules = [{"name": "Game Rule", "description": "from the stale column", "group": None}]
+    game.ploys = [
+        {"name": "Game Ploy", "kind": "strategic", "cp_cost": 1, "description": "y", "universal": False}
+    ]
+    session.add_all([player, game])
+    session.commit()
+
+    body = auth_client.get(f"/api/v1/me/kill-team/games/{created['id']}").json()
+    assert [rule["name"] for rule in body["rules"]] == ["Side Rule"]
+    assert [ploy["name"] for ploy in body["ploys"]] == ["Side Ploy"]
+
+
 def test_every_event_a_route_writes_names_its_actor(
     auth_client, make_kill_team, make_kt_faction, make_kt_operative
 ):

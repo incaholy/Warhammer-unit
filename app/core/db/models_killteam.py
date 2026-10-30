@@ -871,6 +871,20 @@ class KTGame(TimestampMixin, table=True):
         # is told it shares the column rather than owning it.
         sa_relationship_kwargs={"overlaps": "roster,operatives"},
     )
+    #: Both halves of the battle (#67), ordered so `'opponent'` sorts before `'player'`
+    #: only by accident of the alphabet -- read them by name rather than by position.
+    #:
+    #: `cascade_delete` is REQUIRED even though the composite leg already carries ON
+    #: DELETE CASCADE, and the first draft of this left it off for exactly that reason.
+    #: Without it SQLAlchemy disassociates the children instead of deleting them --
+    #: `UPDATE kt_game_sides SET game_id=NULL` -- which the NOT NULL column refuses, so
+    #: deleting a game raised an IntegrityError before the database ever saw a DELETE. The
+    #: three sibling collections all set it, for the same reason.
+    sides: list["KTGameSide"] = Relationship(
+        back_populates="game",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "KTGameSide.side"},
+    )
     operatives: list["KTGameOperative"] = Relationship(
         back_populates="game",
         cascade_delete=True,
@@ -977,6 +991,8 @@ class KTGameSide(TimestampMixin, table=True):
     ploys: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
     ploys_used: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
     choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
+
+    game: "KTGame" = Relationship(back_populates="sides")
 
 
 class KTGameOperative(TimestampMixin, table=True):

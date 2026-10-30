@@ -364,6 +364,74 @@ def test_a_service_with_no_actor_still_writes_the_log(session, battle):
     assert entry.actor_display_name is None
 
 
+def test_the_sides_snapshot_is_what_a_ploy_is_checked_against(session, battle):
+    """Decision #67: `ploys` belongs to the side, so the side is what `use_ploy` reads.
+
+    The two rows hold the SAME list today, since #97 copies it at creation, so a test
+    that merely read one would pass whichever it read. This makes them differ: a name
+    only the side lists is spendable, and a name only the stale game column lists is not.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.update_game(game.id, None, command_points=5)
+    player = svc.player_side(game)
+
+    player.ploys = [{"name": "Side Only", "cp_cost": 1, "universal": False}]
+    game.ploys = [{"name": "Game Only", "cp_cost": 1, "universal": False}]
+    session.add_all([player, game])
+    session.commit()
+
+    svc.use_ploy(game.id, "Side Only")
+    # `ploys_used` and `command_points` are still written to the GAME; they move onto the
+    # side with the next change. What this asserts is which snapshot was CONSULTED.
+    assert [entry["name"] for entry in game.ploys_used] == ["Side Only"]
+    assert game.command_points == 4
+
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.use_ploy(game.id, "Game Only")
+
+
+def test_ploys_used_is_validated_against_the_sides_snapshot(session, battle):
+    """The same authority question for `_validate_ploys_used` (#23's counterpart).
+
+    It takes the snapshot rather than the game now, because after #67 the list belongs to
+    a side and the caller is what knows which one.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    player = svc.player_side(game)
+
+    player.ploys = [{"name": "Side Only", "cp_cost": 0, "universal": False}]
+    game.ploys = [{"name": "Game Only", "cp_cost": 0, "universal": False}]
+    session.add_all([player, game])
+    session.commit()
+
+    svc.update_game(game.id, None, ploys_used=[{"name": "Side Only", "turning_point": 1}])
+
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.update_game(game.id, None, ploys_used=[{"name": "Game Only", "turning_point": 1}])
+
+
+def test_a_game_with_no_player_side_is_a_broken_invariant_not_a_404(session, battle):
+    """#97 makes this unreachable, so it raises `LookupError` rather than `NotFoundError`.
+
+    A `NotFoundError` would answer 404 for a game that plainly exists, which sends a
+    client looking for the wrong fault. `LookupError` is not a `CodedError`, so it reaches
+    the handler as a 500 -- correct for an invariant that cannot be violated by input.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    game_id = game.id
+    session.delete(svc.player_side(game))
+    session.commit()
+
+    with pytest.raises(LookupError, match="no player side"):
+        svc.player_side(svc.get_game(game_id))
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()
@@ -418,7 +486,7 @@ def test_creating_a_game_needs_a_user_and_a_roster_that_exist(session, battle):
 def _touch_whole_game(game):
     """Walk everything a game read carries, so a lazy load would issue its query here."""
     assert game.kill_team.name is not None
-    for collection in (game.operatives, game.equipment, game.events):
+    for collection in (game.sides, game.operatives, game.equipment, game.events):
         [row.id for row in collection]
 
 
@@ -432,7 +500,7 @@ def _assert_eagerly_loaded(game):
     all three `selectinload`s left the count at five and every test green.
     """
     unloaded = inspect(game).unloaded
-    for name in ("operatives", "equipment", "events", "kill_team"):
+    for name in ("sides", "operatives", "equipment", "events", "kill_team"):
         assert name not in unloaded, f"{name} came back lazy, so a battle screen pays per access"
 
 
@@ -464,7 +532,9 @@ def test_a_game_read_is_flat_whatever_the_battles_size(session, battle):
     # `get_game` when nothing touches the collections, and `selectinload` costs one per
     # collection whatever the size -- so the two sides moved together under every
     # mutation. The catalog's equivalent already asserts `== 9` for exactly this reason.
-    assert c3["n"] == c6["n"] == 5, f"{c3['n']} queries for three, {c6['n']} for six"
+    # Six, not five: `sides` joined the bundle when the moved columns became the side's
+    # (#67), so a battle screen still pays one query per collection and none per row.
+    assert c3["n"] == c6["n"] == 6, f"{c3['n']} queries for three, {c6['n']} for six"
 
 
 def test_a_read_after_a_write_sees_the_write(session, battle):

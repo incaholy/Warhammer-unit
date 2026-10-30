@@ -52,7 +52,7 @@ from app.api.fields import INT32_MAX, Name, WriteSchema
 from app.api.pagination import Page, PageParams, paginate
 from app.core.db.connection import get_session
 from app.core.db.models import User
-from app.core.db.models_killteam import KTGame
+from app.core.db.models_killteam import KTGame, KTGameSide
 from app.core.services.errors import NotFoundError
 from app.core.services.service_killteam_game import EQUIPMENT_LIMIT, KTGameService
 
@@ -316,7 +316,20 @@ def _listed(game: KTGame) -> KTGame_ListRead:
     )
 
 
-def _detail(game: KTGame) -> KTGame_Read:
+def _read(service: KTGameService, game_id: UUID) -> KTGame_Read:
+    """Load one game whole and shape the detail response.
+
+    The six writing routes all answered `_detail(service.get_game(game.id))`, and now all
+    need the player side beside the game, so the pair is loaded in one place rather than
+    repeated six times. The side comes from the SERVICE, because "every game has a player
+    side" is #97's invariant and belongs behind the service boundary -- a presentation
+    helper picking the row out of a list would be re-deciding it here.
+    """
+    game = service.get_game(game_id)
+    return _detail(game, service.player_side(game))
+
+
+def _detail(game: KTGame, player: KTGameSide) -> KTGame_Read:
     """A battle whole. No catalog service is injected here, deliberately — everything
     this response carries was snapshotted into the game itself (#22, #24)."""
     return KTGame_Read(
@@ -342,8 +355,11 @@ def _detail(game: KTGame) -> KTGame_Read:
             KTGameOperative_Read.model_validate(row, from_attributes=True) for row in game.operatives
         ],
         equipment=[KTGameEquipment_Read.model_validate(row, from_attributes=True) for row in game.equipment],
-        rules=game.rules,
-        ploys=game.ploys,
+        # The SIDE's snapshots. Both rows hold the same lists today -- #97 copies them at
+        # creation -- and only the side's survives the last revision. The response shape
+        # is unchanged: these stay top-level fields until the read is reshaped.
+        rules=player.rules,
+        ploys=player.ploys,
         events=[KTGameEvent_Read.model_validate(entry, from_attributes=True) for entry in game.events],
     )
 
@@ -364,7 +380,7 @@ def create_game(
     battle from a stranger's list even if the route forgot to look (#54).
     """
     game = service.create_game(current_user.id, payload.roster_id, payload.opponent_name)
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)
 
 
 @router.get("", response_model=Page[KTGame_ListRead])
@@ -383,7 +399,7 @@ def get_game(
     game: KTGame = Depends(get_owned_game),
     service: KTGameService = Depends(get_game_service),
 ) -> KTGame_Read:
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)
 
 
 @router.patch("/{game_id}", response_model=KTGame_Read)
@@ -395,7 +411,7 @@ def update_game(
     """CP, VP, markers, the ploys spent. 409 if `version` is behind (#9)."""
     fields = payload.model_dump(exclude_unset=True)
     service.update_game(game.id, fields.pop("version", None), **fields)
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)
 
 
 @router.delete("/{game_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -533,7 +549,7 @@ def use_ploy(
     because two of its fields moved.
     """
     service.use_ploy(game.id, payload.name)
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)
 
 
 # --- flow ---
@@ -553,7 +569,7 @@ def advance(
     `undo` reopens one closed by accident.
     """
     service.advance(game.id)
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)
 
 
 @router.post("/{game_id}/undo", response_model=KTGame_Read)
@@ -569,4 +585,4 @@ def undo(
     nothing left.
     """
     service.undo(game.id)
-    return _detail(service.get_game(game.id))
+    return _read(service, game.id)

@@ -190,6 +190,7 @@ class KTGameService:
             .where(KTGame.id == game_id)
             .options(
                 selectinload(KTGame.kill_team),  # type: ignore[arg-type]
+                selectinload(KTGame.sides),  # type: ignore[arg-type]
                 selectinload(KTGame.operatives),  # type: ignore[arg-type]
                 selectinload(KTGame.equipment),  # type: ignore[arg-type]
                 selectinload(KTGame.events),  # type: ignore[arg-type]
@@ -431,7 +432,10 @@ class KTGameService:
         `ploys_used` and `command_points` stay directly writable for a custom game.
         """
         game = self._require_game(game_id)
-        ploy = next((p for p in game.ploys if p.get("name") == name), None)
+        # The SIDE's snapshot, not the game's. Both hold the same list today -- #97 copies
+        # it at creation -- and only one of them survives the last revision.
+        side = self.player_side(game)
+        ploy = next((p for p in side.ploys if p.get("name") == name), None)
         if ploy is None:
             raise KTGameValidationError("name", f"{name!r} is not one of this game's ploys")
 
@@ -923,6 +927,24 @@ class KTGameService:
         side = "player" if mine else "opponent"
         return side if self._side_row(game_id, side) is not None else None
 
+    def player_side(self, game: KTGame) -> KTGameSide:
+        """The creator's half, which every game has.
+
+        Guaranteed present rather than hoped for: #97 inserts it with the game, and #77's
+        backfill gave one to every game that predates the slice. So its absence is a
+        broken invariant rather than a missing resource, and raising `LookupError` says
+        that -- a `NotFoundError` would answer 404 for a game that plainly exists.
+
+        Reads the loaded collection when there is one, so `get_game`'s bundle stays a flat
+        number of queries. `get_game_shallow` loads no sides, and SQLAlchemy lazy-loads
+        them on first touch there, which is one query on a path that was already doing
+        several.
+        """
+        for row in game.sides:
+            if row.side == "player":
+                return row
+        raise LookupError(f"game {game.id} has no player side, which #97 makes impossible")
+
     def _side_row(self, game_id: UUID, side: str) -> KTGameSide | None:
         """One side of a game, or None where that half has no row yet.
 
@@ -1051,11 +1073,15 @@ class KTGameService:
         if "victory_points" in fields:
             self._validate_victory_points(fields["victory_points"])
         if "ploys_used" in fields:
-            self._validate_ploys_used(game, fields["ploys_used"])
+            self._validate_ploys_used(self.player_side(game).ploys, fields["ploys_used"])
 
     @staticmethod
-    def _validate_ploys_used(game: KTGame, entries) -> None:
-        """A ploy recorded must be one this GAME's snapshot lists.
+    def _validate_ploys_used(snapshot: list, entries) -> None:
+        """A ploy recorded must be one this SIDE's snapshot lists.
+
+        Takes the snapshot rather than the game, because after #67 the list belongs to a
+        side and the caller is what knows which one. It also keeps this a static method:
+        handing it the game would have made it reach for a session to find the side.
 
         The exact counterpart of `_validate_actions` against an operative's card (#23),
         and it was the missing half of that rule: actions were checked and ploys were
@@ -1064,7 +1090,7 @@ class KTGameService:
         """
         if not isinstance(entries, list):
             raise KTGameValidationError("ploys_used", "must be a list of entries")
-        known = {p["name"] for p in game.ploys if isinstance(p, dict) and "name" in p}
+        known = {p["name"] for p in snapshot if isinstance(p, dict) and "name" in p}
         for entry in entries:
             # `isinstance(..., str)` rather than just present: `known` is a SET, so a
             # name that was a dict or a list raised `TypeError: unhashable type` on the
