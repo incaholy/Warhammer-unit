@@ -62,7 +62,7 @@ def test_putting_a_side_names_an_opponent_who_holds_no_account(
 
     # The log says who, and which half.
     entry = r.json()["events"][-1]
-    assert entry["type"] == "side_updated"
+    assert entry["type"] == "side_described"
     assert entry["side"] == "opponent"
     assert entry["actor_display_name"] == auth_client.user.username
 
@@ -168,7 +168,9 @@ def test_adding_games_did_not_give_the_catalog_a_write_route():
 def test_every_game_route_needs_a_token(client):
     paths = [p for p in app.openapi()["paths"] if "/me/kill-team/games" in p]
     operations = sum(len(app.openapi()["paths"][p]) for p in paths)
-    assert (len(paths), operations) == (12, 16), f"{len(paths)} paths, {operations} operations"
+    # 12 paths and 17 operations: `PATCH .../sides/{side}` added an OPERATION to a path
+    # that already existed, which is the distinction `CLAUDE.md` fixes those two terms for.
+    assert (len(paths), operations) == (12, 17), f"{len(paths)} paths, {operations} operations"
 
     assert client.get(BASE).status_code == 401
     assert client.post(BASE, json={"roster_id": str(uuid.uuid4())}).status_code == 401
@@ -176,6 +178,8 @@ def test_every_game_route_needs_a_token(client):
     assert client.post(f"{BASE}/{uuid.uuid4()}/advance").status_code == 401
     assert client.post(f"{BASE}/{uuid.uuid4()}/undo").status_code == 401
     assert client.put(f"{BASE}/{uuid.uuid4()}/sides/opponent", json={"display_name": "x"}).status_code == 401
+    sides = f"{BASE}/{uuid.uuid4()}/sides/opponent"
+    assert client.patch(sides, json={"command_points": 1}).status_code == 401
 
 
 # --- creating and reading ---------------------------------------------------

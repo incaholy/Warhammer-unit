@@ -231,6 +231,21 @@ class KTGameSide_Put(WriteSchema):
     kill_team_id: UUID | None = None
 
 
+class KTGameSide_Update(WriteSchema):
+    """One side's numbers (#87): either participant may set these on either half.
+
+    `version` is the GAME's (#9), because one battle is one optimistic-locking unit. The
+    four fields are the ones #67 moved off the game, and `PATCH /{game_id}` can still set
+    them until the breaking change removes them there.
+    """
+
+    version: int | None = Field(default=None, ge=1, le=INT32_MAX)
+    command_points: int | None = Field(default=None, ge=0, le=INT32_MAX)
+    victory_points: dict[str, int] | None = None
+    ploys_used: list[dict[str, Any]] | None = None
+    choices: dict[str, Any] | None = None
+
+
 class KTGame_Read(SQLModel):
     """A battle whole — everything the screen needs, and no catalog call (#24)."""
 
@@ -465,6 +480,23 @@ def establish_side(
         display_name=fields["display_name"],
         kill_team_id=fields.get("kill_team_id"),
     )
+    return _read(service, game.id)
+
+
+@router.patch("/{game_id}/sides/{side}", response_model=KTGame_Read)
+def update_side(
+    side: str,
+    payload: KTGameSide_Update,
+    game: KTGame = Depends(get_owned_game),
+    service: KTGameService = Depends(get_game_service),
+) -> KTGame_Read:
+    """One side's CP, score, spent ploys and picks (#87). 409 if `version` is behind (#9).
+
+    NOT scoped to the caller's own half: #87 lets either participant record anything on
+    either side, with the actor on the event so the write is visible rather than silent.
+    """
+    fields = payload.model_dump(exclude_unset=True)
+    service.update_side(game.id, side, fields.pop("version", None), **fields)
     return _read(service, game.id)
 
 

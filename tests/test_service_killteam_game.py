@@ -568,6 +568,12 @@ def test_a_side_can_be_established_by_hand_for_an_opponent_with_no_account(sessi
     assert row.kill_team_id == theirs.id
     assert row.occupant_user_id is None
     assert row.roster_id is None
+    # Setting a team snapshots its reference, so #69's "the snapshot is the authority"
+    # holds for a hand-described side and not only a joined one. The universal ploys come
+    # with it, exactly as they do at creation.
+    assert [p["universal"] for p in row.ploys] == [True], "the universal list came with it"
+    assert all(p["name"].startswith("Command Re-roll") for p in row.ploys)
+    assert row.rules == [], "this team has no rules of its own in the fixture"
 
 
 def test_naming_your_own_side_needs_no_team(session, battle):
@@ -633,7 +639,7 @@ def test_establishing_a_side_is_undone_as_fields_and_leaves_the_row(session, bat
     entry = session.exec(
         select(KTGameEvent).where(KTGameEvent.game_id == game.id).order_by(KTGameEvent.sequence.desc())
     ).first()
-    assert entry.type == "side_updated"
+    assert entry.type == "side_described"
     assert entry.payload["op"] == "fields"
     assert entry.side == "opponent"
     assert entry.payload["target_id"] == str(row_id)
@@ -751,6 +757,98 @@ def test_an_unknown_side_is_refused_when_adding_an_operative(session, battle):
 
     with pytest.raises(KTGameValidationError, match="must be one of"):
         svc.add_operative(game.id, b["cards"][0].id, source="rule", side="banana")
+
+
+def test_either_side_can_be_scored_and_neither_is_the_callers_own(session, battle, make_kill_team):
+    """Decision #87: either participant may record anything on either side.
+
+    Nothing compares the caller to the side, which is the point -- one person holding one
+    phone is the ordinary case at a table, and the opponent asking you to tick their score
+    is not an edge case. The actor is on the event, so the write is visible rather than
+    silent (#70).
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    svc.update_side(game.id, "player", None, command_points=4, victory_points={"crit_op": 3})
+    svc.update_side(game.id, "opponent", None, command_points=2, victory_points={"crit_op": 5})
+
+    mine = svc.player_side(game)
+    theirs_row = svc._side_row(game.id, "opponent")
+    assert (mine.command_points, mine.victory_points) == (4, {"crit_op": 3})
+    assert (theirs_row.command_points, theirs_row.victory_points) == (2, {"crit_op": 5})
+
+
+def test_a_sides_spent_ploys_are_checked_against_that_sides_snapshot(
+    session, battle, make_kill_team, make_kt_ploy
+):
+    """Which is why establishment snapshots one (#92, as amended).
+
+    #87 lets either participant record PLOYS on either side, and the opponent's spent
+    ploys have to be the OPPONENT's ploys -- so a name from your own team's list is
+    refused on their half. Without a snapshot at establishment their list would be empty
+    and every entry refused, which is the gap that amendment closes.
+    """
+    b = battle()
+    theirs = make_kill_team(faction=b["team"].faction, name="Hearthkyn Salvagers")
+    make_kt_ploy(kill_team=theirs, name="Bolstered Resolve", position=0)
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    svc.establish_side(game.id, "opponent", display_name="Dave", kill_team_id=theirs.id)
+
+    svc.update_side(game.id, "opponent", None, ploys_used=[{"name": "Bolstered Resolve", "turning_point": 1}])
+    assert svc._side_row(game.id, "opponent").ploys_used[0]["name"] == "Bolstered Resolve"
+
+    mine = svc.player_side(game).ploys[0]["name"]
+    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
+        svc.update_side(game.id, "opponent", None, ploys_used=[{"name": mine, "turning_point": 1}])
+
+
+def test_a_side_patch_refuses_what_it_does_not_own(session, battle):
+    """`_SIDE_UPDATABLE` is the four fields #67 moved, and nothing else.
+
+    `status`, `initiative` and `markers` stay the game's (#76, #67), so this path cannot
+    set them -- a side has no such columns to set.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="cannot update"):
+        svc.update_side(game.id, "player", None, status="finished")
+    with pytest.raises(KTGameValidationError, match="cannot update"):
+        svc.update_side(game.id, "player", None, markers=["a"])
+
+
+def test_a_side_patch_takes_the_games_version_lock(session, battle):
+    """`version` is the GAME's (#9): one battle is one optimistic-locking unit.
+
+    A per-side version would let one tab overwrite the other's view of the board while
+    both believed they were current.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    stale = game.version
+
+    svc.update_side(game.id, "player", None, command_points=3)
+
+    with pytest.raises(ConflictError, match="has moved on"):
+        svc.update_side(game.id, "player", stale, command_points=9)
+    assert svc.player_side(game).command_points == 3
+
+
+def test_a_side_patch_needs_the_side_to_exist(session, battle):
+    """An unestablished opponent cannot be scored, and says so rather than 404ing."""
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+
+    with pytest.raises(KTGameValidationError, match="no opponent side yet"):
+        svc.update_side(game.id, "opponent", None, command_points=1)
 
 
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):

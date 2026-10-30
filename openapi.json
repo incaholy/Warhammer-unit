@@ -3319,6 +3319,72 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "kill team games"
+        ],
+        "summary": "Update Side",
+        "description": "One side's CP, score, spent ploys and picks (#87). 409 if `version` is behind (#9).\n\nNOT scoped to the caller's own half: #87 lets either participant record anything on\neither side, with the actor on the event so the write is visible rather than silent.",
+        "operationId": "update_side_api_v1_me_kill_team_games__game_id__sides__side__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "side",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Side"
+            }
+          },
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KTGameSide_Update"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KTGame_Read"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/me/kill-team/games/{game_id}/operatives": {
@@ -5027,6 +5093,81 @@
         ],
         "title": "KTGameSide_Put",
         "description": "Describe one side of a battle (#92): name it, and give it a team if it has none.\n\n`display_name` is the only field a body must carry, which is what lets this one\noperation serve both halves. Naming your OWN side is `{display_name}` alone -- #76\nfixes the creator's team at creation, so there is no value to echo back from the read.\n\n`kill_team_id` is settable once. A side with no team takes the one given; naming a\ndifferent team on a side that already has one is a 409 rather than a rewrite, because\nthat side's operatives and equipment are keyed to it through the four-column leg."
+      },
+      "KTGameSide_Update": {
+        "properties": {
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "command_points": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 2147483647.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Points"
+          },
+          "victory_points": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Victory Points"
+          },
+          "ploys_used": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ploys Used"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KTGameSide_Update",
+        "description": "One side's numbers (#87): either participant may set these on either half.\n\n`version` is the GAME's (#9), because one battle is one optimistic-locking unit. The\nfour fields are the ones #67 moved off the game, and `PATCH /{game_id}` can still set\nthem until the breaking change removes them there."
       },
       "KTGameWeapon_Read": {
         "properties": {

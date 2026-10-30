@@ -96,7 +96,7 @@ rewrite what is already written. Two classes of content take different rules:
 endpoints") and with a count of one. They are refused **beside a count of two or
 more**, which is the only place the ambiguity misleads: that is where a reader
 re-derives the number and gets a different one, because the games router has 11
-nested paths carrying 14 nested operations.
+nested paths carrying 15 nested operations.
 
 **Normative statements use RFC 2119 keywords**, capitalised: `MUST`, `MUST NOT`,
 `SHOULD`, `MAY`. Those four only — `SHALL`, `REQUIRED`, `RECOMMENDED` and `OPTIONAL`

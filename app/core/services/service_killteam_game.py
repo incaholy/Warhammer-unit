@@ -111,6 +111,12 @@ class KTGameService:
     # What a PATCH on one operative may set. `activated_in_turning_point` is absent for
     # the same reason: `activate_operative` sets it to the game's OWN turning point, so
     # a caller cannot record an activation in a turning point that is not happening.
+    # What `PATCH .../sides/{side}` may set: the four settable fields `MVP.md` names,
+    # which are exactly the ones #67 moved off the game. They stay in `_UPDATABLE` too
+    # until the breaking change removes them, so both doors reach the same row in the
+    # meantime -- `_apply_routed` is what makes the game's door land on the side.
+    _SIDE_UPDATABLE = {"command_points", "victory_points", "ploys_used", "choices"}
+
     _OPERATIVE_UPDATABLE = {"current_wounds", "order", "status", "tokens", "actions_used"}
 
     # Of those, the ones mapped to a NOT NULL column -- derived from the tables rather
@@ -125,6 +131,7 @@ class KTGameService:
     # correct while both tables carry them too: a field NOT NULL on either is one this
     # service must refuse a null for.
     _NOT_NULLABLE = not_nullable_fields(KTGame, _UPDATABLE) | not_nullable_fields(KTGameSide, _UPDATABLE)
+    _SIDE_NOT_NULLABLE = not_nullable_fields(KTGameSide, _SIDE_UPDATABLE)
     _OPERATIVE_NOT_NULLABLE = not_nullable_fields(KTGameOperative, _OPERATIVE_UPDATABLE)
 
     _STATUSES = {"setup", "in_progress", "finished"}
@@ -189,9 +196,7 @@ class KTGameService:
 
         for row in roster.operatives:
             self.session.add(
-                self._new_operative(
-                    game, row.operative, side=player, source="roster", position=row.position
-                )
+                self._new_operative(game, row.operative, side=player, source="roster", position=row.position)
             )
         self.session.flush()
         self.session.refresh(game)
@@ -326,6 +331,7 @@ class KTGameService:
         if side not in SIDES:
             raise KTGameValidationError("side", f"must be one of {sorted(SIDES)}")
 
+        team = None
         if kill_team_id is not None:
             team = self.session.get(KillTeam, kill_team_id)
             if team is None:
@@ -353,14 +359,78 @@ class KTGameService:
         changes: dict[str, Any] = {"display_name": display_name}
         if kill_team_id is not None:
             changes["kill_team_id"] = kill_team_id
+            # Setting a team snapshots its reference onto the side, with the same helpers
+            # `create_game` uses. #69 says a side's datacards are snapshotted "at join
+            # exactly as #22 snapshots the creator's, and the snapshot is the authority" --
+            # and #86's join is a K9 path, so without this a hand-described opponent would
+            # carry an empty snapshot for the whole of K8. #87 lets either participant
+            # record PLOYS on either side, and `_validate_ploys_used` reads that side's own
+            # list, so an empty one makes #87's ploys clause unreachable for the opponent.
+            #
+            # A rename snapshots nothing, because the team did not change -- which is also
+            # what keeps a rename from quietly resetting a side's reference.
+            changes["rules"] = [self._rule_snapshot(rule) for rule in team.rules]
+            changes["ploys"] = [self._ploy_snapshot(ploy) for ploy in self._playable_ploys(team)]
 
         # `op="fields"`, not `"created"`, even on the first write. Undoing an
         # establishment restores both columns to what they were -- NULL, which is #77's
         # own backfilled shape -- and LEAVES the row, because `_undo_created` deletes its
         # target and deleting this row is what #92 refuses.
         touched = self._apply(row, changes)
+        # `side_described`, and #87's `PATCH` writes `side_updated`. Two types because
+        # describing a side and scoring one are the different acts #92 already separates
+        # on authorization, and one name for both would leave a reader of the log unable
+        # to tell "Dave's Hearthkyn was named" from "Dave's CP changed".
+        self._write(game, "side_described", touched, target_id=row.id, side=side)
+        return game
+
+    def update_side(self, game_id: UUID, side: str, expected_version: int | None = None, **fields) -> KTGame:
+        """Set one side's numbers: its CP, its score, the ploys it spent, its picks (#87).
+
+        Either participant may record anything on either side -- #87's whole point, and
+        the same answer #70 gave for `undo`: one shared truth, with the actor recorded so
+        the write is visible rather than silent. So this is NOT scoped to the caller's own
+        half, and nothing here compares the caller to the side.
+
+        Split from the `PUT` on authorization (#92): describing a side is the host's act,
+        where scoring one is either occupant's once K9 lands. The two therefore write
+        different event types, `side_described` and `side_updated`.
+
+        `version` is the GAME's, not the side's (#9). One game is one optimistic-locking
+        unit, because two tabs fighting over a battle are fighting over all of it -- a
+        per-side version would let one tab overwrite the other's view of the board while
+        both believed they were current.
+        """
+        game = self._require_game(game_id, expected_version)
+        if side not in SIDES:
+            raise KTGameValidationError("side", f"must be one of {sorted(SIDES)}")
+        unknown = set(fields) - self._SIDE_UPDATABLE
+        if unknown:
+            raise KTGameValidationError("fields", f"cannot update {sorted(unknown)}")
+
+        row = self._side_row(game_id, side)
+        if row is None:
+            raise KTGameValidationError("side", f"this game has no {side} side yet -- describe it first")
+
+        self._validate_side_fields(row, fields)
+        touched = self._apply(row, fields)
         self._write(game, "side_updated", touched, target_id=row.id, side=side)
         return game
+
+    def _validate_side_fields(self, row: KTGameSide, fields: dict[str, Any]) -> None:
+        """The same rules `_validate_game_fields` applies, against the side that owns them.
+
+        `ploys_used` is checked against THIS side's snapshot rather than the game's, which
+        is the point of snapshotting one at establishment: the opponent's spent ploys have
+        to be the opponent's ploys.
+        """
+        self._refuse_nulls(fields, self._SIDE_NOT_NULLABLE)
+        if "command_points" in fields and (fields["command_points"] is None or fields["command_points"] < 0):
+            raise KTGameValidationError("command_points", "cannot be negative")
+        if "victory_points" in fields:
+            self._validate_victory_points(fields["victory_points"])
+        if "ploys_used" in fields:
+            self._validate_ploys_used(row.ploys, fields["ploys_used"])
 
     def add_operative(
         self, game_id: UUID, operative_id: UUID, source: str, side: str = "player"
@@ -397,13 +467,9 @@ class KTGameService:
         # team would take the row silently and leave it unprotected.
         target = self._side_row(game_id, side)
         if target is None:
-            raise KTGameValidationError(
-                "side", f"this game has no {side} side yet -- describe it first"
-            )
+            raise KTGameValidationError("side", f"this game has no {side} side yet -- describe it first")
         if target.kill_team_id is None:
-            raise KTGameValidationError(
-                "side", f"the {side} side has no kill team yet -- give it one first"
-            )
+            raise KTGameValidationError("side", f"the {side} side has no kill team yet -- give it one first")
 
         operative = self.session.get(KTOperative, operative_id)
         if operative is None:
@@ -415,9 +481,7 @@ class KTGameService:
         # would refuse the row anyway, and this is here so the caller gets a 404 that
         # names the problem.
         if operative.kill_team_id != target.kill_team_id:
-            raise NotFoundError(
-                f"operative {operative_id} is not one of kill team {target.kill_team_id}'s"
-            )
+            raise NotFoundError(f"operative {operative_id} is not one of kill team {target.kill_team_id}'s")
         # Refused if the catalog has WITHDRAWN it (#55): the source no longer names this
         # row, so a picker that offered it was stale. Rows already in a game or on a
         # roster are untouched and keep resolving -- that is the whole reason #55 flags
