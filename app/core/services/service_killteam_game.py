@@ -1110,10 +1110,28 @@ class KTGameService:
         )
 
     def _event_target(self, game: KTGame, event: KTGameEvent):
+        """The row an event names, or the GAME when it names none (#94).
+
+        `KTGameSide` joins the probe because an operation scoped to one side writes that
+        side's id here, and without it #94's own warning came true: the probe found
+        neither of the other two and answered "points at a row that is gone" -- a 404 for
+        a row that plainly exists.
+
+        It is probed LAST, after the two that every battle writes constantly, so the
+        common path still answers on its first `get`.
+
+        A note rather than a fix: none of the three probes checks that the row it found
+        belongs to THIS game. It is safe because `_write` only ever stores the id of a row
+        it just handled, so no cross-game id can reach the payload -- but it is safe by
+        the writer's discipline rather than by construction. ROADMAP K8 gives the audit of
+        `_undo_created` and `_undo_deleted`, which share this shape, to K9; this belongs
+        with it rather than being changed here, since filtering would turn an
+        already-impossible case into a different answer.
+        """
         target_id = event.payload.get("target_id")
         if target_id is None:
             return game
-        for model in (KTGameOperative, KTGameEquipment):
+        for model in (KTGameOperative, KTGameEquipment, KTGameSide):
             row = self.session.get(model, UUID(target_id))
             if row is not None:
                 return row

@@ -489,6 +489,64 @@ def test_the_moved_fields_not_null_rule_survives_losing_the_game_columns(session
             svc.update_game(game.id, None, **{field: None})
 
 
+def test_an_event_naming_a_side_resolves_that_side_rather_than_404ing(session, battle):
+    """Decision #94: `_event_target` must resolve a side row when an event names one.
+
+    No operation writes such an event yet -- the side-scoped ones arrive with #92's `PUT`
+    and `PATCH` -- so this builds the payload directly. That is the point: the probe has
+    to work before the first caller depends on it, and #94 names the failure it prevents.
+    Without `KTGameSide` in the probe the other two miss and the code raises "points at a
+    row that is gone", which is a 404 for a row that plainly exists.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    player = svc.player_side(game)
+
+    event = KTGameEvent(
+        game_id=game.id,
+        sequence=999,
+        type="side_updated",
+        turning_point=game.turning_point,
+        side="player",
+        payload={"op": "fields", "target_id": str(player.id), "command_points": {"before": 0, "after": 3}},
+    )
+
+    assert svc._event_target(game, event) is player
+
+
+def test_undoing_a_side_scoped_event_writes_back_onto_the_side(session, battle):
+    """The probe's payoff: `_undo_fields` takes the row branch, not the routing branch.
+
+    An event that NAMES a row is about that row, so `_owner_of` is not consulted for it --
+    which matters because `command_points` would route to the player side anyway here, and
+    an operative's `current_wounds` would not. The branch is what keeps those separate.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    player = svc.player_side(game)
+    player.command_points = 3
+    session.add(player)
+    session.commit()
+
+    event = KTGameEvent(
+        game_id=game.id,
+        sequence=999,
+        type="side_updated",
+        turning_point=game.turning_point,
+        side="player",
+        payload={"op": "fields", "target_id": str(player.id), "command_points": {"before": 0, "after": 3}},
+    )
+    session.add(event)
+    session.commit()
+
+    svc._undo_fields(game, event)
+    session.commit()
+
+    assert svc.player_side(game).command_points == 0
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()
