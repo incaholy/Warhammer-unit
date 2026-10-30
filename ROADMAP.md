@@ -1312,8 +1312,14 @@ shortcut — key the operatives off `user_id` — makes the common case unrepres
 The migration is the slice. `kt_game_sides` arrives carrying what moves off `kt_games`:
 `kill_team_id`, `command_points`, `victory_points`, `rules`, `ploys`, `ploys_used`,
 `choices` and a display name. `kt_game_operatives` and `kt_game_equipment` gain `side`,
-and their ownership leg widens from three columns to four so it names the SIDE rather than
-the game (#67) — which is why this cannot be a widened where-clause: `kill_team_id` sits
+and the ownership leg widens from three columns to four so it names the SIDE rather than
+the game (#67) — **on `kt_game_operatives`, which is the only one of the two that has such
+a leg.** `kt_game_equipment` reaches its game through a single `game_id` key and never had
+a composite one, because the universal equipment list belongs to no kill team and there is
+no `(kill_team_id, equipment_id)` pair to aim at. That argument is about the EQUIPMENT
+reference though, and says nothing against a leg to the SIDE, which involves no kill team
+— so equipment GAINS `(game_id, side)` pointing at `kt_game_sides`, the same shape #94
+gives the event log. Found by writing the models. The widening is also why this cannot be a widened where-clause: `kill_team_id` sits
 inside the current triple and `kt_games` holds exactly one, so a second team's operative
 fails the insert rather than slipping past a missing check.
 

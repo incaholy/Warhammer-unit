@@ -1098,6 +1098,11 @@ class KTGameOperative(TimestampMixin, table=True):
     source: str = Field(default="roster", max_length=16)
     #: NULL for the roster's own operatives, set for one added mid-battle.
     added_in_turning_point: int | None = Field(default=None)
+    #: Which half of the game this operative belongs to (#67). Nullable until the
+    #: backfill fills it and the last revision makes it NOT NULL. Its constraint arrives
+    #: when the ownership leg widens, which is a drop-and-add and therefore one later
+    #: revision rather than a piece of this one.
+    side: str | None = Field(default=None, max_length=16)
 
     # `overlaps` on both, as on `KTRosterOperative`: the two composite foreign keys share
     # `kill_team_id`, so each relationship writes a column the other also writes, and
@@ -1132,6 +1137,17 @@ class KTGameEquipment(TimestampMixin, table=True):
     __table_args__ = (
         UniqueConstraint("game_id", "equipment_id", name="uq_kt_game_equipment"),
         CheckConstraint("position >= 0", name="ck_kt_game_equipment_position"),
+        # Two columns into the side, so a piece cannot name a side the game does not
+        # have. This table never had an ownership leg -- the docstring above says why,
+        # and that argument is about the EQUIPMENT reference rather than this one: a leg
+        # to the side involves no kill team, so the universal list is no obstacle. Same
+        # shape #94 gives `kt_game_events`. The simple `game_id` key stays for its
+        # cascade on game deletion.
+        ForeignKeyConstraint(
+            ["game_id", "side"],
+            ["kt_game_sides.game_id", "kt_game_sides.side"],
+            name="fk_kt_game_equipment_side",
+        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -1146,6 +1162,10 @@ class KTGameEquipment(TimestampMixin, table=True):
     #: table -- Gellerpox's MUTOID VERMIN adds four operatives (#18).
     revealed: bool = Field(default=False)
     position: int = Field(default=0)
+    #: Which half of the game took this piece (#67). Nullable until the backfill, then
+    #: NOT NULL. While it is NULL the composite leg above is skipped under MATCH SIMPLE,
+    #: which is correct for an unpopulated column rather than a hole in the rule.
+    side: str | None = Field(default=None, max_length=16)
 
     game: KTGame = Relationship(back_populates="equipment")
     equipment: KTEquipment = Relationship()
@@ -1183,6 +1203,18 @@ class KTGameEvent(TimestampMixin, table=True):
         CheckConstraint("length(trim(type)) > 0", name="ck_kt_game_event_type"),
         # An event cannot undo itself, which a bug in the undo path could otherwise write.
         CheckConstraint("undone_by IS NULL OR undone_by <> id", name="ck_kt_game_event_undone_by"),
+        # Two columns into the side (#94), rather than the two-value check #68 puts on
+        # the side row itself. A check would validate the WORD while still allowing
+        # `'opponent'` on a game with no opponent row; this makes that unrepresentable.
+        # The NULL skip under MATCH SIMPLE is DELIBERATE here and is the opposite of the
+        # hazard `fk_kt_game_roster` records: on this column NULL is a meaning rather
+        # than a gap -- the event targets the game -- so there is no side row to point
+        # at and skipping the check is correct.
+        ForeignKeyConstraint(
+            ["game_id", "side"],
+            ["kt_game_sides.game_id", "kt_game_sides.side"],
+            name="fk_kt_game_event_side",
+        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -1195,5 +1227,17 @@ class KTGameEvent(TimestampMixin, table=True):
     #: The compensating event that reverted this one, NULL while it still stands. Self
     #: referential, so the log records its own corrections rather than losing them.
     undone_by: UUID | None = Field(default=None, foreign_key="kt_game_events.id", index=True)
+    #: Which half of the game this event changed (#94). NULL means the GAME -- after the
+    #: columns move that is `status`, `initiative`, `turning_point` and `phase`, the
+    #: fields that stay. Permanently nullable, unlike the children's `side`.
+    side: str | None = Field(default=None, max_length=16)
+    #: Who wrote this row (#70). Nullable only because events written before the column
+    #: existed cannot be attributed; every new event records one, since even an
+    #: account-less side's moves are entered by a real person.
+    actor_user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    #: The actor's name as it was WHEN THEY ACTED, stored rather than joined (#70). A
+    #: join would return the current name, which an append-only log must not do. The
+    #: value is the `username` until `users` gains a `display_name`.
+    actor_display_name: str | None = Field(default=None, max_length=128)
 
     game: KTGame = Relationship(back_populates="events")
