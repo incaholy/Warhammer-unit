@@ -13,10 +13,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import event, inspect, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import select
 
-from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative
+from app.core.db.models_killteam import KTGame, KTGameEvent, KTGameOperative, KTGameSide
 from app.core.services.errors import ConflictError, NotFoundError
 from app.core.services.service_killteam_game import (
     EQUIPMENT_LIMIT,
@@ -130,6 +131,81 @@ def test_a_game_copies_every_datacard_it_will_play_with(session, battle):
         assert row.current_wounds == row.wounds == 12
         assert row.source == "roster"
         assert row.added_in_turning_point is None
+
+
+def test_a_new_game_arrives_with_its_player_side_and_no_opponent(session, battle):
+    """Decision #97, and the half of #74 the rule was not written about.
+
+    #74 says a side row is created "once that side's kill team is known, not at game
+    creation". The player's team IS known at creation, from the roster, so its row comes
+    with the game; the opponent's does not, so no opponent row exists yet even when the
+    caller named one.
+    """
+    b = battle()
+    game = _service(session).create_game(b["user"].id, b["roster"].id, opponent_name="Bob")
+
+    sides = session.exec(select(KTGameSide).where(KTGameSide.game_id == game.id)).all()
+    assert [row.side for row in sides] == ["player"]
+
+    player = sides[0]
+    assert player.owner_user_id == game.owner_user_id
+    assert player.occupant_user_id == game.owner_user_id
+    assert player.kill_team_id == game.kill_team_id
+    assert player.roster_id == game.roster_id
+    assert player.display_name is None
+
+
+def test_the_player_sides_snapshots_agree_with_the_games_by_construction(session, battle):
+    """Copied from the game rather than rebuilt, so the two cannot disagree at creation.
+
+    Building each from the catalog twice would make them equal only for as long as both
+    code paths stayed in step, which is the kind of agreement that quietly stops holding.
+    """
+    b = battle()
+    game = _service(session).create_game(b["user"].id, b["roster"].id)
+    player = session.exec(select(KTGameSide).where(KTGameSide.game_id == game.id)).one()
+
+    assert player.rules == game.rules
+    assert player.ploys == game.ploys
+    assert player.command_points == game.command_points
+    assert player.victory_points == game.victory_points
+    assert player.ploys_used == game.ploys_used
+    assert player.choices == game.choices
+
+
+def test_a_new_games_operative_can_now_be_sided(session, battle):
+    """The capability #97 exists for, and the one that was REFUSED without it.
+
+    `fk_kt_game_operative_side` needs a matching side row, so before #97 a freshly created
+    game had none and setting `side = 'player'` raised a foreign key error. #77's backfill
+    gave every game that already existed one, so leaving creation alone would have made
+    pre-K8 games work and post-K8 games fail.
+    """
+    b = battle()
+    game = _service(session).create_game(b["user"].id, b["roster"].id)
+
+    row = game.operatives[0]
+    row.side = "player"
+    session.add(row)
+    session.commit()
+
+    assert session.get(KTGameOperative, row.id).side == "player"
+
+
+def test_a_new_games_operative_cannot_name_the_absent_opponent_side(session, battle):
+    """The other half: the leg still refuses a side the game does not have.
+
+    No opponent row exists yet, so `'opponent'` has nothing to point at. This is what
+    makes #97 a narrowing of what is representable rather than a blanket permission.
+    """
+    b = battle()
+    game = _service(session).create_game(b["user"].id, b["roster"].id)
+
+    row = game.operatives[0]
+    row.side = "opponent"
+    session.add(row)
+    with pytest.raises(IntegrityError, match="(?i)foreign key"):
+        session.commit()
 
 
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):

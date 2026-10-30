@@ -38,6 +38,7 @@ from app.core.db.models_killteam import (
     KTGameEquipment,
     KTGameEvent,
     KTGameOperative,
+    KTGameSide,
     KTOperative,
     KTPloy,
     KTRoster,
@@ -141,6 +142,8 @@ class KTGameService:
             ploys=[self._ploy_snapshot(ploy) for ploy in self._playable_ploys(roster.kill_team)],
         )
         self.session.add(game)
+        self.session.flush()
+        self.session.add(self._new_player_side(game))
         self.session.flush()
 
         for row in roster.operatives:
@@ -698,6 +701,44 @@ class KTGameService:
             "description": ploy.description,
             "universal": ploy.kill_team_id is None,
         }
+
+    def _new_player_side(self, game: KTGame) -> KTGameSide:
+        """The creator's half of a new game, inserted with the game itself (#97).
+
+        #74 says a side row is created "once that side's kill team is known, not at game
+        creation", and that rule GIVES this rather than forbidding it: the player's team is
+        known at creation, from the roster, and the opponent's is not. The opponent's row
+        still waits for #92's `PUT` or #86's join.
+
+        It is not optional. `fk_kt_game_operative_side` refuses `side = 'player'` with no
+        matching row, so without this a new game could not hold a sided operative, while
+        #77's backfill gives every game that already exists one -- pre-K8 games would work
+        and post-K8 games would not.
+
+        The snapshot columns are copied from the game rather than rebuilt, so the two agree
+        at creation by construction instead of by two code paths happening to match. The
+        MUTABLE ones go stale from here until the writes move onto the side, which is
+        deliberate: nothing reads this row yet, the same sense in which #74 calls
+        `occupant_user_id` "written here and deliberately unread".
+
+        `display_name` stays NULL. The game never named the creator's side, #92's `PUT` is
+        what sets one, and the team's name is already reachable through `kill_team_id` --
+        the same reasoning #77's backfill applies to the rows it writes.
+        """
+        return KTGameSide(
+            game_id=game.id,
+            owner_user_id=game.owner_user_id,
+            side="player",
+            kill_team_id=game.kill_team_id,
+            occupant_user_id=game.owner_user_id,
+            roster_id=game.roster_id,
+            command_points=game.command_points,
+            victory_points=game.victory_points,
+            rules=game.rules,
+            ploys=game.ploys,
+            ploys_used=game.ploys_used,
+            choices=game.choices,
+        )
 
     def _new_operative(
         self,
