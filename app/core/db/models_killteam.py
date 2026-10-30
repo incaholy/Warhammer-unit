@@ -755,6 +755,13 @@ class KTGame(TimestampMixin, table=True):
         # operative can then only sit in a game its own owner owns, and can only name a
         # datacard of that game's team.
         UniqueConstraint("owner_user_id", "kill_team_id", "id", name="uq_kt_game_owner_team_id"),
+        # The parent `KTGameSide`'s own leg points at (#67). It CANNOT reuse the unique
+        # above: a side carries its OWN `kill_team_id`, which for the opponent is a
+        # different team from the game's and may be NULL for a backfilled one (#77), so a
+        # leg through that column would be checking the wrong thing. Same purpose as the
+        # one above and the one on `kt_rosters` -- give a composite key a provably unique
+        # parent -- which is why it looks redundant beside the primary key and is not.
+        UniqueConstraint("owner_user_id", "id", name="uq_kt_game_owner_id"),
         # Three columns into the roster, so a game cannot name a roster of another player
         # or claim a kill team its roster does not play. **No `ondelete`**, deliberately:
         # NO ACTION means deleting a roster a game was played from is REFUSED, and the
@@ -885,6 +892,94 @@ class KTGame(TimestampMixin, table=True):
         cascade_delete=True,
         sa_relationship_kwargs={"order_by": "KTGameEvent.sequence"},
     )
+
+
+class KTGameSide(TimestampMixin, table=True):
+    """One half of a battle: a kill team, its score, and whoever is playing it (#67).
+
+    A game held one team, one owner and one set of numbers, with the opponent as
+    `opponent_name` plus a single integer typed in by hand. That was never a second side
+    so much as a placeholder where one would go, which is why this table exists rather
+    than a second set of `opponent_*` columns -- the opponent side is not a lesser thing.
+
+    **`side` is not derived from a user id**, and that is the whole reason K8 comes before
+    K9 (#67). The ordinary case is an opponent with no account whose half is filled in at
+    the table, so `occupant_user_id` is nullable and NULL is the common state rather than
+    the exception.
+
+    `kill_team_id` is nullable only because of #77's backfill: a game played before this
+    table existed never recorded the opponent's team. Every row that has children carries
+    one, so no composite leg into it is half-NULL -- the invariant is "a row with children
+    has a team", not "the column is NOT NULL".
+
+    `roster_id` is PROVENANCE and carries no foreign key (#69): the datacards are
+    snapshotted at join exactly as #22 snapshots the creator's, and the snapshot is the
+    authority. A roster deleted afterwards leaves the battle intact.
+
+    There is no `equipment_limit` column, for #57's reason unchanged -- the allowance is a
+    constant the read reports per side, never a refusal.
+    """
+
+    __tablename__ = "kt_game_sides"
+    __table_args__ = (
+        # Two columns into the game, so a side cannot claim a game another player owns.
+        # `kill_team_id` is deliberately NOT in this leg: it is the SIDE's team, which
+        # differs from the game's for the opponent, so including it would constrain the
+        # wrong relationship. `uq_kt_game_owner_id` is the parent it points at.
+        ForeignKeyConstraint(
+            ["owner_user_id", "game_id"],
+            ["kt_games.owner_user_id", "kt_games.id"],
+            ondelete="CASCADE",
+            name="fk_kt_game_side_game",
+        ),
+        # The provably-unique parent `KTGameOperative` and `KTGameEquipment` point their
+        # four-column legs at, replacing `uq_kt_game_owner_team_id` as their target: a
+        # child row can then only sit in a side of a game its own owner owns, and can only
+        # name a datacard of THAT SIDE's team rather than the game's (#67).
+        UniqueConstraint(
+            "owner_user_id",
+            "game_id",
+            "side",
+            "kill_team_id",
+            name="uq_kt_game_side_owner_team_id",
+        ),
+        # One row per side, and NOT implied by the four-column unique above. #77 makes
+        # `kill_team_id` nullable, and Postgres treats two NULLs as distinct, so that
+        # unique refuses nothing when the column is NULL -- two team-less `opponent` rows
+        # would satisfy it, and `KTGame_Read.opponent` would become a query with an
+        # ordering rule, which is the shape #74 rejected a participants table to avoid.
+        UniqueConstraint("game_id", "side", name="uq_kt_game_side"),
+        # The same two-value vocabulary `ck_kt_game_initiative` already uses (#68), so
+        # `initiative` names a side row rather than a loose label.
+        CheckConstraint("side IN ('player', 'opponent')", name="ck_kt_game_side_side"),
+        CheckConstraint("command_points >= 0", name="ck_kt_game_side_command_points"),
+    )
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    game_id: UUID = Field(index=True)
+    #: Carried so the leg above can reach the game through it (#54's shape).
+    owner_user_id: UUID = Field(index=True)
+    side: str = Field(max_length=16)
+    #: This side's own team. NULL only for #77's backfilled opponents.
+    kill_team_id: UUID | None = Field(default=None, foreign_key="kt_kill_teams.id", index=True)
+    #: NULL means no account holds this side -- the ordinary case (#74). Written in K8 and
+    #: deliberately unread until K9, because adding it later is a migration with a
+    #: backfill against a schema that is by then shipped and seeded.
+    occupant_user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    #: Provenance, no foreign key (#69).
+    roster_id: UUID | None = Field(default=None)
+    #: A label for this side, set by #92's `PUT`. Nullable because #77's backfill fires on
+    #: a score alone, so a historical game can yield a row with neither a team nor a name.
+    display_name: str | None = Field(default=None, max_length=128)
+
+    command_points: int = Field(default=0)
+    #: VP by source, as a document rather than a column each, for the same reason the
+    #: game's was (#1, #59). #77's backfilled total lands here as `{"unrecorded": N}`.
+    victory_points: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
+    rules: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+    ploys: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+    ploys_used: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
+    choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
 
 
 class KTGameOperative(TimestampMixin, table=True):

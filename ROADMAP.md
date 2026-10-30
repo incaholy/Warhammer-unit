@@ -1358,13 +1358,25 @@ one operation against one CP pool, and there are now two.
 
 ### What this breaks
 
-The earlier version of this entry named two constraints. There are **six**, and one of
-them is another decision. The count has been wrong twice: two when written, then four
-after `UNIQUE(game_id, side)` was added at `f5c8d11` without it moving:
+The earlier version of this entry named two constraints. There are **seven**, and one of
+them is another decision. **This count has now been wrong three times** — two when
+written, four after `UNIQUE(game_id, side)` was added at `f5c8d11` without it moving, six
+until writing the model found the parent unique below. Count the bullets rather than
+trusting the number; it has grown every time someone looked at the migration properly:
 
 - `uq_kt_game_owner_team_id` is the provably-unique parent every composite leg into
   `kt_games` targets. The child leg moves to the side, so the target moves with it — a
   new unique on `kt_game_sides(owner_user_id, game_id, side, kill_team_id)`.
+- **`kt_games` needs a second unique, `(owner_user_id, id)`, and this entry did not say so.**
+  The side's OWN leg into the game is `(owner_user_id, game_id)`, and Postgres requires a
+  declared unique covering exactly those target columns — a subset of
+  `uq_kt_game_owner_team_id` will not serve. Nor could the side reuse that unique: a side
+  carries its own `kill_team_id`, which for the opponent is a different team from the
+  game's and is NULL for one of #77's backfilled rows, so a leg through that column would
+  constrain the wrong relationship. It is the same redundant-looking unique `kt_rosters`
+  and `kt_games` already carry, for the reason `MVP.md` states — to give a composite key a
+  provably unique parent to point at. Found by writing the model, which is where a missing
+  FK target surfaces rather than in review.
 - **`UNIQUE(game_id, side)` as well, and it is not implied by the one above.** #77 makes
   `kill_team_id` nullable so historical games can be backfilled, and `KILLTEAM.md` already
   records what that costs: Postgres treats two NULLs as distinct, so a four-column unique
