@@ -1296,9 +1296,9 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 3 of the
+**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 5 of the
 seven below are committed there; `main` has none of them, so K8 is not `built`.
-Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94.
+Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
 as `opponent_name` and a single `opponent_victory_points` int typed in by hand (#5), which
@@ -1354,6 +1354,21 @@ Neither breaks under #94, because no operation creates or deletes a side row yet
 #83's vacate is the candidate that would, and K9 MUST check them rather than inherit the
 assumption.
 
+**The repair is a reader change, not a data change (#96).** Writing a side row's id into a
+historical `target_id` is refused, because #94 separates the two: `target_id` names the row
+that CHANGED, and the row that changed when these events were written WAS the game. It also
+could not work. `_UPDATABLE`'s nine fields land in three places after #67, while
+`_undo_fields` resolves ONE target and `setattr`s EVERY payload field onto it, so one `PATCH`
+setting `status` and `command_points` produced one event spanning two destinations. So
+`_undo_fields` MUST route per field, and that change MUST land with step 7 — the step that
+removes the columns, and therefore the step that creates the failure. Step 5 sets scope and
+nothing else.
+
+Two reductions came out of measuring it. `rules` and `ploys` are in no settable set, so they
+never reached a payload: four of the six moved columns are at risk, which is the four named
+above. And `_newest_standing_event` filters `type != UNDO_EVENT`, so `_undo_fields` is never
+called on an `undone` row.
+
 Three smaller things land here because both halves of the slice need them.
 `kt_game_events` gains `actor_user_id` AND `actor_display_name` (#70), both nullable, since
 an event log that cannot say
@@ -1387,13 +1402,15 @@ its own step and points here, so adding a step edits one list rather than every 
 | 1 | `b1c4e7a2f309` | Creates `kt_game_sides` and the `kt_games` unique its composite leg targets | Committed on `kill-team-opponent` |
 | 2 | `c2d5f8b3a417` | Backfills one `player` row per game, and an `opponent` row where #77 requires one | Committed on `kill-team-opponent` |
 | 3 | `d3e6a9c7b521` | Adds `side` to three child tables, and the two actor columns to the log | Committed on `kill-team-opponent` |
-| 4 | — | Backfills `side = 'player'` on the operatives and equipment that already exist | Planned |
-| 5 | — | Repairs historical events: sets `side`, and injects `target_id` into the payload | Planned |
+| 4 | `e4f7b1d8c635` | Backfills `side = 'player'` on the operatives and equipment that already exist | Committed on `kill-team-opponent` |
+| 5 | `f5a8c2e9d743` | Sets `side` on the historical events that belong to one half (#96) | Committed on `kill-team-opponent` |
 | 6 | — | Widens `kt_game_operatives`' ownership leg, and the equipment unique | Planned |
-| 7 | — | Drops the six moved columns and the opponent pair, and sets `side` NOT NULL | Planned |
+| 7 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned |
 
 The chain was planned as six. Step 5 was added at step 3, once writing the models showed
-that historical event rows carry no `target_id` and so cannot name a side. Seven
+that the event log keeps rows written before `side` existed. Its scope then narrowed at the
+keyboard: the step was meant to inject a `target_id` too, and #96 refuses that, so what
+remains is scope alone and the real repair moved into step 7's code. Seven
 statements across two revision files had restated that six, either as `K8 n/6` or by
 naming the last step `6/6`, and all seven were wrong the moment step 5 appeared. Count
 them in the diff of the commit that centralised the number here.
