@@ -1413,7 +1413,7 @@ one operation against one CP pool, and there are now two.
 
 ### The revision chain
 
-K8 ships as nine Alembic revisions, not one, under the small-and-incremental convention
+K8 ships as ten Alembic revisions, not one, under the small-and-incremental convention
 in `ARCHITECTURE.md` §4. This table is the ONLY place the count lives. A revision names
 its own step and points here, so adding a step edits one list rather than every file.
 
@@ -1427,7 +1427,8 @@ its own step and points here, so adding a step edits one list rather than every 
 | 6 | `a6b9d3f1e825` | Widens the operative ownership leg onto the side, and restores its simple game key | Committed on `kill-team-opponent` |
 | 7 | `b7c1e4a9f336` | Swaps the equipment unique to name `side` | Committed on `kill-team-opponent` |
 | 8 | `c8d2f5b1a749` | Retires `uq_kt_game_owner_team_id`, which step 6 orphaned | Committed on `kill-team-opponent` |
-| 9 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned, and GATED on K8's code half |
+| 9 | — | Swaps `ck_kt_game_operative_source` to admit `'opponent'` (#93) | Planned |
+| 10 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned, and GATED on K8's code half |
 
 The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was
 added at step 3, once writing the models showed that the event log keeps rows written
@@ -1453,7 +1454,10 @@ Reversibility splits three ways, and only the last one loses data.
   measured against Postgres 16 rather than argued. Nothing is done about it deliberately:
   a reverse that deleted one of the two rows would be choosing which side loses its
   equipment, and a loud failure lets an operator choose instead.
-- Step 9 is lossy by construction, because it drops the columns a reverse would read.
+- Step 9 is a constraint swap like steps 6 and 7, and NARROWS on reverse: a side's
+  operatives written with `source = 'opponent'` collide with the three-value CHECK it
+  goes back to, so that reverse IS refused once such a row exists.
+- Step 10 is lossy by construction, because it drops the columns a reverse would read.
 
 ### The code half
 
@@ -1469,14 +1473,22 @@ side operations.
 | 3 | The six moved columns are read and written on the side (#67) | Committed on `kill-team-opponent` |
 | 4 | `_event_target` resolves a side row (#94) | Committed on `kill-team-opponent` |
 | 5 | `PUT .../sides/{side}` establishes a side (#92) | Committed on `kill-team-opponent` |
-| 6 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Planned |
-| 7 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Planned |
-| 8 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
+| 6 | A hand-entered operative carries `source: 'opponent'` (#93) | Planned |
+| 7 | `PATCH .../sides/{side}` sets the four settable fields (#87) | Planned |
+| 8 | `POST .../sides/{side}/ploys` spends that side's CP (#65) | Planned |
+| 9 | The read reshape, and `KTGame_Create` losing `opponent_name` (#98) | Planned |
 
-Piece 8 is the only breaking contract change, and everything before it is additive on
-purpose: the three nullable fields on `KTGameEvent_Read` are all a client has seen so
-far. Step 9 of the chain lands after piece 8, because a column cannot be dropped before
-the code stops reading it.
+Piece 9 is the only breaking contract change, and everything before it is additive on
+purpose: three nullable fields on `KTGameEvent_Read` and one new path are all a client
+has seen so far. The chain's step 10 lands after piece 9, because a column cannot be
+dropped before the code stops reading it.
+
+**Piece 6 was missing from the first draft of this table**, and the omission is why the
+table exists: #93 is `Planned (K8)` in the register and appeared in no piece, so it was
+tracked nowhere. It pairs with #92 -- that decision lets a host describe an opponent,
+this one lets them field that opponent's models -- so it sits next to it rather than at
+the end. It also needs the chain's step 9 first, because `source = 'opponent'` is
+refused by a CHECK until that swap lands.
 
 ### What this breaks
 
