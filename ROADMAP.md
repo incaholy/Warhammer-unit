@@ -1672,14 +1672,23 @@ migration with a backfill.
 
 ## K9. A second user occupies a side
 
-**Status: Not started.** Decisions #71, #72, #74, #75, #78, #79, #80, #81, #82, #83,
-and #70's undo contract.
+**Status: Not started.** Decisions #71, #72, #75, #78, #79, #80, #81, #82, #83, #86,
+#88, #89, #90, #91 and #95 — the fifteen the register marks `Planned (K9)`. It also
+CONSUMES #70 and #74, whose columns K8 wrote and deliberately left unread.
 
-The authorization change is **two** predicates, not one function. All thirteen nested game
+An earlier draft of this line listed eleven and omitted #86, #88, #89, #90, #91 and
+#95 — the join and its outcomes. Re-derive it from the register rather than trusting
+this list.
+
+The authorization change is **two** predicates, not one function. All **15** nested game
 operations reach the game through `get_owned_game`, which does a primary-key fetch and one
 Python equality test, and `get_game` — the detail read — has no owner clause of its own.
-Widening that test to "owner or participant" covers those thirteen — but **not
+Widening that test to "owner or participant" covers those 15 — but **not
 uniformly**, which the earlier draft of this entry treated as the slice's cheapness.
+
+That count was **thirteen** when this entry was written and K8 moved it: three paths
+arrived and one retired. Re-derive it from `openapi.json` rather than trusting this
+number — 11 nested paths carrying 15 nested operations, measured at `1ee5b3d`.
 Three operations stay host-only behind a second loader (#82): deleting a game, which
 cascades the event log with no undelete, minting an invite, which revokes the
 outstanding code because #71 keeps one slot, and reading that code back, which discloses
@@ -1706,6 +1715,97 @@ standing between it and a brute force. That entropy is **40 bits** — 8 charact
 32-character single-case alphabet — which needs about 611 million guesses a second for an
 even chance inside the 15-minute window.
 
+### The revision chain
+
+K9 needs **one** Alembic revision, which is the whole of its schema change. Listed in a
+table for the reason K8's is: an order that lives only in a conversation drifts, and K8's
+drifted three times before it was written down.
+
+| Step | What | State |
+|---|---|---|
+| 1 | `kt_games` gains `invite_code` and `invite_expires_at`, both nullable (#71) | Planned |
+
+One revision rather than two: the pair is one capability with one slot, and a code with no
+expiry is not a state this design has. Everything else K9 does is code — #83's vacate
+sets a column #74 already made nullable, #86's join writes rows the K8 tables already
+hold, and #81's creation event is a row in a log that exists.
+
+### The code half
+
+| Piece | What | Depends on |
+|---|---|---|
+| 1 | `ErrorCode.GONE`, and the client's hand-written copy (#88) | — |
+| 2 | Minting an invite, host-only, and reading it back (#71, #82, #95) | step 1 |
+| 3 | `POST /me/kill-team/joins` — the join, with all six outcomes (#86, #88, #90) | pieces 1, 2 |
+| 4 | "Owner or participant", and the three host-only operations behind a second loader (#82) | piece 3 |
+| 5 | `list_games` widened, and `your_side` on both read models (#75) | piece 4 |
+| 6 | `DELETE .../sides/{side}/occupant` — a guest vacates (#83) | piece 4 |
+| 7 | `GET .../games/{game_id}/events` — an ordinary paged read (#72, #91) | piece 4 |
+| 8 | Creation is an event; a deleted game is a 404 (#81) | — |
+| 9 | The sibling audit `_undo_created` and `_undo_deleted` inherited from K8 | — |
+| 10 | `version` moves to a header on all 14 nested writes (#78, #79, #80) | pieces 4 to 8 |
+
+Piece 10 is the only BREAKING contract change, and it is last for the reason K8's was:
+everything before it is additive, so the other repo absorbs one change rather than nine.
+Pieces 1, 8 and 9 depend on nothing and can move earlier if something blocks.
+
+**Piece 9 is inherited debt, not new work.** `_undo_created` and `_undo_deleted` iterate
+`(KTGameOperative, KTGameEquipment)` and none of the three probes checks that the row it
+found belongs to THIS game — `session.get` matches by primary key across every game. It
+is safe because `_write` only ever stores the id of a row it just handled, so no
+cross-game id reaches a payload, but that is the writer's discipline rather than
+construction. K8 recorded it and left it here, and #83's vacate is the operation that
+makes a side row deletable, which is what the audit is for.
+
+### The join, which this entry did not describe
+
+Four decisions are `Planned (K9)` in `KILLTEAM.md` and appeared nowhere in this entry:
+#86, #88, #89 and #90. They are the slice's central operation — the paragraphs above
+cover minting an invite and reading one back, and never cover REDEEMING one. The omission
+was found by listing the register's K9 rows and asking which have a home here, which is
+the same check that found #93 missing from K8.
+
+**It is its own collection (#90).** `POST /me/kill-team/joins`, not
+`POST .../games/join`. A join holds no game id — the code is the only handle the caller
+has — so `join` would be a non-resource sitting in `{game_id}`'s namespace, which
+`ARCHITECTURE.md` §2.5 refuses and R12 already moved a route over. The invite MINTING
+route stays at `POST .../games/{game_id}/invite`, because that one is a sub-resource of a
+resolved game.
+
+**It carries a roster (#86).** The body is `{code, roster_id}`. The roster is what makes
+the joining side's kill team known, and #74 creates a side row only once its team is —
+so a code-only join would have to write a side with a NULL team and children with no
+foreign key protection, or write no side at all and leave a joined game with one half.
+The roster also supplies the datacards, snapshotted on the spot exactly as #22 snapshots
+the creator's.
+
+**It has six outcomes and all six are named (#88).** Two answer 404 with ONE message, so
+a wrong code and a spent code are indistinguishable to a guesser. An expired code answers
+**410**, which the service cannot express today: `ErrorCode` holds **7** values and none
+of them is a 410 (`app/core/errors.py`, measured at `1ee5b3d`). Three answer 409 — the
+game is finished, the side is taken, or the caller is already in this game. A failed join
+MUST NOT clear a live code.
+
+| Outcome | Status |
+|---|---|
+| No invitation matches that code | 404 |
+| The code was already used | 404, same message |
+| The code expired | 410 |
+| The game is finished | 409 |
+| That side is already occupied | 409 |
+| The caller is already in this game | 409 |
+
+**The eighth `ErrorCode` crosses repositories.** `warhammer_web` keeps its copy of the
+vocabulary by hand rather than generating it, so a value added here is invisible there
+until someone types it. R18 is the entry that would make it generated. Until then the
+client MUST gain `GONE` in the same change, and `MVP.md` carries that reasoning.
+
+**And the states it produces are states (#89).** Four, which a client MUST render rather
+than leave blank: no opponent yet, an established opponent, a pre-K8 record, and polling
+failing. K8 made the first three distinguishable — `KTGame_Read.opponent` is null,
+an object with a team, or an object without one — so what remains here is the fourth, and
+the client work.
+
 Convergence is polling, not a socket (#72). The event log is already the game's source of
 truth and `sequence` is already monotonic per game, so
 `GET .../games/{game_id}/events` is an ordinary paged read over a mechanism that exists
@@ -1718,10 +1818,11 @@ alternative.
 The real work is not the transport. It is that **409 stops being an edge case**, and the
 earlier version of this entry assumed a safety net that is not strung. #9's reasoning is
 explicitly about one user in two tabs. Two people writing the same game makes a stale
-`version` ordinary — and the measured coverage is two of the twelve nested writes, with
-the field optional on both, four answering 422 to an extra key and six declaring no body
-at all so a sent `version` is discarded with a 200. #79 moves it to a header on all
-twelve. #78 settles what the client does with the refusal, which is re-decide rather than
+`version` ordinary — and the measured coverage is **3 of the 14** nested writes, with the
+field optional on all three, **5** having a body that answers 422 to an extra key and
+**6** declaring no body at all so a sent `version` is discarded with a 200. #79 moves it
+to a header on all 14. Measured at `1ee5b3d`; K8 added `PATCH .../sides/{side}`, which is
+the third of the three. #78 settles what the client does with the refusal, which is re-decide rather than
 retry, because a blind retry discards exactly the conflict the check detected. Note the coupling this creates, because it is
 easy to break: `KTGameEvent.sequence` is assigned in Python as `max(sequence) + 1` and its
 `UNIQUE(game_id, sequence)` is the only guard — two concurrent writers cannot collide on
