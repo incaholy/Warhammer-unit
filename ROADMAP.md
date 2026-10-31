@@ -1482,6 +1482,68 @@ recorded the opponent's team. It is safe for a reason rather than by luck — a 
 opponent side has no operatives and no equipment, so there are no children for a
 half-NULL composite leg to stop protecting.
 
+**The `side` COLUMN needs a backfill too, and the first draft of this section gave it
+none.** It specified side ROWS and stopped there, while K8 adds `side` to every existing
+row of `kt_game_operatives`, `kt_game_equipment` and `kt_game_events`. Left NULL, those
+rows are not merely untidy — follow one through. `update_game` and `use_ploy` both write
+their event with no `target_id`, so a game in progress when K8 deploys has entries whose
+payloads hold `command_points` or `ploys_used`. A NULL `side` means "about the GAME"
+(#94), so `_event_target` answers the game and `_undo_fields` calls `setattr` for a column
+the game no longer has. That is the bare `ValueError` 500 #94 exists to prevent, on a
+saved game, the first time anyone presses undo after the deploy. No test on fresh data can
+see it, because every new entry carries a `side`.
+
+Operatives and equipment take `'player'`, and that is a statement about what the code
+could have produced rather than a default. `add_operative` refuses `source == 'roster'`
+and refuses any datacard whose `kill_team_id` differs from the game's, so every existing
+operative is of the game's one team — the creator's. Equipment is the equipment taken for
+that one side. This backfill is also what makes the paragraph above TRUE: "a backfilled
+opponent side has no operatives and no equipment" is an invariant nothing established
+until every child row was given to the player.
+
+The event log is scoped rather than blanket-assigned, because `side` is not a copy of
+"which half" so much as the scope an entry belongs to:
+
+| Entry | `side` | Why |
+|---|---|---|
+| The eight `operative_*`, `equipment_*` and `ploy_used` types | `'player'` | the creator's half is the only half that existed |
+| `advanced` | NULL | it moves `turning_point`, `phase`, `status` and `initiative`, which stay on the game |
+| `undone` | NULL | `_newest_standing_event` filters it, so `_undo_fields` never sees one |
+| `game_updated` | derived | its payload is a caller-chosen subset of `_UPDATABLE`, so it is the one type whose scope depends on what it touched |
+
+A `game_updated` entry is the player's where its payload names only player-side fields,
+the opponent's where it names only theirs, and NULL where it names both or names neither.
+Both halves in one entry stays NULL deliberately: `side` holds one value, and #94 already
+reads NULL as "about the GAME", which is the honest description of one call that moved two
+halves. **Scoping `'opponent'` requires an opponent side row to point at**, which the
+backfill writes only where the game recorded one — so an entry naming a cleared
+`opponent_name` scopes to NULL rather than failing the composite key.
+
+**And the section has to say what undo does with an entry it can no longer reverse,
+because `'player'` is not enough for all of them.** Two of `_UPDATABLE`'s nine fields —
+`opponent_name` and `opponent_victory_points` — are columns that stop existing, and no
+`side` makes them replayable. `_undo_fields` MUST check every payload field against its
+target row's columns BEFORE writing anything, and refuse where one is gone. Two passes,
+so a refusal cannot leave half an undo applied. The entry stays VISIBLE in the log with
+what it changed; only its reversal is refused, and the message names the field.
+
+**A 400, not the 409 the review suggested**, and the reason is precedent rather than
+preference: `undo` already refuses with `KTGameValidationError` when there is nothing left
+to undo (`service_killteam_game.py:551`), so refusing a particular entry the same way
+keeps one operation answering one status for one kind of refusal. The cost is real and
+bounded — `undo` is LIFO, so such an entry blocks everything older than it — and #58 has a
+player fixing the LAST mistake, so an entry from before the redesign is unlikely to be
+reached.
+
+Routing those two fields onto the opponent side was the alternative and is refused. It
+needs a RENAME as well as a row — `opponent_name` is the opponent side's display name and
+`opponent_victory_points` is their `victory_points`, keyed as #77 keys it — which is a
+mapping no decision states; and where a game ended recording no opponent there is no row,
+so undo would have to CREATE one, which is a third source for a row #92 exists to
+centralise. Keeping the two columns is worse than it looks: nothing reads them after the
+read reshape, so the undo would succeed and change nothing a client can see, trading a
+loud 500 for a silent no-op.
+
 Unlike K1–K7 this is the first Kill Team slice whose migration is **stacked rather than
 redrafted** — the Kill Team tables are on `main` and seeded, so #54's and #64's "free
 because the migration was still a draft" no longer applies. A column here costs a
