@@ -1559,11 +1559,12 @@ operations reach the game through `get_owned_game`, which does a primary-key fet
 Python equality test, and `get_game` — the detail read — has no owner clause of its own.
 Widening that test to "owner or participant" covers those thirteen — but **not
 uniformly**, which the earlier draft of this entry treated as the slice's cheapness.
-Three operations stay host-only behind a second loader (#82): deleting a game, which
+Four operations stay host-only behind a second loader (#82): deleting a game, which
 cascades the event log with no undelete, minting an invite, which revokes the
-outstanding code because #71 keeps one slot, and reading that code back, which discloses
-a live credential to whoever asks (#95). #73's "either side may finish" rests on
-#66 making a finish reversible, and those two are not. A participant refused one gets
+outstanding code because #71 keeps one slot, reading that code back, which discloses
+a live credential to whoever asks (#95), and establishing a side, which sets its team and
+name so a shared predicate would let a guest rewrite the host's half (#92). #73's "either
+side may finish" rests on #66 making a finish reversible, and those two are not. A participant refused one gets
 403 rather than the house 404, because #31 hides existence from a stranger and a
 participant already has the game on screen (#82). A guest's way out is vacating their
 side rather than deleting the game (#83). But `GET /me/kill-team/games`
