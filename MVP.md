@@ -644,7 +644,8 @@ logs; the event log is a log too, and it is readable by whoever joins.
 The code is the only handle Vex has — he does not know the game id — and **the roster is
 required**, because joining is what makes the opponent's kill team known, and #74 will
 not create a side row without it. The server creates `side='opponent'`,
-`kill_team_id=Gellerpox`, `occupant_user_id=Vex`, snapshots his six datacards, then
+`kill_team_id=Gellerpox`, `occupant_user_id=Vex`, snapshots his six datacards with his team's rules and both ploy lists -- everything step 1 snapshots for Nel, because
+step 7 reads the ploy cost off this side's own snapshot -- then
 clears `invite_code` and `invite_expires_at`. Event 3, `guest_joined`.
 
 **4. Vex's first read.** `GET .../games/{id}` now resolves for him (#75). Both sides are
