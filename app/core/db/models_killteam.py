@@ -785,13 +785,7 @@ class KTGame(TimestampMixin, table=True):
         # A game of Kill Team is four turning points. Enforced here and not only in the
         # service, because "no turning point past 4" is bookkeeping the schema can hold.
         CheckConstraint("turning_point BETWEEN 1 AND 4", name="ck_kt_game_turning_point"),
-        CheckConstraint("command_points >= 0", name="ck_kt_game_command_points"),
-        CheckConstraint("opponent_victory_points >= 0", name="ck_kt_game_opponent_vp"),
         CheckConstraint("version >= 1", name="ck_kt_game_version"),
-        CheckConstraint(
-            "opponent_name IS NULL OR length(trim(opponent_name)) > 0",
-            name="ck_kt_game_opponent_name",
-        ),
     )
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -809,7 +803,6 @@ class KTGame(TimestampMixin, table=True):
 
     # Who you played. Optional -- a solo practice game has no opponent to name -- but
     # not blank, so a listing never shows an empty string where a name should be.
-    opponent_name: str | None = Field(default=None, max_length=128)
 
     status: str = Field(default="setup", max_length=16)
     turning_point: int = Field(default=1)
@@ -818,12 +811,9 @@ class KTGame(TimestampMixin, table=True):
     #: a client must render the three states, not two.
     initiative: str | None = Field(default=None, max_length=16)
 
-    command_points: int = Field(default=0)
     # VP BY SOURCE, as a document rather than a column each: the sources are a rules
     # concept the players apply (#1), and with Tac Ops out of v1 (#59) there is no fixed
     # set to make columns from. `{"<source>": <points>}`.
-    victory_points: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
-    opponent_victory_points: int = Field(default=0)
 
     # Team-level markers on the killzone, e.g. Raveners' Tunnel markers. Generic on
     # purpose: the tracker records that a marker exists, the players apply what it does,
@@ -831,17 +821,13 @@ class KTGame(TimestampMixin, table=True):
     markers: list[str] = Field(default_factory=list, sa_type=STRING_LIST, nullable=False)
     # `{"name": ..., "turning_point": ...}` entries, the team-level twin of an
     # operative's `actions_used` (#23), so the CP column has a readable history beside it.
-    ploys_used: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
 
     # The team's reference, snapshotted (#24): its rules, and its ploys together with the
     # universal ones. Display-only, like a datacard's weapons -- nothing reads a field
     # out of these to decide anything.
-    rules: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
-    ploys: list = Field(default_factory=list, sa_type=JSON_DOC, nullable=False)
 
     # Per-game picks the rules leave to the players (#1, #59): the Accursed Gift, the Tac
     # Ops taken. A document so a new one of those is not a migration.
-    choices: dict = Field(default_factory=dict, sa_type=JSON_DOC, nullable=False)
 
     # Declared as a real `Column` rather than through `sa_type`, because
     # `__mapper_args__` below needs the column OBJECT to lock on. The DDL is unchanged:
@@ -976,7 +962,15 @@ class KTGameSide(TimestampMixin, table=True):
     #: NULL means no account holds this side -- the ordinary case (#74). Written in K8 and
     #: deliberately unread until K9, because adding it later is a migration with a
     #: backfill against a schema that is by then shipped and seeded.
-    occupant_user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    #: `SET NULL` on the user's deletion, not CASCADE and not NO ACTION. The side
+    #: SURVIVES and is vacated, which is exactly what NULL means here (#74) -- deleting an
+    #: account should not delete a battle it was a guest in. NO ACTION was the first draft
+    #: and broke a shipped invariant: `kt_games.owner_user_id` and
+    #: `kt_rosters.owner_user_id` both CASCADE, so deleting a user took their games with
+    #: them, and this column refused the delete instead.
+    occupant_user_id: UUID | None = Field(
+        default=None, foreign_key="users.id", ondelete="SET NULL", index=True
+    )
     #: Provenance, no foreign key (#69).
     roster_id: UUID | None = Field(default=None)
     #: A label for this side, set by #92's `PUT`. Nullable because #77's backfill fires on
@@ -1156,10 +1150,10 @@ class KTGameOperative(TimestampMixin, table=True):
     #: NULL for the roster's own operatives, set for one added mid-battle.
     added_in_turning_point: int | None = Field(default=None)
     #: Which half of the game this operative belongs to (#67). Nullable until the
-    #: backfill fills it and the last revision makes it NOT NULL. Its constraint arrives
+    #: backfilled it and the last revision made it NOT NULL. Its constraint arrives
     #: when the ownership leg widens, which is a drop-and-add and therefore one later
     #: revision rather than a piece of this one.
-    side: str | None = Field(default=None, max_length=16)
+    side: str = Field(max_length=16)
 
     # `overlaps` on both, as on `KTRosterOperative`: the two composite foreign keys share
     # `kill_team_id`, so each relationship writes a column the other also writes, and
@@ -1235,7 +1229,7 @@ class KTGameEquipment(TimestampMixin, table=True):
     #: Which half of the game took this piece (#67). Nullable until the backfill, then
     #: NOT NULL. While it is NULL the composite leg above is skipped under MATCH SIMPLE,
     #: which is correct for an unpopulated column rather than a hole in the rule.
-    side: str | None = Field(default=None, max_length=16)
+    side: str = Field(max_length=16)
 
     game: KTGame = Relationship(back_populates="equipment")
     equipment: KTEquipment = Relationship()
@@ -1304,7 +1298,13 @@ class KTGameEvent(TimestampMixin, table=True):
     #: Who wrote this row (#70). Nullable only because events written before the column
     #: existed cannot be attributed; every new event records one, since even an
     #: account-less side's moves are entered by a real person.
-    actor_user_id: UUID | None = Field(default=None, foreign_key="users.id", index=True)
+    #: `SET NULL` for the same reason, and #70 already argued it: the name is STORED
+    #: rather than joined, so a log entry outlives the account that wrote it and still
+    #: says who. Losing the id costs nothing a reader needs; losing the entry would
+    #: breach #8 and #58.
+    actor_user_id: UUID | None = Field(
+        default=None, foreign_key="users.id", ondelete="SET NULL", index=True
+    )
     #: The actor's name as it was WHEN THEY ACTED, stored rather than joined (#70). A
     #: join would return the current name, which an append-only log must not do. The
     #: value is the `username` until `users` gains a `display_name`.

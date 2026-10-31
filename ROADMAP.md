@@ -1296,8 +1296,7 @@ at (#56), which is a scraper job across 48 pages rather than a schema one.
 
 ## K8. Two sides in one game
 
-**Status: In progress on `kill-team-opponent`, not on `main`.** Steps 1 to 9 of the
-ten below are committed there; `main` has none of them, so K8 is not `built`.
+**Status: In progress on `kill-team-opponent`, not on `main`.** All eleven steps below are committed there; `main` has none of them, so K8 is not `built`.
 Decisions #67, #68, #69, #70, #73, #74, #76, #77, #92, #93, #94, #96.
 
 A game today holds one kill team, one owner and one set of numbers. The opponent exists
@@ -1413,7 +1412,7 @@ one operation against one CP pool, and there are now two.
 
 ### The revision chain
 
-K8 ships as ten Alembic revisions, not one, under the small-and-incremental convention
+K8 ships as eleven Alembic revisions, not one, under the small-and-incremental convention
 in `ARCHITECTURE.md` §4. This table is the ONLY place the count lives. A revision names
 its own step and points here, so adding a step edits one list rather than every file.
 
@@ -1428,7 +1427,8 @@ its own step and points here, so adding a step edits one list rather than every 
 | 7 | `b7c1e4a9f336` | Swaps the equipment unique to name `side` | Committed on `kill-team-opponent` |
 | 8 | `c8d2f5b1a749` | Retires `uq_kt_game_owner_team_id`, which step 6 orphaned | Committed on `kill-team-opponent` |
 | 9 | `d9e3a6c2f815` | Swaps `ck_kt_game_operative_source` to admit `'opponent'` (#93) | Committed on `kill-team-opponent` |
-| 10 | — | Drops the six moved columns and the opponent pair; sets `side` NOT NULL on the two CHILD tables | Planned, and GATED on K8's code half |
+| 10 | `e1f4b7d2a936` | Drops the six moved columns, the opponent pair and three CHECKs; sets `side` NOT NULL on the two CHILD tables | Committed on `kill-team-opponent` |
+| 11 | `f2a5c8e1b473` | SET NULL on the two user references step 3 left at NO ACTION | Committed on `kill-team-opponent` |
 
 The chain was planned as six and has grown twice, both times at the keyboard. Step 5 was
 added at step 3, once writing the models showed that the event log keeps rows written
@@ -1457,7 +1457,26 @@ Reversibility splits three ways, and only the last one loses data.
 - Step 9 is a constraint swap like steps 6 and 7, and NARROWS on reverse: a side's
   operatives written with `source = 'opponent'` collide with the three-value CHECK it
   goes back to, so that reverse IS refused once such a row exists.
-- Step 10 is lossy by construction, because it drops the columns a reverse would read.
+- Step 11 is a FIX rather than a step of the design, and its reverse restores a defect,
+  which is what a faithful reverse of a fix does.
+- Step 10 is lossy by construction. Its reverse restores the SHAPE and not the data:
+  `kt_games` holds one row per game and `kt_game_sides` two, so "whose numbers go
+  back" has no answer that is not a choice, and a reverse that quietly picked one
+  would look like it had worked.
+
+**Step 11 exists because the Postgres parity tier disagreed with the default one.**
+`occupant_user_id` (#74) and `actor_user_id` (#70) arrived in step 3 with no `ondelete`,
+which is NO ACTION, so each REFUSED the deletion of a user it referenced — and deleting a
+user has taken their games with them since K5, because
+`kt_games.owner_user_id` and `kt_rosters.owner_user_id` both CASCADE. The same deletion
+SUCCEEDED against SQLite and was refused by Postgres, so every test passed on the tier
+that runs by default. R6's two-tier split is what found it, which is the case it was
+built for.
+
+Both became SET NULL, and neither is a compromise: the side is VACATED, which is what
+NULL already means on that column (#74), and the log entry SURVIVES still naming its
+actor, because #70 made the display name stored rather than joined. CASCADE was the wrong
+shape for both — it would delete a side, or a log entry, because an account went away.
 
 ### The code half
 

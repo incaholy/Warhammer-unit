@@ -162,22 +162,28 @@ def test_a_new_game_arrives_with_its_player_side_and_no_opponent(session, battle
     assert player.display_name is None
 
 
-def test_the_player_sides_snapshots_agree_with_the_games_by_construction(session, battle):
-    """Copied from the game rather than rebuilt, so the two cannot disagree at creation.
+def test_the_player_sides_snapshot_is_built_from_its_team(session, battle):
+    """The side is where the snapshot LIVES, so it is where it is built (#22, #24, #67).
 
-    Building each from the catalog twice would make them equal only for as long as both
-    code paths stayed in step, which is the kind of agreement that quietly stops holding.
+    An earlier version of this compared the side's copy with the game's and asserted they
+    agreed. That premise went with the columns: `kt_games` holds no snapshot now, so there
+    is nothing to disagree with, and "which copy wins" stopped being a question the moment
+    there was one copy. Two sibling tests went the same way -- the per-side authority they
+    checked is covered better by
+    `test_a_ploy_must_be_in_the_snapshot_of_the_side_spending_it`, which uses two REAL
+    sides rather than one side and a stale column.
     """
     b = battle()
-    game = _service(session).create_game(b["user"].id, b["roster"].id)
-    player = session.exec(select(KTGameSide).where(KTGameSide.game_id == game.id)).one()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    player = svc.player_side(game)
 
-    assert player.rules == game.rules
-    assert player.ploys == game.ploys
-    assert player.command_points == game.command_points
-    assert player.victory_points == game.victory_points
-    assert player.ploys_used == game.ploys_used
-    assert player.choices == game.choices
+    assert [rule["name"] for rule in player.rules] == ["Burrow", "Tunnel"]
+    assert any(p["universal"] for p in player.ploys), "the universal ploys came too"
+    assert any(not p["universal"] for p in player.ploys), "and the team's own"
+    # A battle starts at nothing spent and nothing scored.
+    assert (player.command_points, player.victory_points) == (0, {})
+    assert (player.ploys_used, player.choices) == ([], {})
 
 
 def test_a_new_games_operative_can_now_be_sided(session, battle):
@@ -274,11 +280,10 @@ def test_a_ploy_is_the_players_and_the_clock_is_the_games(session, battle):
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_game(game.id, None, status="in_progress")
     svc.update_side(game.id, "player", None, command_points=5)
-    svc.use_ploy(game.id, game.ploys[0]["name"], "player")
+    svc.use_ploy(game.id, _player(session, game).ploys[0]["name"], "player")
     svc.advance(game.id)
 
     assert _scopes(session, game.id)[-2:] == [("ploy_used", "player"), ("advanced", None)]
-
 
 
 def test_undoing_a_removal_puts_the_side_back(session, battle):
@@ -343,56 +348,6 @@ def test_a_service_with_no_actor_still_writes_the_log(session, battle):
     assert entry.actor_display_name is None
 
 
-def test_the_sides_snapshot_is_what_a_ploy_is_checked_against(session, battle):
-    """Decision #67: `ploys` belongs to the side, so the side is what `use_ploy` reads.
-
-    The two rows hold the SAME list today, since #97 copies it at creation, so a test
-    that merely read one would pass whichever it read. This makes them differ: a name
-    only the side lists is spendable, and a name only the stale game column lists is not.
-    """
-    b = battle()
-    svc = _service(session)
-    game = svc.create_game(b["user"].id, b["roster"].id)
-    svc.update_side(game.id, "player", None, command_points=5)
-    player = svc.player_side(game)
-
-    player.ploys = [{"name": "Side Only", "cp_cost": 1, "universal": False}]
-    game.ploys = [{"name": "Game Only", "cp_cost": 1, "universal": False}]
-    session.add_all([player, game])
-    session.commit()
-
-    svc.use_ploy(game.id, "Side Only", "player")
-    # `ploys_used` and `command_points` are still written to the GAME; they move onto the
-    # side with the next change. What this asserts is which snapshot was CONSULTED.
-    assert [entry["name"] for entry in _player(session, game).ploys_used] == ["Side Only"]
-    assert _player(session, game).command_points == 4
-
-    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
-        svc.use_ploy(game.id, "Game Only", "player")
-
-
-def test_ploys_used_is_validated_against_the_sides_snapshot(session, battle):
-    """The same authority question for `_validate_ploys_used` (#23's counterpart).
-
-    It takes the snapshot rather than the game now, because after #67 the list belongs to
-    a side and the caller is what knows which one.
-    """
-    b = battle()
-    svc = _service(session)
-    game = svc.create_game(b["user"].id, b["roster"].id)
-    player = svc.player_side(game)
-
-    player.ploys = [{"name": "Side Only", "cp_cost": 0, "universal": False}]
-    game.ploys = [{"name": "Game Only", "cp_cost": 0, "universal": False}]
-    session.add_all([player, game])
-    session.commit()
-
-    svc.update_side(game.id, "player", None, ploys_used=[{"name": "Side Only", "turning_point": 1}])
-
-    with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
-        svc.update_side(game.id, "player", None, ploys_used=[{"name": "Game Only", "turning_point": 1}])
-
-
 def test_a_game_with_no_player_side_is_a_broken_invariant_not_a_404(session, battle):
     """#97 makes this unreachable, so it raises `LookupError` rather than `NotFoundError`.
 
@@ -449,7 +404,6 @@ def test_undo_routes_a_historical_two_row_event_back_to_both_rows(session, battl
 
     assert game.status == "setup", "the game's field came back to the game"
     assert svc.player_side(game).command_points == 0, "the side's field came back to the side"
-
 
 
 def test_the_moved_fields_not_null_rule_survives_losing_the_game_columns(session, battle):
@@ -922,15 +876,52 @@ def test_a_ploy_cannot_be_spent_for_a_side_that_does_not_exist(session, battle):
         svc.use_ploy(game.id, "anything", "banana")
 
 
+def test_an_entry_naming_a_departed_column_is_refused_not_reverted(session, battle):
+    """Decision #99, and what let the last revision land.
+
+    A `game_updated` entry written before the redesign can carry `opponent_name`:
+    `_UPDATABLE` held it, and the last revision drops the column. `setattr` for a field a
+    model no longer has raises a bare `ValueError`, which is not a `CodedError`, so the
+    player would get an unexplained 500 -- #96's failure mode, reached by the two fields
+    #96's routing deliberately left out.
+
+    The entry stays VISIBLE in the log with what it changed. Only the reversal is refused,
+    and the message says which field and why.
+    """
+    b = battle()
+    svc = _service(session)
+    game = svc.create_game(b["user"].id, b["roster"].id)
+    session.add(
+        KTGameEvent(
+            game_id=game.id,
+            sequence=999,
+            type="game_updated",
+            turning_point=game.turning_point,
+            payload={"op": "fields", "opponent_name": {"before": None, "after": "Dave"}},
+        )
+    )
+    session.commit()
+
+    with pytest.raises(KTGameValidationError, match="which the two-sided redesign removed"):
+        svc.undo(game.id)
+
+    # Nothing half-applied, and no compensating entry written.
+    session.rollback()
+    log = session.exec(select(KTGameEvent).where(KTGameEvent.game_id == game.id)).all()
+    assert [e.type for e in log] == ["game_updated"], "the refusal wrote nothing"
+
+
 def test_a_game_copies_the_teams_reference_including_the_universal_ploys(session, battle):
     # Decision #24: with the datacards, this is what lets a battle need no catalog call.
     b = battle()
     game = _service(session).create_game(b["user"].id, b["roster"].id)
 
-    assert [rule["name"] for rule in game.rules] == ["Burrow", "Tunnel"]
-    assert len(game.ploys) == 2
+    assert [rule["name"] for rule in _player(session, game).rules] == ["Burrow", "Tunnel"]
+    assert len(_player(session, game).ploys) == 2
     # Flagged rather than merged, so a screen can group "the team's" and "everyone's".
-    assert [p["name"] for p in game.ploys if p["universal"]][0].startswith("Command Re-roll")
+    assert [p["name"] for p in _player(session, game).ploys if p["universal"]][0].startswith(
+        "Command Re-roll"
+    )
 
 
 def test_a_games_snapshot_does_not_follow_the_catalog(session, battle, make_kt_operative):
@@ -1766,7 +1757,7 @@ def test_using_a_ploy_records_it_and_pays_for_it(session, battle):
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_side(game.id, "player", None, command_points=3)
-    ploy = next(p for p in game.ploys if not p["universal"])
+    ploy = next(p for p in _player(session, game).ploys if not p["universal"])
 
     svc.use_ploy(game.id, ploy["name"], "player")
 
@@ -1786,7 +1777,7 @@ def test_undoing_a_ploy_restores_the_cp_and_the_entry_together(session, battle):
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_side(game.id, "player", None, command_points=4)
-    ploy = next(p for p in game.ploys if not p["universal"])
+    ploy = next(p for p in _player(session, game).ploys if not p["universal"])
     svc.use_ploy(game.id, ploy["name"], "player")
 
     svc.undo(game.id)
@@ -1825,7 +1816,7 @@ def test_the_same_ploy_twice_is_accepted_because_that_is_a_rule(session, battle)
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_side(game.id, "player", None, command_points=5)
-    ploy = next(p for p in game.ploys if p["cp_cost"] > 0)
+    ploy = next(p for p in _player(session, game).ploys if p["cp_cost"] > 0)
 
     svc.use_ploy(game.id, ploy["name"], "player")
     svc.use_ploy(game.id, ploy["name"], "player")
@@ -1842,7 +1833,7 @@ def test_a_universal_ploy_can_be_spent_like_the_teams_own(session, battle):
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_side(game.id, "player", None, command_points=2)
-    universal = next(p for p in game.ploys if p["universal"])
+    universal = next(p for p in _player(session, game).ploys if p["universal"])
 
     svc.use_ploy(game.id, universal["name"], "player")
 
@@ -1859,7 +1850,7 @@ def test_setting_ploys_used_directly_is_checked_against_the_snapshot(session, ba
     b = battle()
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
-    real = game.ploys[0]["name"]
+    real = _player(session, game).ploys[0]["name"]
 
     with pytest.raises(KTGameValidationError, match="not one of this game's ploys"):
         svc.update_side(game.id, "player", None, ploys_used=[{"name": "Teleportarium", "turning_point": 1}])
@@ -2055,13 +2046,23 @@ def test_a_ploy_cannot_be_paid_for_twice_from_one_pool(session, battle):
     svc = _service(session)
     game = svc.create_game(b["user"].id, b["roster"].id)
     svc.update_side(game.id, "player", None, command_points=5)
-    ploy_name = game.ploys[0]["name"]
+    ploy_name = _player(session, game).ploys[0]["name"]
     read_version = game.version
 
-    session.execute(  # the other tab spends the same CP first
+    # The other tab spends the same CP first. Two statements now, because the pool is the
+    # SIDE's and the version lock is still the GAME's (#9) -- which is the shape that makes
+    # this work: one battle is one locking unit whichever row a write lands on.
+    side_id = _player(session, game).id
+    session.execute(
+        update(KTGameSide)
+        .where(KTGameSide.id == side_id)
+        .values(command_points=4)
+        .execution_options(synchronize_session=False)
+    )
+    session.execute(
         update(KTGame)
         .where(KTGame.id == game.id)
-        .values(version=KTGame.version + 1, command_points=4)
+        .values(version=KTGame.version + 1)
         .execution_options(synchronize_session=False)
     )
     assert game.version == read_version

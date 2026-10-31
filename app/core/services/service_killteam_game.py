@@ -182,12 +182,10 @@ class KTGameService:
             owner_user_id=user_id,
             kill_team_id=roster.kill_team_id,
             roster_id=roster.id,
-            rules=[self._rule_snapshot(rule) for rule in roster.kill_team.rules],
-            ploys=[self._ploy_snapshot(ploy) for ploy in self._playable_ploys(roster.kill_team)],
         )
         self.session.add(game)
         self.session.flush()
-        player = self._new_player_side(game)
+        player = self._new_player_side(game, roster.kill_team)
         self.session.add(player)
         self.session.flush()
 
@@ -617,7 +615,8 @@ class KTGameService:
 
         Refused for a ploy this game's snapshot does not list -- the same bookkeeping as
         `actions_used` against an operative's card (#23) -- and refused if the CP will not
-        cover it, which the `ck_kt_game_command_points` CHECK would refuse anyway. How
+        cover it, which `ck_kt_game_side_command_points` would refuse anyway -- the CHECK
+        moved onto the side with the column. How
         many ploys a turning point allows is a RULE, so it is not counted here (#1), and
         `ploys_used` and `command_points` stay directly writable for a custom game.
         """
@@ -952,7 +951,7 @@ class KTGameService:
             "universal": ploy.kill_team_id is None,
         }
 
-    def _new_player_side(self, game: KTGame) -> KTGameSide:
+    def _new_player_side(self, game: KTGame, team: KillTeam) -> KTGameSide:
         """The creator's half of a new game, inserted with the game itself (#97).
 
         #74 says a side row is created "once that side's kill team is known, not at game
@@ -965,11 +964,9 @@ class KTGameService:
         #77's backfill gives every game that already exists one -- pre-K8 games would work
         and post-K8 games would not.
 
-        The snapshot columns are copied from the game rather than rebuilt, so the two agree
-        at creation by construction instead of by two code paths happening to match. The
-        MUTABLE ones go stale from here until the writes move onto the side, which is
-        deliberate: nothing reads this row yet, the same sense in which #74 calls
-        `occupant_user_id` "written here and deliberately unread".
+        The numeric columns take their own defaults -- no CP, no score, nothing spent,
+        nothing chosen -- which is what a battle starts with. The snapshots are built from
+        the team here, because after the last revision the game has no copy to take.
 
         `display_name` stays NULL. The game never named the creator's side, #92's `PUT` is
         what sets one, and the team's name is already reachable through `kill_team_id` --
@@ -982,12 +979,13 @@ class KTGameService:
             kill_team_id=game.kill_team_id,
             occupant_user_id=game.owner_user_id,
             roster_id=game.roster_id,
-            command_points=game.command_points,
-            victory_points=game.victory_points,
-            rules=game.rules,
-            ploys=game.ploys,
-            ploys_used=game.ploys_used,
-            choices=game.choices,
+            # BUILT here, not copied from the game. The first draft of this copied
+            # `game.command_points` and the rest, which worked only while `kt_games` still
+            # had them -- the last revision drops all six, and copying them raised
+            # `AttributeError` on every game creation. The side is where they live now, so
+            # the side is where they are made. #92's `PUT` does the same for the opponent.
+            rules=[self._rule_snapshot(rule) for rule in team.rules],
+            ploys=[self._ploy_snapshot(ploy) for ploy in self._playable_ploys(team)],
         )
 
     def _new_operative(
@@ -1245,14 +1243,33 @@ class KTGameService:
         were split.
         """
         target = self._event_target(game, event)
+        plan = [
+            (self._owner_of(game, field) if target is game else target, field, change["before"])
+            for field, change in event.payload.items()
+            if field not in {"op", "target_id", "row"} and isinstance(change, dict)
+        ]
+
+        # Checked BEFORE anything is written (#99). An entry naming a column the schema no
+        # longer has cannot be reverted, and `setattr` for one raises a bare `ValueError`
+        # -- not a `CodedError`, so the player would get an unexplained 500. The case is
+        # `opponent_name` and `opponent_victory_points` on a `game_updated` entry written
+        # before the two-sided redesign: `_UPDATABLE` held them, the last revision drops
+        # them, and nothing can route them without inventing a mapping no decision states.
+        #
+        # Two passes rather than one, so a refusal cannot leave half an undo applied.
+        for row, field, _before in plan:
+            if field not in type(row).__table__.columns:  # type: ignore[attr-defined]
+                raise KTGameValidationError(
+                    "undo",
+                    f"this entry changed {field!r}, which the two-sided redesign removed, "
+                    "so it cannot be reverted",
+                )
+
         # A LIST with an identity check, not a set: a SQLModel row is not hashable, so
         # `set()` raised `TypeError: unhashable type` for every undo that reached here.
         touched_rows: list[Any] = []
-        for field, change in event.payload.items():
-            if field in {"op", "target_id", "row"} or not isinstance(change, dict):
-                continue
-            row = self._owner_of(game, field) if target is game else target
-            setattr(row, field, change["before"])
+        for row, field, before in plan:
+            setattr(row, field, before)
             if not any(seen is row for seen in touched_rows):
                 touched_rows.append(row)
         # `target` when nothing was touched, so an event carrying no field changes still

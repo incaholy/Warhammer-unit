@@ -20,6 +20,7 @@ from app.core.db.models_killteam import (
     KTGameEquipment,
     KTGameEvent,
     KTGameOperative,
+    KTGameSide,
     KTOperative,
     KTPloy,
     KTRoster,
@@ -831,20 +832,53 @@ def test_a_direct_update_cannot_move_a_row_into_another_players_roster(
 # --- the game tables (K5) --------------------------------------------------
 
 
+def test_every_user_reference_says_what_a_deletion_does_to_it():
+    """Read off the schema, because in K8 the two SET NULL legs rarely FIRE.
+
+    The occupant of a side is its game's owner (#97) and an event belongs to that game, so
+    deleting a user cascades both away through `kt_games` before either leg is reached.
+    Their rule is still load-bearing: NO ACTION was the first draft and REFUSED the
+    deletion outright, breaking
+    `test_deleting_a_user_takes_their_games_and_everything_on_them`. It matters for real
+    in K9, when an occupant is someone other than the owner.
+
+    So this asserts the DECLARED rule rather than an observable cascade, which is the only
+    way to pin an intent whose effect is not yet reachable.
+    """
+    rules = {}
+    for model in (KTGame, KTRoster, KTGameSide, KTGameEvent):
+        for key in model.__table__.foreign_keys:  # type: ignore[attr-defined]
+            if key.column.table.name == "users":
+                rules[f"{model.__tablename__}.{key.parent.name}"] = key.ondelete
+
+    assert rules == {
+        # Shipped since K5: a user's games and rosters go with them.
+        "kt_games.owner_user_id": "CASCADE",
+        "kt_rosters.owner_user_id": "CASCADE",
+        # Added by K8: the side is VACATED (#74) and the log entry SURVIVES, still naming
+        # the actor through the stored display name (#70).
+        "kt_game_sides.occupant_user_id": "SET NULL",
+        "kt_game_events.actor_user_id": "SET NULL",
+    }
+
+
 def test_a_game_is_created_from_a_roster_with_its_owner_and_team(session, make_kt_game):
     game = make_kt_game()
 
     assert game.status == "setup"
     assert game.turning_point == 1
     assert game.phase == "strategy"
-    assert game.command_points == 0
     assert game.version == 1
+    # `command_points` and the rest are the SIDE's now, not the game's (#67).
+    assert next(row for row in game.sides if row.side == "player").command_points == 0
     # NULL, not "player": nobody has rolled for initiative in a game still in setup
     # (#62), and a client must tell that from the opponent holding it.
     assert game.initiative is None
     # The documents default to empty rather than NULL, so a read never has to ask which.
-    assert (game.markers, game.ploys_used, game.rules, game.ploys) == ([], [], [], [])
-    assert (game.victory_points, game.choices) == ({}, {})
+    assert game.markers == [], "shared on the game, because a marker is on the board (#67)"
+    player = next(row for row in game.sides if row.side == "player")
+    assert (player.ploys_used, player.rules, player.ploys) == ([], [], [])
+    assert (player.victory_points, player.choices) == ({}, {})
 
 
 def test_a_game_operative_cannot_sit_in_another_players_game(
@@ -882,20 +916,16 @@ def test_a_game_operative_cannot_sit_in_another_players_game(
         session.commit()
 
 
-def test_a_null_side_skips_the_whole_ownership_leg(
+def test_an_operative_must_name_a_side(
     session, make_user, make_kt_game, make_kt_game_side, make_kt_operative
 ):
-    """A MATCH SIMPLE composite key is skipped ENTIRELY when any of its columns is NULL.
+    """INVERTED by the last revision, which the earlier version of this said it MUST be.
 
-    This is the same row the test above refuses, with `side` left unset. It is ACCEPTED,
-    so an operative belonging to a stranger sits in this game unchallenged. The gap is
-    real rather than theoretical, which is why it is asserted instead of described.
-
-    It is inherent to expand-migrate-contract rather than a defect in the revision that
-    widened the leg. `side` cannot be NOT NULL until the service writes it, and that code
-    lands with K8's last revisions in the same deploy. When it does, this test MUST be
-    inverted to expect an `IntegrityError` — the hazard `fk_kt_game_roster`'s own comment
-    records, caught here in the one place it can be measured.
+    It used to assert the gap: under MATCH SIMPLE a NULL anywhere in
+    `fk_kt_game_operative_side` skipped the whole check, so an operative owned by a
+    STRANGER inserted cleanly and sat in this game unchallenged. `side` is NOT NULL now,
+    so there is no NULL to skip on and the leg is finally what #54 calls unrepresentable
+    rather than merely checked.
     """
     game = make_kt_game()
     make_kt_game_side(game=game)
@@ -914,10 +944,15 @@ def test_a_null_side_skips_the_whole_ownership_leg(
         current_wounds=operative.wounds,
     )
     session.add(row)
-    session.commit()
 
-    assert row.side is None
-    assert session.get(KTGameOperative, row.id) is not None
+    # No side at all: refused by NOT NULL rather than slipping past the leg.
+    #
+    # `not.?null`, not `not null`: SQLite says "NOT NULL constraint failed" and Postgres
+    # says "violates not-null constraint", with a HYPHEN. The space-only form passed the
+    # default tier and failed the parity one, which is the same divergence the unique
+    # matchers in this file already warn about.
+    with pytest.raises(IntegrityError, match="(?i)not.?null"):
+        session.commit()
 
 
 def test_a_game_operative_cannot_name_another_teams_datacard(
@@ -939,6 +974,9 @@ def test_a_game_operative_cannot_name_another_teams_datacard(
             save=stranger.save,
             wounds=stranger.wounds,
             current_wounds=stranger.wounds,
+            # A real side, so the row reaches the four-column LEG rather than
+            # stopping at `side`'s NOT NULL.
+            side="player",
         )
     )
 
@@ -1002,9 +1040,7 @@ def test_the_schema_admits_an_opponent_source(session, make_kt_game_operative):
         ("initiative", "nobody", "ck_kt_game_initiative"),
         ("turning_point", 5, "ck_kt_game_turning_point"),
         ("turning_point", 0, "ck_kt_game_turning_point"),
-        ("command_points", -1, "ck_kt_game_command_points"),
         ("version", 0, "ck_kt_game_version"),
-        ("opponent_name", "   ", "ck_kt_game_opponent_name"),
     ],
 )
 def test_a_games_vocabulary_is_closed(session, make_kt_game, field, value, constraint):
@@ -1061,28 +1097,31 @@ def test_both_sides_may_take_the_same_piece_of_equipment(
     assert mine.equipment_id == theirs.equipment_id
 
 
-def test_a_null_side_voids_the_equipment_unique(
+def test_the_equipment_unique_can_no_longer_be_voided_by_a_null(
     session, make_kt_game, make_kt_equipment, make_kt_game_equipment
 ):
-    """A unique containing a nullable column refuses NOTHING while that column is NULL.
+    """INVERTED by the last revision, which the earlier version of this said it MUST be.
 
-    Postgres and SQLite both treat two NULLs as distinct, so the same piece twice with no
-    side is ACCEPTED -- the property `uq_kt_game_side` relies on deliberately (#77), here
-    working against us. The constraint is strictly weaker than the
-    `UNIQUE(game_id, equipment_id)` it replaced until the column is NOT NULL.
-
-    `KTGameService.add_equipment` is what keeps this unreachable through the API: it
-    refuses a piece already in the GAME, so nothing gets as far as the constraint. This
-    test asserts the SCHEMA's behaviour, and MUST be inverted when the last revision sets
-    `side` NOT NULL.
+    It used to assert that `UNIQUE(game_id, side, equipment_id)` refused NOTHING while
+    `side` was nullable, because Postgres and SQLite both treat two NULLs as distinct --
+    so the widened constraint was strictly weaker than the two-column one it replaced.
+    `side` is NOT NULL now, so the same piece twice on one side collides.
     """
     game = make_kt_game()
     item = make_kt_equipment()
-    first = make_kt_game_equipment(game=game, equipment=item)
-    second = make_kt_game_equipment(game=game, equipment=item)
+    make_kt_game_equipment(game=game, equipment=item)
 
-    assert first.side is None and second.side is None
-    assert first.id != second.id
+    session.add(
+        KTGameEquipment(game_id=game.id, equipment_id=item.id, side="player", name=item.name, text="x")
+    )
+    with pytest.raises(IntegrityError, match="(?i)unique"):
+        session.commit()
+    session.rollback()
+
+    # And a NULL is no longer available as a way round it.
+    session.add(KTGameEquipment(game_id=game.id, equipment_id=item.id, name=item.name, text="x"))
+    with pytest.raises(IntegrityError, match="(?i)not.?null"):
+        session.commit()
 
 
 def test_a_games_event_sequence_is_unique_so_the_last_event_is_a_fact(

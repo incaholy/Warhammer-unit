@@ -386,7 +386,6 @@ def _listed(game: KTGame, opponent: KTGameSide | None) -> KTGame_ListRead:
     return KTGame_ListRead(
         id=game.id,
         created_at=game.created_at,
-        opponent_name=game.opponent_name,
         status=game.status,
         turning_point=game.turning_point,
         phase=game.phase,
@@ -423,7 +422,6 @@ def _detail(game: KTGame, player: KTGameSide, opponent: KTGameSide | None) -> KT
         kill_team_id=game.kill_team_id,
         kill_team_name=game.kill_team.name,
         faction_name=game.kill_team.faction.name,
-        opponent_name=game.opponent_name,
         status=game.status,
         turning_point=game.turning_point,
         phase=game.phase,

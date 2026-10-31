@@ -85,18 +85,16 @@ def test_putting_a_side_without_a_team_renames_it(
     assert auth_client.put(f"{base}/player", json={"display_name": "x", "nope": 1}).status_code == 422
 
 
-def test_the_detail_publishes_the_sides_snapshots_not_the_games(
+def test_the_detail_serves_the_sides_snapshots(
     session, auth_client, make_kill_team, make_kt_faction, make_kt_operative
 ):
-    """Decision #67: `rules` and `ploys` belong to the side, so the read serves the side's.
+    """`rules` and `ploys` are served from the side, nested under it (#67).
 
-    The two rows hold the SAME lists today -- #97 copies them at creation -- so a read
-    pointed at either would look correct. This makes them differ, which is the only way
-    to tell which one the response came from. The reverting mutation passed every other
-    test in the suite before this existed.
-
-    The response SHAPE is unchanged: both stay top-level fields until the read is
-    reshaped into `player` and `opponent` objects, so no client sees this move.
+    An earlier version made the game's copy DISAGREE with the side's and asserted which
+    one the response came from -- the only test with power while both existed, and the
+    reverting mutation passed every other test in the suite without it. The last revision
+    dropped the game's copy, so there is no longer a wrong answer to catch: the fields
+    exist in exactly one place and the read reaches it or fails.
     """
     team, cards, roster = _battle(auth_client, make_kill_team, make_kt_faction, make_kt_operative)
     created = auth_client.post("/api/v1/me/kill-team/games", json={"roster_id": roster["id"]}).json()
@@ -104,19 +102,12 @@ def test_the_detail_publishes_the_sides_snapshots_not_the_games(
     game = session.get(KTGame, uuid.UUID(created["id"]))
     player = next(row for row in game.sides if row.side == "player")
     player.rules = [{"name": "Side Rule", "description": "from the side", "group": None}]
-    player.ploys = [
-        {"name": "Side Ploy", "kind": "strategic", "cp_cost": 1, "description": "x", "universal": False}
-    ]
-    game.rules = [{"name": "Game Rule", "description": "from the stale column", "group": None}]
-    game.ploys = [
-        {"name": "Game Ploy", "kind": "strategic", "cp_cost": 1, "description": "y", "universal": False}
-    ]
-    session.add_all([player, game])
+    session.add(player)
     session.commit()
 
     body = auth_client.get(f"/api/v1/me/kill-team/games/{created['id']}").json()
     assert [rule["name"] for rule in body["player"]["rules"]] == ["Side Rule"]
-    assert [ploy["name"] for ploy in body["player"]["ploys"]] == ["Side Ploy"]
+    assert "rules" not in body, "no top-level copy survives the reshape"
 
 
 def test_the_read_distinguishes_all_three_opponent_states(

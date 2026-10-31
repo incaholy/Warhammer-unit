@@ -471,15 +471,28 @@ def make_kt_game(session, make_kt_roster):
 
     def _make(roster=None, **overrides):
         roster = roster or make_kt_roster()
-        data = dict(opponent_name=f"Opponent {next(_counter)}")
-        data.update(overrides)
         game = KTGame(
             owner_user_id=roster.owner_user_id,
             kill_team_id=roster.kill_team_id,
             roster_id=roster.id,
-            **data,
+            **overrides,
         )
         session.add(game)
+        session.flush()
+        # The player side comes with the game, exactly as #97 has `create_game` do it.
+        # Without it the child fixtures below cannot insert anything: `side` is NOT NULL
+        # and its four-column leg needs a row to name. No `opponent_name` either -- the
+        # column is gone (#77), and #98 took the field off creation.
+        session.add(
+            KTGameSide(
+                game_id=game.id,
+                owner_user_id=game.owner_user_id,
+                side="player",
+                kill_team_id=game.kill_team_id,
+                occupant_user_id=game.owner_user_id,
+                roster_id=roster.id,
+            )
+        )
         session.commit()
         session.refresh(game)
         return game
@@ -500,6 +513,19 @@ def make_kt_game_side(session, make_kt_game):
 
     def _make(game=None, side="player", **overrides):
         game = game or make_kt_game()
+        # The player row already exists -- `make_kt_game` creates it, as #97 has the
+        # service do -- so asking for it RETURNS it rather than colliding with
+        # `uq_kt_game_side`. Overrides still apply, so a test can shape it.
+        existing = session.exec(
+            select(KTGameSide).where(KTGameSide.game_id == game.id, KTGameSide.side == side)
+        ).first()
+        if existing is not None:
+            for field, value in overrides.items():
+                setattr(existing, field, value)
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
+            return existing
         data = dict(kill_team_id=game.kill_team_id, occupant_user_id=game.owner_user_id)
         data.update(overrides)
         row = KTGameSide(
@@ -538,6 +564,10 @@ def make_kt_game_operative(session, make_kt_game, make_kt_operative):
             wounds=operative.wounds,
             keywords=list(operative.keywords),
             current_wounds=operative.wounds,
+            # The creator's half by default, which is where a roster's models sit. `side`
+            # is NOT NULL now, and its four-column leg needs the row `make_kt_game`
+            # creates.
+            side="player",
         )
         data.update(overrides)
         row = KTGameOperative(
@@ -563,7 +593,7 @@ def make_kt_game_equipment(session, make_kt_game, make_kt_equipment):
     def _make(game=None, equipment=None, **overrides):
         game = game or make_kt_game()
         equipment = equipment or make_kt_equipment()
-        data = dict(name=equipment.name, text=equipment.description)
+        data = dict(name=equipment.name, text=equipment.description, side="player")
         data.update(overrides)
         row = KTGameEquipment(game_id=game.id, equipment_id=equipment.id, **data)
         session.add(row)
