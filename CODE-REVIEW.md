@@ -10,6 +10,11 @@ A full review of both repos: `warhammer_unit` (FastAPI backend) and `warhammer_w
 > Do not cite this file as evidence of a current gap. `DEPLOY-GCP.md` did exactly that
 > with the "no CI" claim below, which was false by then, and planned a stage of work
 > around it.
+>
+> **Re-verified 2026-10-14** (suite: 723 passed of 724 collected, 1 skipped). That pass
+> found six more present-tense claims that had gone stale and one that was wrong when
+> written. Each is struck through and marked in place below, never deleted — the record
+> of what was believed is the point of keeping this file.
 
 **Status at the time: the suite is green and the architecture is sound.** 210 backend tests passed, 144 frontend tests passed, frontend lint and build were clean. The layering (`api → services → db`, session-injected services, thin routers, a typed error hierarchy) holds up, and the frontend has exactly one module that owns the token and HTTP, which is the right shape.
 
@@ -53,8 +58,10 @@ This affects **any non-nullable updatable column**, not just these two.
 ### 2. The catch-all `ValueError` / `TypeError` handlers leak internals and hide bugs — ✅ FIXED
 
 > Those handlers are gone. `app/main.py` now carries a comment saying their absence is
-> deliberate, and registers exactly four: `CodedError`, `RequestValidationError`,
-> `IntegrityError` and a generic `Exception` with a sanitized body.
+> deliberate. ~~It registers exactly four: `CodedError`, `RequestValidationError`,
+> `IntegrityError` and a generic `Exception` with a sanitized body.~~ **Five as of
+> commit `753f552`** — `StaleDataError` was added for the optimistic-version race on a
+> Kill Team game (409 with `field: "version"`). Four was right when this was written.
 
 `app/main.py` (around lines 61 to 68) registers app-wide handlers mapping `ValueError → 400` and `TypeError → 400`, with `content={"detail": str(exc)}`.
 
@@ -119,22 +126,30 @@ This is documented bcrypt behavior, not a bug in bcrypt. The bug is that nothing
 Two open items that are decisions rather than bugs:
 
 - **The JWT lives in `localStorage`** (`src/api/client.ts`). This is the common SPA tradeoff and it is defensible, but it means any XSS on the page can read the token. The alternative is an httpOnly cookie, which trades away some convenience and brings CSRF into scope. Worth knowing you made a tradeoff, even if you keep it.
-- **No last-admin guard** on `PATCH /users/{user_id}`. An admin can demote the only admin, and then nobody can administer anything without going back through `make create-admin` against the database.
+- ~~**No last-admin guard** on `PATCH /users/{user_id}`.~~ **✅ RESOLVED.** `app/core/services/service_user.py` raises `ConflictError("cannot demote the last admin")`, so the demotion is refused with a 409. Original note: an admin can demote the only admin, and then nobody can administer anything without going back through `make create-admin` against the database.
 
 ---
 
 ## Performance
 
-**N+1 queries when listing armies.** `list_armies` calls `_army_read` per army, which calls `service.points_total(army.id)`, which loops that army's entries calling `self.session.get(Unit, ...)` once per entry. Listing N armies with M units each issues roughly N × (1 + M) queries instead of a couple.
+> **✅ RESOLVED — this whole section describes code that no longer exists.**
+> `app/core/services/service_army.py` eager-loads each army's units, weapons and
+> abilities with `selectinload`, and `points_total` is one
+> `select(func.sum(ArmyUnit.amount * Unit.points))` aggregate instead of a per-entry
+> `session.get` loop. That is two of the three fixes the last paragraph suggested. The
+> reasoning is kept because the *shape* is worth recognising; the code is not there to
+> find.
 
-This is fine at your current scale, and it is not worth contorting the code over today. But learn to spot the shape: **a query inside a loop that is itself inside a loop over query results.** The pattern is called an **N+1 select**, and the fixes to read about are a join, SQLAlchemy's `selectinload`, or computing the totals in a single aggregate query.
+~~**N+1 queries when listing armies.**~~ `list_armies` called `_army_read` per army, which called `service.points_total(army.id)`, which looped that army's entries calling `self.session.get(Unit, ...)` once per entry. Listing N armies with M units each issued roughly N × (1 + M) queries instead of a couple.
+
+That was fine at the scale of the time, and not worth contorting the code over then. But learn to spot the shape: **a query inside a loop that is itself inside a loop over query results.** The pattern is called an **N+1 select**, and the fixes to read about are a join, SQLAlchemy's `selectinload`, or computing the totals in a single aggregate query.
 
 ---
 
 ## Process and docs gaps
 
 - ~~**The backend has no CI.**~~ **✅ FIXED — and this claim is what `DEPLOY-GCP.md` cited.** `.github/workflows/ci.yml` runs ruff check and format, `lint-imports`, an `openapi.json` freshness gate, the SQLite suite, and a `parity` job doing `alembic upgrade head && alembic check` plus the suite against Postgres 16. Original note: `warhammer_unit_web` has `.github/workflows/ci.yml` running lint, build, and test on every push and PR. This repo has no `.github/workflows` directory at all, so 210 tests exist that nothing runs automatically. You already wrote the frontend workflow, so porting it is mostly mechanical: swap Node for Python, `npm ci` for `pip install -r requirements.txt -r requirements-dev.txt`, and `npm test` for `pytest`. This is the highest value per minute of anything in this document.
-- **`README.md` is 2 lines** while `SPEC.md` is 1,179. Someone landing on the repo learns nothing about what this is or how to run it. The content largely exists already, it just needs a front door that links to `SPEC.md`, `MVP.md`, and `DEPLOY.md`.
+- ~~**`README.md` is 2 lines** while `SPEC.md` is 1,179.~~ **✅ RESOLVED, and both numbers are stale.** `wc -l` at commit `753f552`: `README.md` is 99 lines and `SPEC.md` is 1,524. The front door exists and links the documents named below. Original note: someone landing on the repo learns nothing about what this is or how to run it. The content largely exists already, it just needs a front door that links to `SPEC.md`, `MVP.md`, and `DEPLOY.md`.
 
 ---
 
@@ -142,9 +157,19 @@ This is fine at your current scale, and it is not worth contorting the code over
 
 Genuinely minor, batch them whenever.
 
-- `UserAdmin_Read` in `app/api/user.py` is a byte-for-byte duplicate of `User_Read`, and its comment ("Admin-only view — unlike User_Read, it surfaces the admin flag") is factually wrong, because `User_Read` also has `is_admin`. Either the comment or the class should go.
-- `_UNAUTHORIZED` in `app/core/security.py` is a module-level exception **instance** that gets raised repeatedly. Each `raise` mutates that one shared object's `__traceback__`. It works, but prefer building a fresh exception (or a small factory function) per raise.
-- The Wahapedia scraper is polite, with a sleep between requests and a real User-Agent, which is the right instinct. Be aware that the datasheet content is Games Workshop IP, so republishing it has real ToS and copyright implications if this ever goes public. You already keep `datasheets.json` out of git, which is the right call.
+- ~~`UserAdmin_Read` in `app/api/user.py` is a byte-for-byte duplicate of `User_Read`, and its comment ("Admin-only view — unlike User_Read, it surfaces the admin flag") is factually wrong, because `User_Read` also has `is_admin`. Either the comment or the class should go.~~ **✅ RESOLVED** — `grep -rn UserAdmin_Read app/` returns nothing. The class went.
+- ~~`_UNAUTHORIZED` in `app/core/security.py` is a module-level exception **instance** that gets raised repeatedly. Each `raise` mutates that one shared object's `__traceback__`. It works, but prefer building a fresh exception (or a small factory function) per raise.~~ **✅ RESOLVED** — `grep -rn _UNAUTHORIZED app/` returns nothing. `app/core/security.py` now defines exception *classes* and instantiates one per raise, which is the suggested fix.
+- The Wahapedia scraper is polite, with a sleep between requests and a real User-Agent, which is the right instinct. Be aware that the datasheet content is Games Workshop IP, so republishing it has real ToS and copyright implications if this ever goes public. ~~You already keep `datasheets.json` out of git, which is the right call.~~
+  **⚠ That was wrong when written, and it matters because of the sentence before it.**
+  `scripts/data/datasheets.json` **is committed**: `git ls-files scripts/data/` lists it,
+  at roughly 2.1 MB, holding 1,558 units, 2,235 weapons and 1,026 abilities scraped from
+  Wahapedia. `.gitignore` says so itself, in a comment beside the Kill Team rule — "the
+  40k equivalent (`scripts/data/datasheets.json`) ended up committed". Only
+  `scripts/data/killteam.json` and the scraper cache `scripts/data/cache/` are ignored.
+  So the Games Workshop IP point above applies to content already in this repo's
+  history, not to a hypothetical. What to do about the file — leave it, remove it from
+  the tip, or rewrite history — is the owner's decision and is deliberately not made
+  here; this note exists so it is made knowing the file is there.
 
 ---
 
@@ -159,4 +184,4 @@ Genuinely minor, batch them whenever.
 4. **README front door.**
 5. **Nits**, whenever.
 
-The N+1, the localStorage tradeoff, and the last-admin guard are worth understanding now and fixing when they actually bite. They are on the list so they are not a surprise later, not because they are urgent.
+~~The N+1, the localStorage tradeoff, and the last-admin guard are worth understanding now and fixing when they actually bite.~~ The N+1 and the last-admin guard have since been fixed — see the Performance section and the security-posture bullet above. The localStorage tradeoff stands, as a decision rather than a defect. Original note: they are on the list so they are not a surprise later, not because they are urgent.
