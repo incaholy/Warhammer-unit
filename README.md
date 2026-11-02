@@ -10,7 +10,7 @@ client (`/army-list` vs `/kill-team`):
   turn-by-turn game tracker — turning points, activations, ploys, equipment, and an
   undo. Designed in [`KILLTEAM.md`](KILLTEAM.md).
 
-Kill Team is the larger half by surface area. Of the 72 operations in
+Kill Team is the larger half by surface area. Of the 74 operations in
 `openapi.json`, 29 are Kill Team; of the 26 SQLModel tables, 15 are the `kt_*`
 tables in `app/core/db/models_killteam.py`. Both counted at commit `753f552`.
 

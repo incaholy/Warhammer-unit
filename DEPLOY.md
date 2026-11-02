@@ -87,7 +87,7 @@ idle spin-down (first request after a nap is slow) — fine for a demo.
 - **Port**: nothing to set. The image binds to Render's `$PORT` automatically
   (`CMD` → `--port ${PORT:-8000}`).
 
-On deploy, migrations create all 26 tables in Neon (11 for the 40k army builder, 15
+On deploy, migrations create all 27 tables in Neon (11 for the 40k army builder, 15
 `kt_*` for Kill Team) and the service comes up at
 `https://<name>.onrender.com`. It has **no catalog data yet** — that's Step 3.
 

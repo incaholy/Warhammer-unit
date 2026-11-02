@@ -14,7 +14,7 @@ wins — build order here. Where they disagree about **what the code does today*
 check the code.
 
 **Evidence.** Every claim below was reproduced against the running code rather than read off a commit
-message or a doc. At `4dbef9d` here: `pytest` (**744 passed, 1 skipped**, 745 collected). At
+message or a doc. At `c0ee26e` here: `pytest` (**811 passed, 1 skipped**, 812 collected). At
 `warhammer_web` `440da79`: `npm test` (**669** `it`/`test` blocks across **60** spec files) and
 `npm run test:browser` (**19** blocks across **2** Playwright specs), `npm run lint` and
 `npm run build`, and throwaway probe scripts for SQL query counting, SQLite DDL inspection
@@ -286,7 +286,7 @@ aggregates versus client-side derivation.
 **Satisfies:** §2.1.
 
 **Status: ✅ Done (R5).** Every resource router mounts under one
-`APIRouter(prefix="/api/v1")` parent in `app/main.py`. Of the 49 paths in
+`APIRouter(prefix="/api/v1")` parent in `app/main.py`. Of the 50 paths in
 `openapi.json`, 48 are under `/api/v1` and the only one that is not is `/health`,
 unversioned on purpose. The frontend bakes the prefix into `API_PREFIX` in
 `src/api/client.ts`, and the Firebase rewrite's `/api/**` already covers

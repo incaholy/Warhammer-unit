@@ -138,7 +138,7 @@ User ─→ Army ─→ ArmyUnit ─→ Unit        a points-costed list
   └──→ UserUnit ─→ Unit                 the models you own
 ```
 
-**Kill Team (15 tables)** — three layers, each only depending on the one above.
+**Kill Team (16 tables)** — three layers, each only depending on the one above.
 
 ```
 CATALOG (read-only, public)
@@ -153,7 +153,8 @@ ROSTER (one player's)
   KTRoster ─→ KTRosterOperative ─→ KTOperative
 
 GAME (one battle, self-contained)
-  KTGame ─→ KTGameOperative ─→ (datacard SNAPSHOT, not a reference)
+  KTGame ─→ KTGameSide       two halves; every child below names one (#67)
+     ├───→ KTGameOperative ─→ (datacard SNAPSHOT, not a reference)
      ├───→ KTGameEquipment
      └───→ KTGameEvent          append-only log; undo walks it back
 ```
@@ -198,7 +199,7 @@ Deleting would leave anything already rostered permanently broken.
 | `armies` | one army list: name, faction, optional points limit | `points_total` is **not** stored; it is computed per request |
 | `army_units` | which units are in a list, and how many | `UNIQUE(army_id, unit_id)` — one row per datasheet, which is what makes two differently-sized squads unrepresentable |
 
-**Kill Team — 15 tables**, in three layers.
+**Kill Team — 16 tables**, in three layers.
 
 *Catalog (seeded, read-only, public):*
 
@@ -226,6 +227,7 @@ Deleting would leave anything already rostered permanently broken.
 | Table | Holds | Notable |
 |---|---|---|
 | `kt_games` | the battle: status, turning point, phase, initiative, CP, VP, and the snapshotted team reference | 20 columns, **8 check constraints**, and the `version` that locks every write in the whole subtree |
+| `kt_game_sides` | one half of a battle: its team, occupant, CP, VP, spent ploys and snapshotted reference (#67) | `UNIQUE(game_id, side)` keeps one row per side, which a unique containing the nullable `kill_team_id` cannot (#77) |
 | `kt_game_operatives` | a **snapshot** of a datacard plus what is true of it now | 24 columns and **10 checks** — the most constrained table in the schema. Snapshot and live state side by side |
 | `kt_game_equipment` | equipment taken for this battle, text copied | plain single-column FKs, because universal equipment has a NULL team and offers no unique pair to point at |
 | `kt_game_events` | one row per thing that happened, append-only | `UNIQUE(game_id, sequence)` is the only ordering guarantee; `undone_by` is a self-reference |
@@ -273,7 +275,7 @@ game side (K8). Those are the three tables the MVP still adds.
 
 ## API surface
 
-**49 paths, 72 operations today**, every one of them below. **Fifteen need no token**:
+**50 paths, 74 operations today**, every one of them below. **Fifteen need no token**:
 `/health`, register and login, the six Kill Team catalog reads, and six 40k catalog
 reads — factions, subfactions, `/taxonomy`, weapons, abilities and a unit by id. The
 other 57 **declare** a JWT — but `GET /units` and `/units/facets` serve anonymous callers
@@ -283,7 +285,7 @@ user sees only their own rows.
 
 | Area | Operations | |
 |---|---|---|
-| Kill Team games | 15 | create from a roster, the battle writes, advance, undo |
+| Kill Team games | 17 | create from a roster, the battle writes, advance, undo |
 | 40k catalog | 24 | factions, subfactions, units, weapons, abilities — admin-writable, public to read |
 | 40k armies | 10 | CRUD, add/remove units, points validation, shortfall |
 | Kill Team rosters | 8 | CRUD, add/remove/move operatives |
@@ -546,7 +548,7 @@ three of its numbers went stale in a single commit.
 | Test modules | 35 |
 | Tables | 26 — 11 Army List and shared, 15 Kill Team |
 | Migrations | 4, and CI fails if they disagree with the models |
-| API | 49 paths, 72 operations, published as a committed `openapi.json` |
+| API | 50 paths, 74 operations, published as a committed `openapi.json` |
 | Recorded decisions | **95**, in [`KILLTEAM.md`](KILLTEAM.md), each with its reasoning — 66 at `366f918`, plus the 29 this branch adds for shared play, the 40k composition and the response envelope |
 | CI gates | 7 — see below |
 | Catalog data | **1,331 40k units stored** from 1,558 scraped rows, the difference being the seed's natural key; all 48 Kill Team teams parse and seed |
