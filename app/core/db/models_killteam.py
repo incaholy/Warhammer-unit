@@ -1302,9 +1302,7 @@ class KTGameEvent(TimestampMixin, table=True):
     #: rather than joined, so a log entry outlives the account that wrote it and still
     #: says who. Losing the id costs nothing a reader needs; losing the entry would
     #: breach #8 and #58.
-    actor_user_id: UUID | None = Field(
-        default=None, foreign_key="users.id", ondelete="SET NULL", index=True
-    )
+    actor_user_id: UUID | None = Field(default=None, foreign_key="users.id", ondelete="SET NULL", index=True)
     #: The actor's name as it was WHEN THEY ACTED, stored rather than joined (#70). A
     #: join would return the current name, which an append-only log must not do. The
     #: value is the `username` until `users` gains a `display_name`.

@@ -630,9 +630,7 @@ class KTGameService:
         # right for the creator's half and be wrong for the opponent's.
         row = self._side_row(game_id, side)
         if row is None:
-            raise KTGameValidationError(
-                "side", f"this game has no {side} side yet -- describe it first"
-            )
+            raise KTGameValidationError("side", f"this game has no {side} side yet -- describe it first")
         ploy = next((p for p in row.ploys if p.get("name") == name), None)
         if ploy is None:
             raise KTGameValidationError("name", f"{name!r} is not one of this game's ploys")

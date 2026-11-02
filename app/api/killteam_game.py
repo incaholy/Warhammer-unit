@@ -160,6 +160,7 @@ class KTGameOperative_Read(SQLModel):
     #: #93's are whichever side the host typed them in for.
     side: str | None = None
 
+
 class KTGameEquipment_Read(SQLModel):
     id: UUID
     equipment_id: UUID
@@ -170,6 +171,7 @@ class KTGameEquipment_Read(SQLModel):
     #: Which half took it (#67). Each side picks its own, and the universal
     #: list belongs to no team (#48), so both may hold the same piece.
     side: str | None = None
+
 
 class KTGameEvent_Read(SQLModel):
     """One entry in the log (#8, #58), which is also what `undo` walks back over."""
@@ -222,6 +224,7 @@ class KTGame_ListRead(SQLModel):
     #: game it did not create and the value can actually vary.
     opponent_kill_team_name: str | None = None
     opponent_display_name: str | None = None
+
 
 class KTGameSide_Put(WriteSchema):
     """Describe one side of a battle (#92): name it, and give it a team if it has none.
