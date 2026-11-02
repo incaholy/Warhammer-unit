@@ -513,11 +513,15 @@ outside #77's backfill no side row exists without a kill team from one of them.
 | `GET /me/kill-team/games/{game_id}/invite` | read back the outstanding code and its expiry, or **404** when there is none. **Host only** (#82). Without it a host who reloads must re-mint, which revokes the code the guest is typing (#95) |
 | `DELETE /me/kill-team/games/{game_id}/sides/{side}/occupant` | a guest vacates their side. The side's team, operatives and score stay; the host keeps playing (#83) |
 
-**Three operations stay host-only.** Deleting a game cascades the event log and cannot be
+**Four operations stay host-only.** Deleting a game cascades the event log and cannot be
 undone, and minting an invite revokes the outstanding code, so neither inherits the
 shared predicate (#82). Reading the code back is the third, for a different reason: it
 discloses a live credential, and the guest holding a side of the game is not the person
-entitled to it (#95) — `#73`'s "either side may finish" rests on a finish being
+entitled to it (#95). **Establishing a side is the fourth** (#92): it sets a side's team
+and name, so a shared predicate would let a guest rewrite the host's half. It was missing
+from this list while #92 gave "describing a side is the HOST's act" as its own reason for
+existing — and #82 makes the DEFAULT shared, so a route left off this list is shared by
+omission rather than by decision — `#73`'s "either side may finish" rests on a finish being
 reversible, which these are not. A participant refused one gets **403**, not the 404 the
 rest of the API answers, because that rule hides existence from a stranger and a
 participant is looking at the game. A guest leaves by vacating their side, which keeps
@@ -564,8 +568,8 @@ against Postgres, so the two together catch a class of bug — an unbounded colu
 dialect-specific query — that neither catches alone.
 
 **The client is three slices of five — on the `kill-team-ui` branch, not `main`.**
-That branch is 70 commits ahead of the client's `main`, which carries no Kill Team UI
-at all: no route, view, query or type. A reader who clones `main` sees the 40k half
+That branch is 86 commits ahead of the client's `main` at `warhammer_web` `440da79`,
+and `main` carries no Kill Team UI at all: no route, view, query or type. A reader who clones `main` sees the 40k half
 only. On [`warhammer_web`][web]'s `kill-team-ui`: the two-section
 shell, the public Kill Team catalog, and the roster builder are done; the battle
 screen is not. So the API can do things no screen can yet reach.
@@ -644,7 +648,8 @@ logs; the event log is a log too, and it is readable by whoever joins.
 The code is the only handle Vex has — he does not know the game id — and **the roster is
 required**, because joining is what makes the opponent's kill team known, and #74 will
 not create a side row without it. The server creates `side='opponent'`,
-`kill_team_id=Gellerpox`, `occupant_user_id=Vex`, snapshots his six datacards, then
+`kill_team_id=Gellerpox`, `occupant_user_id=Vex`, snapshots his six datacards with his team's rules and both ploy lists -- everything step 1 snapshots for Nel, because
+step 7 reads the ploy cost off this side's own snapshot -- then
 clears `invite_code` and `invite_expires_at`. Event 3, `guest_joined`.
 
 **4. Vex's first read.** `GET .../games/{id}` now resolves for him (#75). Both sides are
@@ -1041,8 +1046,9 @@ them:
   generated client believes they need a token. And `GET /taxonomy` returns names without
   ids, so a picker built on it cannot reference the row a user chose.
 - **The client's Kill Team half is on a branch, and there is no backend id for that.**
-  `kill-team-ui` is 70 commits ahead of the client's `main` and 0 behind, and `main`
-  carries no Kill Team UI at all. Merging it is work in the other repository, so no
+  `kill-team-ui` is 86 commits ahead of the client's `main` and **3 behind**, measured
+  at `warhammer_web` `440da79`, and `main` carries no Kill Team UI at all. The earlier
+  figures here said 70 and 0, neither pinned to a commit, which is why both rotted. Merging it is work in the other repository, so no
   entry here covers it — stated rather than given an id it would not deserve. Its own
   PR #2 has to land first, as a merge commit rather than a squash, or the branch has to
   be moved onto a rewritten base.
