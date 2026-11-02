@@ -568,8 +568,8 @@ against Postgres, so the two together catch a class of bug — an unbounded colu
 dialect-specific query — that neither catches alone.
 
 **The client is three slices of five — on the `kill-team-ui` branch, not `main`.**
-That branch is 70 commits ahead of the client's `main`, which carries no Kill Team UI
-at all: no route, view, query or type. A reader who clones `main` sees the 40k half
+That branch is 86 commits ahead of the client's `main` at `warhammer_web` `440da79`,
+and `main` carries no Kill Team UI at all: no route, view, query or type. A reader who clones `main` sees the 40k half
 only. On [`warhammer_web`][web]'s `kill-team-ui`: the two-section
 shell, the public Kill Team catalog, and the roster builder are done; the battle
 screen is not. So the API can do things no screen can yet reach.
@@ -1046,8 +1046,9 @@ them:
   generated client believes they need a token. And `GET /taxonomy` returns names without
   ids, so a picker built on it cannot reference the row a user chose.
 - **The client's Kill Team half is on a branch, and there is no backend id for that.**
-  `kill-team-ui` is 70 commits ahead of the client's `main` and 0 behind, and `main`
-  carries no Kill Team UI at all. Merging it is work in the other repository, so no
+  `kill-team-ui` is 86 commits ahead of the client's `main` and **3 behind**, measured
+  at `warhammer_web` `440da79`, and `main` carries no Kill Team UI at all. The earlier
+  figures here said 70 and 0, neither pinned to a commit, which is why both rotted. Merging it is work in the other repository, so no
   entry here covers it — stated rather than given an id it would not deserve. Its own
   PR #2 has to land first, as a merge commit rather than a squash, or the branch has to
   be moved onto a rewritten base.
