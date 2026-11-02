@@ -374,7 +374,7 @@ fail on a non-empty diff, which directly asserts that models and migrations agre
 
 ## R7. Land observability: request ID, structured logs, error reporting
 
-**Satisfies:** §2.4. This is `SPEC.md`'s **M5** item (`SPEC.md:1309`), which M5 itself now records
+**Satisfies:** §2.4. This is `SPEC.md`'s **M5** item, which M5's own row now records
 as done.
 
 **Status: ✅ Done (R7).** All three pieces are wired together in

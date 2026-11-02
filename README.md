@@ -111,8 +111,8 @@ scripts/             seed + scrape tooling, for both 40k and Kill Team
 Layering is strict — **API → service → DB**: routers never touch the session,
 services never raise `HTTPException` (they raise typed errors that `app/main.py`
 maps to one normalized error shape: `{detail, code, errors}` on every error body,
-plus `field` on a field-specific failure and `request_id` whenever the request
-carries one). [`docs/api/conventions.md`](docs/api/conventions.md) states that
+plus `field` on a field-specific failure and `request_id` always — the
+middleware generates one when the request sends none). [`docs/api/conventions.md`](docs/api/conventions.md) states that
 shape in full, and `CLAUDE.md` has the repo conventions.
 
 ## Documentation
