@@ -228,3 +228,15 @@ scripts/data/cache/
 scripts/data/killteam.json
 
 
+
+# Secrets
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Claude Code's local settings
+**/.claude/settings.local.json
+
+# Scratch
+tmp/
